@@ -126,6 +126,13 @@ if(BUILD_TESTS)
     target_link_libraries(discover_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog CURL::libcurl nlohmann_json::nlohmann_json boost::boost)
     add_test(NAME discover COMMAND discover_test)
 
+    add_executable(domain_test 
+        test/unit/domain_test.cpp
+    )
+    target_include_directories(domain_test PRIVATE src)
+    target_link_libraries(domain_test PRIVATE GTest::gtest GTest::gtest_main)
+    add_test(NAME domain COMMAND domain_test)
+
     # Benchmarks
     add_executable(bench_perf 
         bench/bench_perf.cpp

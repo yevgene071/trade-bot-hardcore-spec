@@ -228,7 +228,7 @@ Out of scope:
 
 ---
 
-### T0-DOMAIN: Доменные типы
+### [COMPLETED] T0-DOMAIN: Доменные типы
 
 **Depends on:** T0-SETUP
 

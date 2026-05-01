@@ -1,0 +1,146 @@
+#pragma once
+
+#include <string>
+#include <vector>
+#include <chrono>
+#include <optional>
+#include <cstdint>
+
+namespace trade_bot {
+
+using Ticker = std::string;
+
+enum class Side {
+    None,
+    Buy,
+    Sell
+};
+
+enum class OrderType {
+    Limit,
+    Stop,
+    StopLoss,
+    TakeProfit,
+    Market
+};
+
+enum class OrderStatus {
+    New,
+    Open,
+    Closed
+};
+
+enum class PositionStatus {
+    New,
+    Open,
+    Closed
+};
+
+struct PriceLevel {
+    double price;
+    double size;
+    Side side;
+
+    bool operator==(const PriceLevel&) const = default;
+};
+
+struct Trade {
+    double price;
+    double size;
+    Side side;
+    std::chrono::system_clock::time_point timestamp;
+
+    bool operator==(const Trade&) const = default;
+};
+
+struct OrderBookSnapshot {
+    Ticker ticker;
+    std::vector<PriceLevel> asks;
+    std::vector<PriceLevel> bids;
+    std::chrono::system_clock::time_point ts;
+
+    bool operator==(const OrderBookSnapshot&) const = default;
+};
+
+struct OrderBookUpdate {
+    Ticker ticker;
+    std::vector<PriceLevel> changes;
+    std::chrono::system_clock::time_point ts;
+
+    bool operator==(const OrderBookUpdate&) const = default;
+};
+
+struct OrderUpdate {
+    int64_t order_id;
+    Ticker ticker;
+    Side side;
+    OrderType type;
+    double price;
+    double filled_price;
+    double size;
+    double filled_size;
+    double fee;
+    std::string fee_currency;
+    OrderStatus status;
+    std::chrono::system_clock::time_point time;
+
+    bool operator==(const OrderUpdate&) const = default;
+};
+
+struct RestOrder {
+    int64_t id;
+    std::optional<std::string> client_id;
+    Ticker ticker;
+    Side side;
+    OrderType type;
+    double price;
+    double size;
+    double filled_size;
+    double filled_price;
+    double remaining_size;
+    OrderStatus status;
+    std::optional<double> trigger_price;
+    std::chrono::system_clock::time_point create_date;
+
+    bool operator==(const RestOrder&) const = default;
+};
+
+struct PlaceOrderResult {
+    std::string status;
+    std::string client_id;
+    double execution_time_ms;
+
+    bool operator==(const PlaceOrderResult&) const = default;
+};
+
+struct PositionUpdate {
+    int connection_id;
+    int64_t position_id;
+    Ticker ticker;
+    Side side;
+    double size;
+    double avg_price;
+    double avg_price_fix;
+    double avg_price_dyn;
+    PositionStatus status;
+
+    bool operator==(const PositionUpdate&) const = default;
+};
+
+struct BalanceEntry {
+    std::string coin;
+    double total;
+    double free;
+    double locked;
+
+    bool operator==(const BalanceEntry&) const = default;
+};
+
+struct BalanceUpdate {
+    int connection_id;
+    std::vector<BalanceEntry> balances;
+
+    bool operator==(const BalanceUpdate&) const = default;
+};
+
+} // namespace trade_bot

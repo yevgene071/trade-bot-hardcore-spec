@@ -1,5 +1,6 @@
 # CHANGELOG
 
 ## [Unreleased]
+- T0-DOMAIN: Описаны базовые доменные типы (Ticker, Side, Order, Position, Balance) для работы с MetaScalp API.
 - T0-HTTP: Реализован HTTP-клиент на базе libcurl и модуль автоматического обнаружения MetaScalp API.
 - T0-CONFIG: Реализован модуль конфигурации на базе `toml++` с поддержкой векторов и строгой валидацией при запуске.
