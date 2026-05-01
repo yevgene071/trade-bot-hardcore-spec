@@ -17,11 +17,11 @@ public:
         LOG_INFO("Feed received snapshot for {}", s.ticker);
         received_snapshot = true; 
     }
-    void on_orderbook_update(const OrderBookUpdate& u) override { received_update = true; }
-    void on_order_update(const OrderUpdate& u) override {}
-    void on_position_update(const PositionUpdate& u) override {}
-    void on_balance_update(const BalanceUpdate& u) override {}
-    void on_error(const std::string& msg) override {}
+    void on_orderbook_update(const OrderBookUpdate& /*u*/) override { received_update = true; }
+    void on_order_update(const OrderUpdate& /*u*/) override {}
+    void on_position_update(const PositionUpdate& /*u*/) override {}
+    void on_balance_update(const BalanceUpdate& /*u*/) override {}
+    void on_error(const std::string& /*msg*/) override {}
 
     std::atomic<bool> received_trade{false};
     std::atomic<bool> received_snapshot{false};
