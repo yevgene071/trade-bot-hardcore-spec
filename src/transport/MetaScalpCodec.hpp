@@ -52,6 +52,17 @@ namespace api::fields {
     inline constexpr auto kBlocked = "Blocked";
     inline constexpr auto kBestAsk = "BestAsk";
     inline constexpr auto kBestBid = "BestBid";
+    inline constexpr auto kName = "Name";
+    inline constexpr auto kState = "State";
+    inline constexpr auto kViewMode = "ViewMode";
+    inline constexpr auto kBaseAsset = "BaseAsset";
+    inline constexpr auto kQuoteAsset = "QuoteAsset";
+    inline constexpr auto kIsTradingAllowed = "IsTradingAllowed";
+    inline constexpr auto kPriceIncrement = "PriceIncrement";
+    inline constexpr auto kSizeIncrement = "SizeIncrement";
+    inline constexpr auto kMinSize = "MinSize";
+    inline constexpr auto kMaxSize = "MaxSize";
+    inline constexpr auto kReduceOnly = "ReduceOnly";
 }
 
 class MetaScalpCodec {
@@ -66,6 +77,9 @@ public:
     static OrderBookUpdate parse_orderbook_update(const nlohmann::json& j, const Ticker& ticker);
     static FinresUpdate parse_finres_update(const nlohmann::json& j);
     static SignalLevelTriggered parse_signal_level_triggered(const nlohmann::json& j);
+    
+    static ConnectionInfo parse_connection_info(const nlohmann::json& j);
+    static TickerInfo parse_ticker_info(const nlohmann::json& j);
 
     static Side parse_side(const nlohmann::json& v);
     static OrderType parse_order_type(const nlohmann::json& v);

@@ -296,7 +296,7 @@ Out of scope:
 
 ---
 
-### T0-GATEWAY: OrderGateway (REST-обёртка)
+### [COMPLETED] T0-GATEWAY: OrderGateway (REST-обёртка)
 
 **Depends on:** T0-CODEC
 

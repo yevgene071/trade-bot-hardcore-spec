@@ -54,6 +54,7 @@ add_executable(trade_bot
     src/transport/BeastWsClient.cpp
     src/transport/MetaScalpCodec.cpp
     src/transport/MarketDataFeed.cpp
+    src/transport/OrderGateway.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -183,6 +184,16 @@ if(BUILD_TESTS)
     target_include_directories(feed_smoke_test PRIVATE src)
     target_link_libraries(feed_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json)
     add_test(NAME feed_smoke COMMAND feed_smoke_test)
+
+    add_executable(order_gateway_test 
+        test/unit/order_gateway_test.cpp
+        src/transport/OrderGateway.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(order_gateway_test PRIVATE src)
+    target_link_libraries(order_gateway_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    add_test(NAME order_gateway COMMAND order_gateway_test)
 
     # Benchmarks
     add_executable(bench_perf 

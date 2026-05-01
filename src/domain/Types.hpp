@@ -169,4 +169,37 @@ struct SignalLevelTriggered {
     bool operator==(const SignalLevelTriggered&) const = default;
 };
 
+struct ConnectionInfo {
+    int id;
+    std::string name;
+    std::string state;
+    bool view_mode;
+    
+    bool operator==(const ConnectionInfo&) const = default;
+};
+
+struct TickerInfo {
+    Ticker name;
+    std::string base_asset;
+    std::string quote_asset;
+    bool is_trading_allowed;
+    double price_increment;
+    double size_increment;
+    double min_size;
+    double max_size;
+    
+    bool operator==(const TickerInfo&) const = default;
+};
+
+struct PlaceOrderRequest {
+    Ticker ticker;
+    Side side;
+    double price;
+    double size;
+    OrderType type;
+    bool reduce_only = false;
+    
+    bool operator==(const PlaceOrderRequest&) const = default;
+};
+
 } // namespace trade_bot

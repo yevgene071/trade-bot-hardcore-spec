@@ -275,4 +275,28 @@ SignalLevelTriggered MetaScalpCodec::parse_signal_level_triggered(const nlohmann
     };
 }
 
+ConnectionInfo MetaScalpCodec::parse_connection_info(const nlohmann::json& j) {
+    check_required(j, fields::kId);
+    return ConnectionInfo {
+        .id = j.value(fields::kId, 0),
+        .name = j.value(fields::kName, ""),
+        .state = j.value(fields::kState, ""),
+        .view_mode = j.value(fields::kViewMode, false)
+    };
+}
+
+TickerInfo MetaScalpCodec::parse_ticker_info(const nlohmann::json& j) {
+    check_required(j, fields::kName);
+    return TickerInfo {
+        .name = j.value(fields::kName, ""),
+        .base_asset = j.value(fields::kBaseAsset, ""),
+        .quote_asset = j.value(fields::kQuoteAsset, ""),
+        .is_trading_allowed = j.value(fields::kIsTradingAllowed, false),
+        .price_increment = j.value(fields::kPriceIncrement, 0.0),
+        .size_increment = j.value(fields::kSizeIncrement, 0.0),
+        .min_size = j.value(fields::kMinSize, 0.0),
+        .max_size = j.value(fields::kMaxSize, 0.0)
+    };
+}
+
 } // namespace trade_bot
