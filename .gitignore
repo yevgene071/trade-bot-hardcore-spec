@@ -1,0 +1,29 @@
+# Build directories
+/build/
+/cmake-build-*/
+
+# Conan
+/.conan2/
+CMakeUserPresets.json
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+/logs/
+*.log
+
+# Local agent tooling state
+.claude/
+.claude-flow/
+.swarm/
+.mcp.json
+ruvector.db
+GEMINI.md

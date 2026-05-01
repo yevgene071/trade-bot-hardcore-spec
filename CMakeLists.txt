@@ -1,18 +1,18 @@
 cmake_minimum_required(VERSION 3.22)
-project(TradeBotHardcore 
-    VERSION 0.1.0 
+project(trade_bot
+    VERSION 0.0.1
+    DESCRIPTION "Trade Bot — hardcore C++23 implementation"
     LANGUAGES CXX)
 
-# Force C++23
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Build options
 option(BUILD_TESTS "Build unit tests" ON)
 option(ENABLE_AVX2 "Enable AVX2 optimizations" ON)
+option(ENABLE_SANITIZERS "Enable AddressSanitizer + UndefinedBehaviorSanitizer in Debug" OFF)
 
-# Cross-platform compiler flags
+# Strict warnings
 if(MSVC)
     add_compile_options(/W4 /WX /permissive- /utf-8)
     if(ENABLE_AVX2)
@@ -23,36 +23,30 @@ else()
     if(ENABLE_AVX2)
         add_compile_options(-mavx2)
     endif()
+    if(ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+    endif()
 endif()
 
-# Output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# Include directories
-include_directories(include)
-include_directories(src)
+# Main executable (T0-SETUP: just prints version and exits)
+add_executable(trade_bot src/main.cpp)
+target_include_directories(trade_bot PRIVATE src)
 
-# Add source files
-file(GLOB_RECURSE SRC_FILES 
-    src/*.cpp 
-    src/*.hpp 
-    include/*.hpp)
-
-# Main executable
-add_executable(${PROJECT_NAME} src/main.cpp ${SRC_FILES})
-
-# Link libraries (Placeholder for future dependencies)
-# target_link_libraries(${PROJECT_NAME} PRIVATE ...)
-
+# Tests
 if(BUILD_TESTS)
     enable_testing()
-    # add_subdirectory(tests)
+    find_package(GTest REQUIRED CONFIG)
+    add_executable(smoke_test test/unit/smoke_test.cpp)
+    target_link_libraries(smoke_test PRIVATE GTest::gtest GTest::gtest_main)
+    add_test(NAME smoke COMMAND smoke_test)
 endif()
 
-message(STATUS "Project: ${PROJECT_NAME}")
-message(STATUS "Version: ${PROJECT_VERSION}")
+message(STATUS "Project: ${PROJECT_NAME} v${PROJECT_VERSION}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID}")
-message(STATUS "AVX2: ${ENABLE_AVX2}")
+message(STATUS "Compiler:     ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "Build type:   ${CMAKE_BUILD_TYPE}")
+message(STATUS "AVX2:         ${ENABLE_AVX2}")
+message(STATUS "Sanitizers:   ${ENABLE_SANITIZERS}")
