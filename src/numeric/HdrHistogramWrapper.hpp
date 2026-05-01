@@ -49,6 +49,9 @@ public:
     int64_t min() const { return hdr_min(histogram_); }
     int64_t max() const { return hdr_max(histogram_); }
     double mean() const { return hdr_mean(histogram_); }
+    double stddev() const { return hdr_stddev(histogram_); }
+    int64_t total_count() const { return histogram_ ? histogram_->total_count : 0; }
+    void reset() { hdr_reset(histogram_); }
 
 private:
     struct hdr_histogram* histogram_ = nullptr;

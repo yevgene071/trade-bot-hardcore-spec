@@ -39,16 +39,25 @@ find_package(Boost REQUIRED CONFIG)
 find_package(tomlplusplus REQUIRED CONFIG)
 find_package(CURL REQUIRED CONFIG)
 find_package(nlohmann_json REQUIRED CONFIG)
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL REQUIRED CONFIG)
+# Workaround: Conan 2 openssl/3.6.2 recipe forgets to populate INTERFACE_INCLUDE_DIRECTORIES.
+# Force-attach include path from the package folder.
+if(DEFINED openssl_PACKAGE_FOLDER_RELEASE)
+    set_property(TARGET OpenSSL::SSL APPEND PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${openssl_PACKAGE_FOLDER_RELEASE}/include")
+    set_property(TARGET OpenSSL::Crypto APPEND PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${openssl_PACKAGE_FOLDER_RELEASE}/include")
+endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Main executable (T0-SETUP: just prints version and exits)
-add_executable(trade_bot 
-    src/main.cpp 
+add_executable(trade_bot
+    src/main.cpp
     src/logger/Logger.cpp
     src/perf/CpuPinning.cpp
     src/perf/SimdOps.cpp
+    src/perf/TimestampMonitor.cpp
     src/config/Config.cpp
     src/transport/CurlHttpClient.cpp
     src/transport/MetaScalpDiscovery.cpp
@@ -68,6 +77,7 @@ target_link_libraries(trade_bot PRIVATE
     CURL::libcurl
     nlohmann_json::nlohmann_json
     OpenSSL::SSL
+    OpenSSL::Crypto
 )
 
 # Tests
@@ -145,7 +155,7 @@ if(BUILD_TESTS)
         src/logger/Logger.cpp
     )
     target_include_directories(ws_test PRIVATE src)
-    target_link_libraries(ws_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL)
+    target_link_libraries(ws_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
     add_test(NAME ws COMMAND ws_test)
 
     add_executable(ws_smoke_test 
@@ -154,7 +164,7 @@ if(BUILD_TESTS)
         src/logger/Logger.cpp
     )
     target_include_directories(ws_smoke_test PRIVATE src)
-    target_link_libraries(ws_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL)
+    target_link_libraries(ws_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
     add_test(NAME ws_smoke COMMAND ws_smoke_test)
 
     add_executable(codec_test 
@@ -184,10 +194,10 @@ if(BUILD_TESTS)
         src/logger/Logger.cpp
     )
     target_include_directories(feed_smoke_test PRIVATE src)
-    target_link_libraries(feed_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL)
+    target_link_libraries(feed_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
     add_test(NAME feed_smoke COMMAND feed_smoke_test)
 
-    add_executable(order_gateway_test 
+    add_executable(order_gateway_test
         test/unit/order_gateway_test.cpp
         src/transport/OrderGateway.cpp
         src/transport/MetaScalpCodec.cpp
@@ -196,6 +206,44 @@ if(BUILD_TESTS)
     target_include_directories(order_gateway_test PRIVATE src)
     target_link_libraries(order_gateway_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
     add_test(NAME order_gateway COMMAND order_gateway_test)
+
+    # T0-MONITOR-TIMESTAMPS
+    add_executable(timestamp_monitor_test
+        test/unit/timestamp_monitor_test.cpp
+        src/perf/TimestampMonitor.cpp
+        src/transport/MarketDataFeed.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(timestamp_monitor_test PRIVATE src)
+    target_link_libraries(timestamp_monitor_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        hdr_histogram::hdr_histogram_static
+        nlohmann_json::nlohmann_json
+        boost::boost)
+    add_test(NAME timestamp_monitor COMMAND timestamp_monitor_test)
+
+    add_executable(timestamp_jitter_test
+        test/integration/timestamp_jitter_test.cpp
+        src/perf/TimestampMonitor.cpp
+        src/transport/MarketDataFeed.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/transport/BeastWsClient.cpp
+        src/transport/CurlHttpClient.cpp
+        src/transport/MetaScalpDiscovery.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(timestamp_jitter_test PRIVATE src)
+    target_link_libraries(timestamp_jitter_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        hdr_histogram::hdr_histogram_static
+        nlohmann_json::nlohmann_json
+        boost::boost
+        CURL::libcurl
+        OpenSSL::SSL OpenSSL::Crypto)
+    add_test(NAME timestamp_jitter COMMAND timestamp_jitter_test)
 
     # Benchmarks
     add_executable(bench_perf 
