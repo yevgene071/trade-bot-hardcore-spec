@@ -10,7 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BUILD_TESTS "Build unit tests" ON)
 option(ENABLE_AVX2 "Enable AVX2 optimizations" ON)
-option(ENABLE_SANITIZERS "Enable AddressSanitizer + UndefinedBehaviorSanitizer in Debug" OFF)
+option(ENABLE_SANITIZERS "Enable AddressSanitizer + UndefinedBehaviorSanitizer in Debug" ON)
 
 # Strict warnings
 if(MSVC)
@@ -31,6 +31,7 @@ endif()
 
 # Dependencies
 find_package(spdlog REQUIRED CONFIG)
+find_package(hdr_histogram REQUIRED CONFIG)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
@@ -58,6 +59,13 @@ if(BUILD_TESTS)
     target_include_directories(logger_test PRIVATE src)
     target_link_libraries(logger_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog)
     add_test(NAME logger COMMAND logger_test)
+
+    add_executable(numeric_test 
+        test/unit/numeric_test.cpp
+    )
+    target_include_directories(numeric_test PRIVATE src)
+    target_link_libraries(numeric_test PRIVATE GTest::gtest GTest::gtest_main hdr_histogram::hdr_histogram_static)
+    add_test(NAME numeric COMMAND numeric_test)
 endif()
 
 message(STATUS "Project: ${PROJECT_NAME} v${PROJECT_VERSION}")
