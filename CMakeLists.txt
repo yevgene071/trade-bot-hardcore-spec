@@ -29,19 +29,35 @@ else()
     endif()
 endif()
 
+# Dependencies
+find_package(spdlog REQUIRED CONFIG)
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Main executable (T0-SETUP: just prints version and exits)
-add_executable(trade_bot src/main.cpp)
+add_executable(trade_bot 
+    src/main.cpp 
+    src/logger/Logger.cpp
+)
 target_include_directories(trade_bot PRIVATE src)
+target_link_libraries(trade_bot PRIVATE spdlog::spdlog)
 
 # Tests
 if(BUILD_TESTS)
     enable_testing()
     find_package(GTest REQUIRED CONFIG)
+    
     add_executable(smoke_test test/unit/smoke_test.cpp)
     target_link_libraries(smoke_test PRIVATE GTest::gtest GTest::gtest_main)
     add_test(NAME smoke COMMAND smoke_test)
+
+    add_executable(logger_test 
+        test/unit/logger_test.cpp 
+        src/logger/Logger.cpp
+    )
+    target_include_directories(logger_test PRIVATE src)
+    target_link_libraries(logger_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME logger COMMAND logger_test)
 endif()
 
 message(STATUS "Project: ${PROJECT_NAME} v${PROJECT_VERSION}")
