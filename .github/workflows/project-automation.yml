@@ -1,0 +1,41 @@
+name: Project Automation
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  move-to-done:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Move Issue to Done
+      uses: actions/github-script@v6
+      with:
+        script: |
+          // This script helps automate moving issues to the "Done" label
+          // Since Projects V2 automation via API requires specific tokens, 
+          // we use labels as the primary driver for our Kanban view.
+          const issue = context.payload.issue;
+          
+          // Remove "status: Todo" and "status: In Progress"
+          const labelsToRemove = ['status: Todo', 'status: In Progress', 'status: Review'];
+          for (const labelName of labelsToRemove) {
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                name: labelName
+              });
+            } catch (e) {
+              // Label might not exist on the issue, ignore
+            }
+          }
+          
+          // Add "status: Done"
+          await github.rest.issues.addLabels({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: issue.number,
+            labels: ['status: Done']
+          });
