@@ -187,7 +187,7 @@ Out of scope:
 
 ---
 
-### T0-HTTP: HTTP-клиент + MetaScalp discovery
+### [COMPLETED] T0-HTTP: HTTP-клиент + MetaScalp discovery
 
 **Depends on:** T0-LOG
 

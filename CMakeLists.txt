@@ -37,6 +37,8 @@ find_package(concurrentqueue REQUIRED CONFIG)
 find_package(benchmark REQUIRED CONFIG)
 find_package(Boost REQUIRED CONFIG)
 find_package(tomlplusplus REQUIRED CONFIG)
+find_package(CURL REQUIRED CONFIG)
+find_package(nlohmann_json REQUIRED CONFIG)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
@@ -47,9 +49,20 @@ add_executable(trade_bot
     src/perf/CpuPinning.cpp
     src/perf/SimdOps.cpp
     src/config/Config.cpp
+    src/transport/CurlHttpClient.cpp
+    src/transport/MetaScalpDiscovery.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
-target_link_libraries(trade_bot PRIVATE spdlog::spdlog xsimd hdr_histogram::hdr_histogram_static boost::boost concurrentqueue::concurrentqueue tomlplusplus::tomlplusplus)
+target_link_libraries(trade_bot PRIVATE 
+    spdlog::spdlog 
+    xsimd 
+    hdr_histogram::hdr_histogram_static 
+    boost::boost 
+    concurrentqueue::concurrentqueue 
+    tomlplusplus::tomlplusplus
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+)
 
 # Tests
 if(BUILD_TESTS)
@@ -93,6 +106,25 @@ if(BUILD_TESTS)
     target_include_directories(config_test PRIVATE src)
     target_link_libraries(config_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog tomlplusplus::tomlplusplus)
     add_test(NAME config COMMAND config_test)
+
+    add_executable(http_client_test 
+        test/unit/http_client_test.cpp
+        src/transport/CurlHttpClient.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(http_client_test PRIVATE src)
+    target_link_libraries(http_client_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog CURL::libcurl boost::boost)
+    add_test(NAME http_client COMMAND http_client_test)
+
+    add_executable(discover_test 
+        test/unit/discover_test.cpp
+        src/transport/MetaScalpDiscovery.cpp
+        src/transport/CurlHttpClient.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(discover_test PRIVATE src)
+    target_link_libraries(discover_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog CURL::libcurl nlohmann_json::nlohmann_json boost::boost)
+    add_test(NAME discover COMMAND discover_test)
 
     # Benchmarks
     add_executable(bench_perf 
