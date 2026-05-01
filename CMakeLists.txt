@@ -32,6 +32,10 @@ endif()
 # Dependencies
 find_package(spdlog REQUIRED CONFIG)
 find_package(hdr_histogram REQUIRED CONFIG)
+find_package(xsimd REQUIRED CONFIG)
+find_package(concurrentqueue REQUIRED CONFIG)
+find_package(benchmark REQUIRED CONFIG)
+find_package(Boost REQUIRED CONFIG)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
@@ -39,9 +43,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_executable(trade_bot 
     src/main.cpp 
     src/logger/Logger.cpp
+    src/perf/CpuPinning.cpp
+    src/perf/SimdOps.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
-target_link_libraries(trade_bot PRIVATE spdlog::spdlog)
+target_link_libraries(trade_bot PRIVATE spdlog::spdlog xsimd hdr_histogram::hdr_histogram_static boost::boost concurrentqueue::concurrentqueue)
 
 # Tests
 if(BUILD_TESTS)
@@ -66,6 +72,24 @@ if(BUILD_TESTS)
     target_include_directories(numeric_test PRIVATE src)
     target_link_libraries(numeric_test PRIVATE GTest::gtest GTest::gtest_main hdr_histogram::hdr_histogram_static)
     add_test(NAME numeric COMMAND numeric_test)
+
+    add_executable(perf_test 
+        test/unit/perf_test.cpp
+        src/perf/CpuPinning.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(perf_test PRIVATE src)
+    target_link_libraries(perf_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog xsimd boost::boost concurrentqueue::concurrentqueue)
+    add_test(NAME perf COMMAND perf_test)
+
+    # Benchmarks
+    add_executable(bench_perf 
+        bench/bench_perf.cpp
+        src/perf/SimdOps.cpp
+    )
+    target_include_directories(bench_perf PRIVATE src)
+    target_link_libraries(bench_perf PRIVATE benchmark::benchmark xsimd)
 endif()
 
 message(STATUS "Project: ${PROJECT_NAME} v${PROJECT_VERSION}")
