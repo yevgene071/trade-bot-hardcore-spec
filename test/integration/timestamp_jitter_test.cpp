@@ -40,7 +40,9 @@ TEST(TimestampJitter, MetaScalpStreamMeetsThresholds) {
     auto http = std::make_shared<CurlHttpClient>();
     MetaScalpDiscovery discovery{http};
     auto port = discovery.discover();
-    ASSERT_TRUE(port.has_value()) << "MetaScalp not running on 17845..17855";
+    if (!port.has_value()) {
+        GTEST_SKIP() << "MetaScalp not running on 17845..17855";
+    }
 
     boost::asio::io_context ioc;
     auto ws = std::make_shared<BeastWsClient>(ioc);

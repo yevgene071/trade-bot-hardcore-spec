@@ -65,6 +65,7 @@ add_executable(trade_bot
     src/transport/MetaScalpCodec.cpp
     src/transport/MarketDataFeed.cpp
     src/transport/OrderGateway.cpp
+    src/trading/OrderReconciliator.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -244,6 +245,18 @@ if(BUILD_TESTS)
         CURL::libcurl
         OpenSSL::SSL OpenSSL::Crypto)
     add_test(NAME timestamp_jitter COMMAND timestamp_jitter_test)
+
+    # T0-ORDER-RECONCILIATION
+    add_executable(order_reconciliator_test
+        test/unit/order_reconciliator_test.cpp
+        src/trading/OrderReconciliator.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(order_reconciliator_test PRIVATE src)
+    target_link_libraries(order_reconciliator_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog)
+    add_test(NAME order_reconciliator COMMAND order_reconciliator_test)
 
     # Benchmarks
     add_executable(bench_perf 
