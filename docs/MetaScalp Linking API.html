@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MetaScalp Linking API</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d29922;
+    --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header h1 span { color: var(--accent); }
+  #connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  #connection-status .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+  }
+  #connection-status.connected .dot { background: var(--green); }
+  #connection-status.connected { color: var(--green); }
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 24px 32px 80px;
+  }
+  .intro {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 32px;
+  }
+  .intro p { color: var(--text-muted); font-size: 14px; margin-bottom: 8px; }
+  .intro p:last-child { margin-bottom: 0; }
+  .intro code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--accent);
+  }
+
+  /* Endpoint card */
+  .endpoint {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .endpoint-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    background: var(--surface);
+    cursor: pointer;
+    user-select: none;
+  }
+  .endpoint-header:hover { background: var(--surface2); }
+  .method {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-family: monospace;
+    letter-spacing: 0.5px;
+  }
+  .method-get { background: rgba(63,185,80,.15); color: var(--green); }
+  .method-post { background: rgba(88,166,255,.15); color: var(--accent); }
+  .endpoint-path {
+    font-family: monospace;
+    font-size: 14px;
+    flex: 1;
+  }
+  .endpoint-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .chevron {
+    color: var(--text-muted);
+    transition: transform .2s;
+    font-size: 18px;
+  }
+  .endpoint.open .chevron { transform: rotate(90deg); }
+  .endpoint-body {
+    display: none;
+    padding: 20px;
+    border-top: 1px solid var(--border);
+  }
+  .endpoint.open .endpoint-body { display: block; }
+
+  /* Form */
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .form-grid.single { grid-template-columns: 1fr; }
+  .form-group { display: flex; flex-direction: column; gap: 4px; }
+  .form-group.full { grid-column: 1 / -1; }
+  label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  label .optional {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-muted);
+    opacity: 0.6;
+  }
+  input, select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  select option { background: var(--surface2); }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity .15s;
+  }
+  .btn:hover { opacity: .85; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn-primary { background: var(--accent); color: #0d1117; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+
+  .actions-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  /* Response panel */
+  .response-panel {
+    margin-top: 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    display: none;
+  }
+  .response-panel.visible { display: block; }
+  .response-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    background: var(--surface);
+    font-size: 13px;
+  }
+  .status-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 12px;
+    font-family: monospace;
+  }
+  .status-ok { background: rgba(63,185,80,.15); color: var(--green); }
+  .status-err { background: rgba(248,81,73,.15); color: var(--red); }
+  .status-net { background: rgba(210,153,34,.15); color: var(--orange); }
+  .response-time { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+  .response-body {
+    padding: 14px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--bg);
+  }
+
+  /* Docs section inside card */
+  .docs { margin-bottom: 20px; }
+  .docs h3 {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+  .docs p { font-size: 14px; color: var(--text-muted); margin-bottom: 12px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  td {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+  }
+  td code {
+    background: var(--surface2);
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 16px 0;
+  }
+
+  /* Ref tables section */
+  .ref-section {
+    margin-top: 40px;
+  }
+  .ref-section h2 {
+    font-size: 16px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ref-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 700px) {
+    .ref-columns { grid-template-columns: 1fr; }
+    .form-grid { grid-template-columns: 1fr; }
+  }
+  .ref-columns h3 {
+    font-size: 14px;
+    margin-bottom: 8px;
+    color: var(--accent);
+  }
+  .note {
+    background: rgba(210,153,34,.08);
+    border-left: 3px solid var(--orange);
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 12px;
+  }
+
+  /* Markdown rendered section */
+  .md-section {
+    margin-top: 40px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .md-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .md-section-header h2 { font-size: 14px; font-weight: 600; margin: 0; }
+  .md-section-header .file-icon { color: var(--text-muted); margin-right: 8px; }
+  .md-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .md-download:hover { background: var(--border); }
+  .md-body {
+    padding: 28px 32px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .md-body h1 { font-size: 24px; font-weight: 600; margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .md-body h2 { font-size: 20px; font-weight: 600; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .md-body h3 { font-size: 16px; font-weight: 600; margin: 20px 0 8px; }
+  .md-body h4 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
+  .md-body p { margin: 8px 0; color: var(--text); }
+  .md-body ul { margin: 8px 0; padding-left: 24px; }
+  .md-body li { margin: 4px 0; }
+  .md-body strong { color: var(--text); }
+  .md-body hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+  .md-body pre {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 10px 0;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .md-body pre code { background: none; padding: 0; font-size: 13px; }
+  .md-body code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  .md-body table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 13px; }
+  .md-body th { text-align: left; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); font-weight: 600; font-size: 12px; color: var(--text-muted); }
+  .md-body td { padding: 8px 12px; border: 1px solid var(--border); }
+  .md-body td code { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+  .md-body blockquote {
+    border-left: 3px solid var(--accent);
+    padding: 8px 14px;
+    margin: 12px 0;
+    color: var(--text-muted);
+    background: rgba(88,166,255,.05);
+    border-radius: 0 6px 6px 0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>MetaScalp</span> Linking API</h1>
+  <div id="connection-status">
+    <div class="dot"></div>
+    <span id="status-text">MetaScalp not found</span>
+  </div>
+</header>
+
+<div class="container">
+  <div class="intro">
+    <p>Local HTTP server for external applications to communicate with a running MetaScalp instance.</p>
+    <p>Host: <code>127.0.0.1</code> &nbsp; Ports: <code>17845</code>–<code>17855</code> &nbsp; CORS enabled for all origins. &nbsp; <a href="#markdown-docs" style="color:var(--accent);">Full documentation</a></p>
+    <p style="margin-top:8px;"><strong>Getting started:</strong> 1. Launch MetaScalp — the API server starts automatically. 2. Discover the port with <code>GET /ping</code>. 3. Send commands to switch tickers or open combos.</p>
+  </div>
+
+  <!-- /ping -->
+  <div class="endpoint open" id="ep-ping">
+    <div class="endpoint-header" onclick="toggle('ep-ping')">
+      <span class="method method-get">GET</span>
+      <span class="endpoint-path">/ping</span>
+      <span class="endpoint-desc">Discover running instance</span>
+      <span class="chevron">▸</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="docs">
+        <p>Scan ports <code>17845</code>–<code>17855</code> to find the running MetaScalp instance. Returns the app name and version.</p>
+      </div>
+      <div class="actions-row">
+        <button class="btn btn-primary" onclick="sendPing()">Send Request</button>
+      </div>
+      <div class="response-panel" id="resp-ping">
+        <div class="response-bar">
+          <span class="status-badge" id="resp-ping-status"></span>
+          <span class="response-time" id="resp-ping-time"></span>
+        </div>
+        <div class="response-body" id="resp-ping-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- /api/change-ticker -->
+  <div class="endpoint" id="ep-ticker">
+    <div class="endpoint-header" onclick="toggle('ep-ticker')">
+      <span class="method method-post">POST</span>
+      <span class="endpoint-path">/api/change-ticker</span>
+      <span class="endpoint-desc">Switch ticker in MetaScalp</span>
+      <span class="chevron">▸</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="docs">
+        <p>Changes the current ticker. The active window is always 
+notified. When a named binding is provided, that binding's linked panels
+ are also updated.</p>
+        <p>Accepts two request formats: a <strong>ticker pattern</strong> string (e.g. <code>BINANCE:BTCUSDT.p</code>) or <strong>explicit fields</strong> (exchange + market + ticker).</p>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:8px;">A <strong>binding</strong>
+ is a named group of linked panels inside MetaScalp (e.g. a chart, order
+ book, and trade feed showing the same ticker). Bindings are numbered <code>"001"</code>–<code>"500"</code> and configured by the user in the MetaScalp UI.</p>
+        <table>
+          <tbody><tr><th>Binding value</th><th>Active window</th><th>Named binding</th></tr>
+          <tr><td>omitted / empty</td><td>notified</td><td>—</td></tr>
+          <tr><td><code>"001"</code> … <code>"500"</code></td><td>notified</td><td>notified</td></tr>
+        </tbody></table>
+      </div>
+      <div style="display:flex;gap:0;margin-bottom:16px;">
+        <button class="btn btn-primary" id="tab-pattern" onclick="switchTickerTab('pattern')" style="border-radius:6px 0 0 6px;">Ticker Pattern</button>
+        <button class="btn btn-secondary" id="tab-explicit" onclick="switchTickerTab('explicit')" style="border-radius:0 6px 6px 0;">Explicit Fields</button>
+      </div>
+      <div id="form-pattern">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Ticker Pattern</label>
+            <input type="text" id="f-ticker-pattern" value="BINANCE:BTCUSDT.p" placeholder="e.g. BINANCE:BTCUSDT.p">
+          </div>
+          <div class="form-group">
+            <label>Binding <span class="optional">(optional)</span></label>
+            <input type="text" id="f-binding-pattern" placeholder="e.g. 001">
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+          Format: <code>EXCHANGE:SYMBOL.suffix</code> — suffix: <code>.p</code> (futures), <code>.m</code> (margin), <code>.o</code> (options), omitted (spot)<br>
+          Exchange and suffix are optional. Symbol may contain letters, digits, <code>_</code>, <code>/</code>, <code>-</code>, <code>$</code>, <code>:</code>.<br>
+          Examples: <code>BINANCE:BTCUSDT.p</code>, <code>BYBIT:ETHUSDT</code>, <code>OKX:BTC-USDT.m</code>, <code>HYPERLIQUID:BTCUSDT.p</code>, <code>HYPERLIQUID:cash:HOODUSDT0.p</code><br>
+          Symbol is case-insensitive and separators (<code>-</code>, <code>_</code>, <code>/</code>) are auto-stripped: <code>btc-usdt</code>, <code>BTC/USDT</code>, <code>BTCUSDT</code> all resolve to the same ticker.
+        </div>
+      </div>
+      <div id="form-explicit" style="display:none;">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Exchange</label>
+            <select id="f-exchange">
+              <option value="2" selected="selected">Binance</option>
+              <option value="3">GateIo</option>
+              <option value="4">Bybit (classic)</option>
+              <option value="5">KuCoin</option>
+              <option value="6">BybitUta (Unified Trading Account)</option>
+              <option value="7">Bitget</option>
+              <option value="8">Mexc</option>
+              <option value="10">Okx</option>
+              <option value="11">BingX</option>
+              <option value="12">HTX</option>
+              <option value="13">BitMart</option>
+              <option value="14">LBank</option>
+              <option value="15">HyperLiquid</option>
+              <option value="16">UpBit</option>
+              <option value="17">AsterDex</option>
+              <option value="18">Moex</option>
+              <option value="19">Lighter</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Market</label>
+            <select id="f-market">
+              <option value="0">Spot</option>
+              <option value="1">Futures</option>
+              <option value="2" selected="selected">UsdtFutures</option>
+              <option value="3">CoinFutures</option>
+              <option value="4">InverseFutures</option>
+              <option value="5">UsdtPerpetual</option>
+              <option value="6">UsdcPerpetual</option>
+              <option value="7">Margin</option>
+              <option value="8">Options</option>
+              <option value="9">Stock</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Ticker</label>
+            <input type="text" id="f-ticker" value="BTCUSDT" placeholder="e.g. BTCUSDT">
+          </div>
+          <div class="form-group">
+            <label>Binding <span class="optional">(optional)</span></label>
+            <input type="text" id="f-binding" placeholder="e.g. 001">
+          </div>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="btn btn-primary" onclick="sendChangeTicker()">Send Request</button>
+      </div>
+      <div class="response-panel" id="resp-ticker">
+        <div class="response-bar">
+          <span class="status-badge" id="resp-ticker-status"></span>
+          <span class="response-time" id="resp-ticker-time"></span>
+        </div>
+        <div class="response-body" id="resp-ticker-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- /api/combo -->
+  <div class="endpoint" id="ep-combo">
+    <div class="endpoint-header" onclick="toggle('ep-combo')">
+      <span class="method method-post">POST</span>
+      <span class="endpoint-path">/api/combo</span>
+      <span class="endpoint-desc">Open combo layout</span>
+      <span class="chevron">▸</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="docs">
+        <p>Opens a combo layout for the specified ticker in the MetaScalp UI. The <code>ticker</code> field is a symbol (e.g. <code>BTCUSDT</code>),
+ not a pattern — the combo opens on the currently active exchange and 
+market connection. The symbol is normalized: case-insensitive, 
+separators (<code>-</code>, <code>_</code>, <code>/</code>) are stripped, and the <code>SWAP</code> suffix is removed.</p>
+      </div>
+      <div class="form-grid single">
+        <div class="form-group">
+          <label>Ticker</label>
+          <input type="text" id="f-combo-ticker" value="BTCUSDT" placeholder="e.g. BTCUSDT">
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="btn btn-primary" onclick="sendCombo()">Send Request</button>
+      </div>
+      <div class="response-panel" id="resp-combo">
+        <div class="response-bar">
+          <span class="status-badge" id="resp-combo-status"></span>
+          <span class="response-time" id="resp-combo-time"></span>
+        </div>
+        <div class="response-body" id="resp-combo-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reference tables -->
+  <div class="ref-section">
+    <h2>Reference</h2>
+    <div class="ref-columns">
+      <div>
+        <h3>Exchange values</h3>
+        <table>
+          <tbody><tr><th>Value</th><th>Exchange</th></tr>
+          <tr><td>2</td><td>Binance</td></tr>
+          <tr><td>3</td><td>GateIo</td></tr>
+          <tr><td>4</td><td>Bybit <span style="color:var(--text-muted);font-size:11px;">(classic)</span></td></tr>
+          <tr><td>5</td><td>KuCoin</td></tr>
+          <tr><td>6</td><td>BybitUta <span style="color:var(--text-muted);font-size:11px;">(Unified Trading Account)</span></td></tr>
+          <tr><td>7</td><td>Bitget</td></tr>
+          <tr><td>8</td><td>Mexc</td></tr>
+          <tr><td>10</td><td>Okx</td></tr>
+          <tr><td>11</td><td>BingX</td></tr>
+          <tr><td>12</td><td>HTX</td></tr>
+          <tr><td>13</td><td>BitMart</td></tr>
+          <tr><td>14</td><td>LBank</td></tr>
+          <tr><td>15</td><td>HyperLiquid</td></tr>
+          <tr><td>16</td><td>UpBit</td></tr>
+          <tr><td>17</td><td>AsterDex</td></tr>
+          <tr><td>18</td><td>Moex</td></tr>
+          <tr><td>19</td><td>Lighter</td></tr>
+        </tbody></table>
+      </div>
+      <div>
+        <h3>MarketType values</h3>
+        <table>
+          <tbody><tr><th>Value</th><th>Type</th><th>Description</th></tr>
+          <tr><td>0</td><td>Spot</td><td>Spot trading</td></tr>
+          <tr><td>1</td><td>Futures</td><td>Generic futures</td></tr>
+          <tr><td>2</td><td>UsdtFutures</td><td>USDT-margined futures</td></tr>
+          <tr><td>3</td><td>CoinFutures</td><td>Coin-margined futures</td></tr>
+          <tr><td>4</td><td>InverseFutures</td><td>Inverse futures</td></tr>
+          <tr><td>5</td><td>UsdtPerpetual</td><td>USDT perpetual swaps</td></tr>
+          <tr><td>6</td><td>UsdcPerpetual</td><td>USDC perpetual swaps</td></tr>
+          <tr><td>7</td><td>Margin</td><td>Margin (cross/isolated)</td></tr>
+          <tr><td>8</td><td>Options</td><td>Options contracts</td></tr>
+          <tr><td>9</td><td>Stock</td><td>Stock / equity markets</td></tr>
+        </tbody></table>
+        <div class="note">Unsure which market type to use? Use the <strong>ticker pattern</strong> approach instead — the <code>.p</code> suffix auto-resolves to the right futures type. For explicit fields, <code>2</code> (UsdtFutures) is the most common choice for perpetual futures.</div>
+        <div class="note" style="margin-top:8px;">When the requested 
+market is not Spot and no exact match is found, MetaScalp falls back to 
+any non-Spot connection on the same exchange.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error reference -->
+  <div class="ref-section">
+    <h2>Error responses</h2>
+    <p style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">All errors return HTTP <code style="background:var(--surface2);padding:2px 5px;border-radius:3px;font-size:12px;">400</code> with a JSON body.</p>
+    <table>
+      <tbody><tr><th>Endpoint</th><th>Condition</th><th>Error message</th></tr>
+      <tr><td>/api/change-ticker</td><td>Missing fields</td><td><code>Invalid request body. Provide 'tickerPattern' or 'exchange'+'market'+'ticker'.</code></td></tr>
+      <tr><td>/api/change-ticker</td><td>Invalid pattern</td><td><code>Invalid ticker pattern: '{pattern}'</code></td></tr>
+      <tr><td>/api/change-ticker</td><td>Binding not found</td><td><code>Binding '{name}' not found. Available: {list}</code></td></tr>
+      <tr><td>/api/change-ticker</td><td>No connection</td><td><code>No connection found for exchange ... and market ...</code></td></tr>
+      <tr><td>/api/change-ticker</td><td>Ticker not on connection</td><td><code>Ticker '{ticker}' not found on connection {id}</code></td></tr>
+      <tr><td>/api/combo</td><td>Missing ticker</td><td><code>Invalid request body. 'ticker' is required.</code></td></tr>
+      <tr><td>/api/combo</td><td>Handler not ready</td><td><code>Combo handler not registered</code></td></tr>
+      <tr><td>any unknown path</td><td>—</td><td><code>Not found</code></td></tr>
+      <tr><td>wrong HTTP method</td><td>—</td><td><code>Method not allowed</code></td></tr>
+    </tbody></table>
+  </div>
+
+  <!-- Rendered Markdown documentation -->
+  <div class="md-section" id="markdown-docs">
+    <div class="md-section-header">
+      <h2><span class="file-icon">📄</span> MetaScalp-Api.md</h2>
+      <a class="md-download" href="https://download.metascalp.io/MetaScalp-Api.md" download="MetaScalp-Api.md">⬇ Download .md</a>
+    </div>
+    <div class="md-body">
+
+      <h1>MetaScalp Linking API</h1>
+      <p>Local HTTP server for external applications to communicate with a running MetaScalp instance.</p>
+      <ul>
+        <li><strong>Host:</strong> <code>127.0.0.1</code> (localhost only)</li>
+        <li><strong>Port range:</strong> <code>17845</code>–<code>17855</code> (first available port is used)</li>
+        <li><strong>Protocol:</strong> HTTP</li>
+        <li><strong>Content-Type:</strong> <code>application/json</code></li>
+        <li><strong>CORS:</strong> All responses include <code>Access-Control-Allow-Origin: *</code>. OPTIONS preflight is supported on all routes.</li>
+      </ul>
+
+      <h2>Getting started</h2>
+      <p>1. <strong>Launch MetaScalp</strong> — the local API server starts automatically.</p>
+      <p>2. <strong>Discover the port</strong> — scan <code>17845</code>–<code>17855</code> with <code>GET /ping</code> to find the running instance.</p>
+      <p>3. <strong>Send commands</strong> — use <code>POST /api/change-ticker</code> to switch the active ticker, or <code>POST /api/combo</code> to open a combo layout.</p>
+
+      <hr>
+
+      <h2>Discovery</h2>
+      <p>Scan the port range to find the running MetaScalp instance.</p>
+      <pre><code>GET http://127.0.0.1:{port}/ping</code></pre>
+      <p><strong>Response <code>200 OK</code>:</strong></p>
+      <pre><code>{ "app": "MetaScalp", "version": "0.0.9" }</code></pre>
+
+      <hr>
+
+      <h2>Change Ticker</h2>
+      <p>Switches the active ticker in MetaScalp. The active window is 
+always notified. When a named binding is provided, that binding's linked
+ panels are notified as well.</p>
+      <pre><code>POST http://127.0.0.1:{port}/api/change-ticker
+Content-Type: application/json</code></pre>
+
+      <h3>Request body</h3>
+      <p>The endpoint accepts two request formats. Include <strong>either</strong> <code>tickerPattern</code> <strong>or</strong> the <code>exchange</code> + <code>market</code> + <code>ticker</code> fields.</p>
+
+      <h4>Option A — Ticker pattern</h4>
+      <table>
+        <tbody><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>tickerPattern</code></td><td>string</td><td>yes</td><td>Pattern string (see Ticker pattern format below).</td></tr>
+        <tr><td><code>binding</code></td><td>string</td><td>no</td><td>Named binding (<code>"001"</code>–<code>"500"</code>). Omit or send empty string to only notify the active window.</td></tr>
+      </tbody></table>
+
+      <h4>Option B — Explicit fields</h4>
+      <table>
+        <tbody><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>exchange</code></td><td>integer</td><td>yes</td><td>Exchange identifier (see Exchange values below)</td></tr>
+        <tr><td><code>market</code></td><td>integer</td><td>yes</td><td>Market type identifier (see MarketType values below)</td></tr>
+        <tr><td><code>ticker</code></td><td>string</td><td>yes</td><td>Trading pair symbol, e.g. <code>"BTCUSDT"</code></td></tr>
+        <tr><td><code>binding</code></td><td>string</td><td>no</td><td>Named binding (<code>"001"</code>–<code>"500"</code>). Omit or send empty string to only notify the active window.</td></tr>
+      </tbody></table>
+
+      <h3>Bindings</h3>
+      <p>A <strong>binding</strong> is a named group of linked panels 
+inside MetaScalp (e.g. a chart, order book, and trade feed that should 
+all show the same ticker). Bindings are numbered <code>"001"</code> through <code>"500"</code>
+ and are configured by the user inside the MetaScalp UI. When you send a
+ binding name with a request, all panels assigned to that binding will 
+switch to the new ticker.</p>
+      <table>
+        <tbody><tr><th><code>binding</code> value</th><th>Active window notified</th><th>Named binding notified</th></tr>
+        <tr><td>omitted / empty / null</td><td style="text-align:center">yes</td><td style="text-align:center">—</td></tr>
+        <tr><td><code>"001"</code> … <code>"500"</code></td><td style="text-align:center">yes</td><td style="text-align:center">yes</td></tr>
+      </tbody></table>
+
+      <h3>Response</h3>
+      <p><strong><code>200 OK</code></strong> — ticker changed successfully:</p>
+      <pre><code>{ "status": "ok" }</code></pre>
+      <p><strong><code>400 Bad Request</code></strong> — validation error:</p>
+      <pre><code>{ "error": "..." }</code></pre>
+
+      <p>Possible error messages:</p>
+      <table>
+        <tbody><tr><th>Condition</th><th>Error message</th></tr>
+        <tr><td>Missing fields</td><td><code>Invalid request body. Provide 'tickerPattern' or 'exchange'+'market'+'ticker'.</code></td></tr>
+        <tr><td>Invalid pattern format</td><td><code>Invalid ticker pattern: '{pattern}'</code></td></tr>
+        <tr><td>Binding name not found</td><td><code>Binding '{name}' not found. Available: {list}</code></td></tr>
+        <tr><td>No connection for exchange + market</td><td><code>No connection found for exchange {exchange} and market {market}</code></td></tr>
+        <tr><td>Ticker not available on connection</td><td><code>Ticker '{ticker}' not found on connection {id}</code></td></tr>
+      </tbody></table>
+
+      <h3>Examples</h3>
+      <p><strong>Using ticker pattern:</strong></p>
+      <pre><code>curl -X POST http://127.0.0.1:17845/api/change-ticker \
+  -H "Content-Type: application/json" \
+  -d '{"tickerPattern": "BINANCE:BTCUSDT.p", "binding": "001"}'</code></pre>
+      <p><strong>Using explicit fields:</strong></p>
+      <pre><code>curl -X POST http://127.0.0.1:17845/api/change-ticker \
+  -H "Content-Type: application/json" \
+  -d '{"exchange": 2, "market": 2, "ticker": "BTCUSDT", "binding": "001"}'</code></pre>
+
+      <hr>
+
+      <h2>Open Combo</h2>
+      <p>Opens a combo layout for the specified ticker. The <code>ticker</code> field is a symbol (e.g. <code>BTCUSDT</code>),
+ not a pattern — the combo opens on the currently active exchange and 
+market connection. The symbol is normalized: case-insensitive, 
+separators (<code>-</code>, <code>_</code>, <code>/</code>) are stripped, and the <code>SWAP</code> suffix is removed.</p>
+      <pre><code>POST http://127.0.0.1:{port}/api/combo
+Content-Type: application/json</code></pre>
+
+      <h3>Request body</h3>
+      <table>
+        <tbody><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>ticker</code></td><td>string</td><td>yes</td><td>Trading pair symbol, e.g. <code>"BTCUSDT"</code></td></tr>
+      </tbody></table>
+
+      <h3>Response</h3>
+      <p><strong><code>200 OK</code>:</strong></p>
+      <pre><code>{ "status": "ok" }</code></pre>
+      <p><strong><code>400 Bad Request</code>:</strong></p>
+      <table>
+        <tbody><tr><th>Condition</th><th>Error message</th></tr>
+        <tr><td>Missing or empty <code>ticker</code></td><td><code>Invalid request body. 'ticker' is required.</code></td></tr>
+        <tr><td>Handler not registered</td><td><code>Combo handler not registered</code></td></tr>
+      </tbody></table>
+
+      <h3>Example</h3>
+      <pre><code>curl -X POST http://127.0.0.1:17845/api/combo \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "BTCUSDT"}'</code></pre>
+
+      <hr>
+
+      <h2>Ticker pattern format</h2>
+      <p>The <code>tickerPattern</code> string follows the <strong>TradingView-style</strong> format:</p>
+      <pre><code>EXCHANGE:SYMBOL.suffix</code></pre>
+      <table>
+        <tbody><tr><th>Part</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>EXCHANGE</code></td><td>no</td><td>Exchange name (case-insensitive), e.g. <code>BINANCE</code>, <code>BYBIT</code>, <code>OKX</code>. Separated from the symbol by <code>:</code>. If omitted, the colon is also omitted.</td></tr>
+        <tr><td><code>SYMBOL</code></td><td>yes</td><td>Trading pair symbol, e.g. <code>BTCUSDT</code>, <code>ETH-USDT</code>. May contain letters, digits, <code>_</code>, <code>/</code>, <code>-</code>, <code>$</code>, and <code>:</code>.</td></tr>
+        <tr><td><code>.suffix</code></td><td>no</td><td>Single-letter market type suffix preceded by a dot.</td></tr>
+      </tbody></table>
+
+      <h3>Market type suffixes</h3>
+      <table>
+        <tbody><tr><th>Suffix</th><th>Market type</th></tr>
+        <tr><td><code>.p</code></td><td>Futures</td></tr>
+        <tr><td><code>.m</code></td><td>Margin</td></tr>
+        <tr><td><code>.o</code></td><td>Options</td></tr>
+        <tr><td><em>(none)</em></td><td>Spot</td></tr>
+      </tbody></table>
+
+      <h3>Pattern examples</h3>
+      <table>
+        <tbody><tr><th>Pattern</th><th>Exchange</th><th>Symbol</th><th>Market</th></tr>
+        <tr><td><code>BINANCE:BTCUSDT.p</code></td><td>Binance</td><td>BTCUSDT</td><td>Futures</td></tr>
+        <tr><td><code>BYBIT:ETHUSDT</code></td><td>Bybit</td><td>ETHUSDT</td><td>Spot</td></tr>
+        <tr><td><code>OKX:BTC-USDT.m</code></td><td>OKX</td><td>BTC-USDT</td><td>Margin</td></tr>
+        <tr><td><code>BINANCE:BTCUSDT.o</code></td><td>Binance</td><td>BTCUSDT</td><td>Options</td></tr>
+        <tr><td><code>HYPERLIQUID:BTCUSDT.p</code></td><td>HyperLiquid</td><td>BTCUSDT</td><td>Futures</td></tr>
+        <tr><td><code>HYPERLIQUID:cash:HOODUSDT0.p</code></td><td>HyperLiquid</td><td>cash:HOODUSDT0</td><td>Futures</td></tr>
+        <tr><td><code>BTCUSDT.p</code></td><td><em>(none)</em></td><td>BTCUSDT</td><td>Futures</td></tr>
+        <tr><td><code>BTCUSDT</code></td><td><em>(none)</em></td><td>BTCUSDT</td><td>Spot</td></tr>
+      </tbody></table>
+
+      <blockquote><strong>Note:</strong> The exchange name in the pattern is matched case-insensitively against the exchange names listed in Exchange values below.</blockquote>
+
+      <h3>Symbol resolution</h3>
+      <p>The symbol part of the pattern is flexible — MetaScalp automatically tries several normalizations to find a match:</p>
+      <table>
+        <tbody><tr><th>Step</th><th>Transformation</th><th>Example</th></tr>
+        <tr><td>1</td><td>As-is (exact match)</td><td><code>cash:HOODUSDT0</code> → <code>cash:HOODUSDT0</code></td></tr>
+        <tr><td>2</td><td>Uppercase</td><td><code>btcusdt</code> → <code>BTCUSDT</code></td></tr>
+        <tr><td>3</td><td>Strip separators (<code>-</code>, <code>_</code>, <code>/</code>)</td><td><code>ETH/USDT</code> → <code>ETHUSDT</code>, <code>SOL_USDT</code> → <code>SOLUSDT</code></td></tr>
+        <tr><td>4</td><td>Strip separators + uppercase</td><td><code>eth/usdt</code> → <code>ETHUSDT</code></td></tr>
+        <tr><td>5</td><td>Remove <code>SWAP</code> suffix</td><td><code>BTCUSDTSWAP</code> → <code>BTCUSDT</code></td></tr>
+        <tr><td>6</td><td>Preserve prefix before <code>:</code>, uppercase the rest</td><td><code>cash:hoodUSDT0</code> → <code>cash:HOODUSDT0</code></td></tr>
+      </tbody></table>
+      <p>This means you can pass symbols in <strong>any case</strong> and with or without common separators (<code>-</code>, <code>_</code>, <code>/</code>) — the API will find the correct ticker.</p>
+
+      <hr>
+
+      <h2>Exchange values</h2>
+      <table>
+        <tbody><tr><th>Value</th><th>Exchange</th><th>Notes</th></tr>
+        <tr><td>2</td><td>Binance</td><td></td></tr>
+        <tr><td>3</td><td>GateIo</td><td></td></tr>
+        <tr><td>4</td><td>Bybit</td><td>Classic (non-UTA) accounts</td></tr>
+        <tr><td>5</td><td>KuCoin</td><td></td></tr>
+        <tr><td>6</td><td>BybitUta</td><td>Bybit Unified Trading Account</td></tr>
+        <tr><td>7</td><td>Bitget</td><td></td></tr>
+        <tr><td>8</td><td>Mexc</td><td></td></tr>
+        <tr><td>10</td><td>Okx</td><td></td></tr>
+        <tr><td>11</td><td>BingX</td><td></td></tr>
+        <tr><td>12</td><td>HTX</td><td></td></tr>
+        <tr><td>13</td><td>BitMart</td><td></td></tr>
+        <tr><td>14</td><td>LBank</td><td></td></tr>
+        <tr><td>15</td><td>HyperLiquid</td><td></td></tr>
+        <tr><td>16</td><td>UpBit</td><td></td></tr>
+        <tr><td>17</td><td>AsterDex</td><td></td></tr>
+        <tr><td>18</td><td>Moex</td><td></td></tr>
+        <tr><td>19</td><td>Lighter</td><td></td></tr>
+      </tbody></table>
+
+      <blockquote><strong>Note:</strong> Values 1 and 9 are unused and reserved. Exchange identifiers are not sequential.</blockquote>
+
+      <h2>MarketType values</h2>
+      <table>
+        <tbody><tr><th>Value</th><th>Type</th><th>Description</th></tr>
+        <tr><td>0</td><td>Spot</td><td>Spot trading</td></tr>
+        <tr><td>1</td><td>Futures</td><td>Generic futures</td></tr>
+        <tr><td>2</td><td>UsdtFutures</td><td>USDT-margined futures</td></tr>
+        <tr><td>3</td><td>CoinFutures</td><td>Coin-margined futures</td></tr>
+        <tr><td>4</td><td>InverseFutures</td><td>Inverse futures</td></tr>
+        <tr><td>5</td><td>UsdtPerpetual</td><td>USDT perpetual swaps</td></tr>
+        <tr><td>6</td><td>UsdcPerpetual</td><td>USDC perpetual swaps</td></tr>
+        <tr><td>7</td><td>Margin</td><td>Margin (cross/isolated)</td></tr>
+        <tr><td>8</td><td>Options</td><td>Options contracts</td></tr>
+        <tr><td>9</td><td>Stock</td><td>Stock / equity markets</td></tr>
+      </tbody></table>
+
+      <blockquote><strong>Tip:</strong> Unsure which market type to use? Use the <strong>ticker pattern</strong> approach instead — the <code>.p</code> suffix auto-resolves to the right futures type. For explicit fields, <code>2</code> (UsdtFutures) is the most common choice for perpetual futures.</blockquote>
+
+      <blockquote><strong>Note:</strong> When the requested market type 
+is not Spot and no exact connection match is found, MetaScalp falls back
+ to any non-Spot connection on the same exchange.</blockquote>
+
+      <hr>
+
+      <h2>Integration examples</h2>
+
+      <h3>JavaScript (browser)</h3>
+      <pre><code>async function discoverMetaScalp() {
+  for (let port = 17845; port &lt;= 17855; port++) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}/ping`);
+      if (r.ok) {
+        const data = await r.json();
+        if (data.app === "MetaScalp") return port;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function changeTickerByPattern(port, tickerPattern, binding) {
+  const body = { tickerPattern };
+  if (binding) body.binding = binding;
+  const r = await fetch(`http://127.0.0.1:${port}/api/change-ticker`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  return r.json();
+}
+
+async function changeTicker(port, exchange, market, ticker, binding) {
+  const r = await fetch(`http://127.0.0.1:${port}/api/change-ticker`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ exchange, market, ticker, binding })
+  });
+  return r.json();
+}
+
+// Usage with ticker pattern
+const port = await discoverMetaScalp();
+if (port) await changeTickerByPattern(port, "BINANCE:BTCUSDT.p", "001");
+
+// Usage with explicit fields
+if (port) await changeTicker(port, 2, 2, "BTCUSDT", "001");
+
+// Without binding — only active window is updated
+if (port) await changeTickerByPattern(port, "BINANCE:ETHUSDT.p");</code></pre>
+
+      <h3>Python</h3>
+      <pre><code>import requests
+
+def discover_metascalp():
+    for port in range(17845, 17856):
+        try:
+            r = requests.get(f"http://127.0.0.1:{port}/ping", timeout=0.5)
+            if r.ok and r.json().get("app") == "MetaScalp":
+                return port
+        except requests.ConnectionError:
+            continue
+    return None
+
+def change_ticker_by_pattern(port, ticker_pattern, binding=None):
+    payload = {"tickerPattern": ticker_pattern}
+    if binding:
+        payload["binding"] = binding
+    r = requests.post(f"http://127.0.0.1:{port}/api/change-ticker", json=payload)
+    return r.json()
+
+def change_ticker(port, exchange, market, ticker, binding=None):
+    payload = {"exchange": exchange, "market": market, "ticker": ticker}
+    if binding:
+        payload["binding"] = binding
+    r = requests.post(f"http://127.0.0.1:{port}/api/change-ticker", json=payload)
+    return r.json()
+
+def open_combo(port, ticker):
+    r = requests.post(f"http://127.0.0.1:{port}/api/combo", json={"ticker": ticker})
+    return r.json()
+
+# Usage
+port = discover_metascalp()
+if port:
+    change_ticker_by_pattern(port, "BINANCE:BTCUSDT.p", binding="001")
+    change_ticker(port, 2, 2, "BTCUSDT", binding="001")
+    open_combo(port, "BTCUSDT")</code></pre>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  let msPort = null;
+
+  // --- Discovery ---
+  async function discover() {
+    const el = document.getElementById('connection-status');
+    const txt = document.getElementById('status-text');
+    for (let p = 17845; p <= 17855; p++) {
+      try {
+        const r = await fetch(`http://127.0.0.1:${p}/ping`, { signal: AbortSignal.timeout(800) });
+        if (r.ok) {
+          const d = await r.json();
+          if (d.app === 'MetaScalp') {
+            msPort = p;
+            el.classList.add('connected');
+            txt.textContent = `Connected — port ${p} (v${d.version})`;
+            return;
+          }
+        }
+      } catch {}
+    }
+    txt.textContent = 'MetaScalp not found';
+  }
+  discover();
+
+  // --- Helpers ---
+  function toggle(id) {
+    document.getElementById(id).classList.toggle('open');
+  }
+
+  function showResponse(prefix, status, statusClass, body, ms) {
+    const panel = document.getElementById(`resp-${prefix}`);
+    const sBadge = document.getElementById(`resp-${prefix}-status`);
+    const sTime = document.getElementById(`resp-${prefix}-time`);
+    const sBody = document.getElementById(`resp-${prefix}-body`);
+    panel.classList.add('visible');
+    sBadge.textContent = status;
+    sBadge.className = 'status-badge ' + statusClass;
+    sTime.textContent = ms + ' ms';
+    sBody.textContent = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+  }
+
+  async function apiCall(method, path, body) {
+    if (!msPort) {
+      await discover();
+      if (!msPort) throw new Error('MetaScalp not found on ports 17845-17855');
+    }
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const t0 = performance.now();
+    const r = await fetch(`http://127.0.0.1:${msPort}${path}`, opts);
+    const ms = Math.round(performance.now() - t0);
+    const data = await r.json();
+    return { status: r.status, data, ms };
+  }
+
+  // --- Endpoints ---
+  async function sendPing() {
+    try {
+      const { status, data, ms } = await apiCall('GET', '/ping');
+      showResponse('ping', status, status === 200 ? 'status-ok' : 'status-err', data, ms);
+    } catch (e) {
+      showResponse('ping', 'ERR', 'status-net', e.message, 0);
+    }
+  }
+
+  let tickerTabMode = 'pattern';
+
+  function switchTickerTab(mode) {
+    tickerTabMode = mode;
+    document.getElementById('form-pattern').style.display = mode === 'pattern' ? '' : 'none';
+    document.getElementById('form-explicit').style.display = mode === 'explicit' ? '' : 'none';
+    const tabP = document.getElementById('tab-pattern');
+    const tabE = document.getElementById('tab-explicit');
+    tabP.className = mode === 'pattern' ? 'btn btn-primary' : 'btn btn-secondary';
+    tabE.className = mode === 'explicit' ? 'btn btn-primary' : 'btn btn-secondary';
+    tabP.style.borderRadius = '6px 0 0 6px';
+    tabE.style.borderRadius = '0 6px 6px 0';
+  }
+
+  async function sendChangeTicker() {
+    let payload;
+    if (tickerTabMode === 'pattern') {
+      const tickerPattern = document.getElementById('f-ticker-pattern').value.trim();
+      const binding = document.getElementById('f-binding-pattern').value.trim();
+      payload = { tickerPattern };
+      if (binding) payload.binding = binding;
+    } else {
+      const exchange = parseInt(document.getElementById('f-exchange').value);
+      const market = parseInt(document.getElementById('f-market').value);
+      const ticker = document.getElementById('f-ticker').value.trim();
+      const binding = document.getElementById('f-binding').value.trim();
+      payload = { exchange, market, ticker };
+      if (binding) payload.binding = binding;
+    }
+    try {
+      const { status, data, ms } = await apiCall('POST', '/api/change-ticker', payload);
+      showResponse('ticker', status, status === 200 ? 'status-ok' : 'status-err', data, ms);
+    } catch (e) {
+      showResponse('ticker', 'ERR', 'status-net', e.message, 0);
+    }
+  }
+
+  async function sendCombo() {
+    const ticker = document.getElementById('f-combo-ticker').value.trim();
+    try {
+      const { status, data, ms } = await apiCall('POST', '/api/combo', { ticker });
+      showResponse('combo', status, status === 200 ? 'status-ok' : 'status-err', data, ms);
+    } catch (e) {
+      showResponse('combo', 'ERR', 'status-net', e.message, 0);
+    }
+  }
+</script>
+
+
+</body></html>
