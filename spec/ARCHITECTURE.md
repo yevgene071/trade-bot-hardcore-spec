@@ -2,6 +2,13 @@
 
 Техническая архитектура торгового бота для MetaScalp.
 
+## 0. Технологический стек
+- **Язык:** C++23 (ISO/IEC 14882:2024). Использование `std::expected`, `std::print`, `std::mdspan`, улучшенных ranges и корутин.
+- **Платформы:** Кроссплатформенная разработка (Linux Pop!_OS / Windows 11).
+- **SIMD:** AVX2 baseline (AVX-512 не используется для обеспечения кроссплатформенной стабильности и соответствия целевому железу).
+- **Сборка:** CMake 3.28+.
+
+
 ---
 
 ## 1. Высокоуровневая схема
@@ -1021,18 +1028,18 @@ Transport thread ─[spsc_queue]─► Processing thread ─[mpmc]─► Journal
 ### 10.5. SIMD optimizations
 
 Везде, где есть итерация по массивам doubles длиной ≥ 8 — используем
-SIMD (AVX2 baseline, AVX-512 опционально через runtime dispatch).
+SIMD (AVX2 baseline). AVX-512 не используется.
 
 | Операция | Где | Speedup |
 |----------|-----|---------|
-| sum/prefix-sum по `bid_depth_10` | `OrderBook::depth(N)` | 4× (AVX2) |
+| sum/prefix-sum по `bid_depth_10` | `OrderBook::depth(N)` | 4× (AVX2, AVX-512 disabled) |
 | Pearson correlation (Welford-vectorized) | `LeaderTracker::corr()` | 3× |
 | Apply batched orderbook update (8+ levels) | `OrderBook::apply_update_batch` | 2× |
 | KDE для cluster-snapshot уровней | `LevelDetector` | 5× |
 | FFT-based cross-correlation (cufft если есть) | `LeaderTracker` (offline-warmup) | 10× |
 
 Реализация — через `xsimd` или `Highway` (Google) — портируемо
-(AVX2/AVX-512/NEON), без ручного `_mm256_*`-кода.
+(AVX2/NEON (AVX-512 disabled)), без ручного `_mm256_*`-кода.
 
 ### 10.6. io_uring для localhost REST
 
@@ -1187,7 +1194,7 @@ DEMA реагирует в ~2× быстрее SMA того же окна при
 | **Wilson score interval** | precision/recall CI в T2-LABELING | корректный CI на малой выборке |
 | **DEMA** (§ 11.6) | smoothing affinity score, lag | 2× быстрее SMA при той же noise rejection |
 | **Bayesian update** | `IcebergDetector` evidence | накопление uncertainty, не binary count |
-| **xsimd / Highway SIMD** | OrderBook depth, KDE, correlation | AVX2/AVX-512 portable |
+| **xsimd / Highway SIMD** | OrderBook depth, KDE, correlation | AVX2 portable (AVX-512 disabled) |
 | **io_uring** (Linux 5.6+) | localhost REST к MetaScalp | ~5× snizhenie p99 latency |
 | **absl::flat_hash_map / btree_map** | hot-path containers | swiss-table & B-tree cache-friendly |
 
