@@ -65,6 +65,7 @@ add_executable(trade_bot
     src/transport/MetaScalpCodec.cpp
     src/transport/MarketDataFeed.cpp
     src/transport/OrderGateway.cpp
+    src/transport/ReplayFeed.cpp
     src/trading/OrderReconciliator.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
@@ -257,6 +258,22 @@ if(BUILD_TESTS)
         GTest::gtest GTest::gtest_main
         spdlog::spdlog)
     add_test(NAME order_reconciliator COMMAND order_reconciliator_test)
+
+    # T0-REPLAY
+    add_executable(replay_test
+        test/unit/replay_test.cpp
+        src/transport/ReplayFeed.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/transport/MarketDataFeed.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(replay_test PRIVATE src)
+    target_link_libraries(replay_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json
+        boost::boost)
+    add_test(NAME replay COMMAND replay_test)
 
     # Benchmarks
     add_executable(bench_perf 
