@@ -39,6 +39,7 @@ find_package(Boost REQUIRED CONFIG)
 find_package(tomlplusplus REQUIRED CONFIG)
 find_package(CURL REQUIRED CONFIG)
 find_package(nlohmann_json REQUIRED CONFIG)
+find_package(OpenSSL REQUIRED)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
@@ -66,6 +67,7 @@ target_link_libraries(trade_bot PRIVATE
     tomlplusplus::tomlplusplus
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    OpenSSL::SSL
 )
 
 # Tests
@@ -143,7 +145,7 @@ if(BUILD_TESTS)
         src/logger/Logger.cpp
     )
     target_include_directories(ws_test PRIVATE src)
-    target_link_libraries(ws_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json)
+    target_link_libraries(ws_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL)
     add_test(NAME ws COMMAND ws_test)
 
     add_executable(ws_smoke_test 
@@ -152,7 +154,7 @@ if(BUILD_TESTS)
         src/logger/Logger.cpp
     )
     target_include_directories(ws_smoke_test PRIVATE src)
-    target_link_libraries(ws_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json)
+    target_link_libraries(ws_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL)
     add_test(NAME ws_smoke COMMAND ws_smoke_test)
 
     add_executable(codec_test 
@@ -182,7 +184,7 @@ if(BUILD_TESTS)
         src/logger/Logger.cpp
     )
     target_include_directories(feed_smoke_test PRIVATE src)
-    target_link_libraries(feed_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json)
+    target_link_libraries(feed_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL)
     add_test(NAME feed_smoke COMMAND feed_smoke_test)
 
     add_executable(order_gateway_test 

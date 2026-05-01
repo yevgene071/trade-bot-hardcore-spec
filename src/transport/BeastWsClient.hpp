@@ -3,9 +3,12 @@
 #include "IWsClient.hpp"
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/ssl.hpp>
 #include <memory>
+#include <variant>
 #include <thread>
 #include <atomic>
 #include <queue>
@@ -34,11 +37,13 @@ public:
     void set_on_connect(std::function<void()> callback) override { m_on_connect = std::move(callback); }
 
     bool is_connected() const override { return m_connected; }
+    bool is_ssl() const { return m_use_ssl; }
 
 private:
     void do_resolve();
     void on_resolve(beast::error_code ec, tcp::resolver::results_type results);
     void on_connect(beast::error_code ec, tcp::resolver::results_type::endpoint_type ep);
+    void on_ssl_handshake(beast::error_code ec);
     void on_handshake(beast::error_code ec);
     
     void do_read();
@@ -53,14 +58,20 @@ private:
     void on_ping(beast::error_code ec);
 
     net::io_context& m_ioc;
+    net::ssl::context m_ctx{net::ssl::context::tls_client};
     tcp::resolver m_resolver;
-    std::unique_ptr<websocket::stream<beast::tcp_stream>> m_ws;
+
+    using plain_stream = websocket::stream<beast::tcp_stream>;
+    using ssl_stream = websocket::stream<beast::ssl_stream<beast::tcp_stream>>;
+    std::unique_ptr<std::variant<plain_stream, ssl_stream>> m_ws;
+
     beast::flat_buffer m_buffer;
     
     std::string m_host;
     std::string m_port;
     std::string m_target;
     std::string m_url;
+    bool m_use_ssl = false;
 
     std::atomic<bool> m_connected{false};
     std::atomic<bool> m_closing{false};
