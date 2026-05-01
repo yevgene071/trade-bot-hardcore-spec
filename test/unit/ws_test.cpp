@@ -18,8 +18,11 @@ TEST_F(WsTest, UrlParsing) {
     net::io_context ioc;
     auto client = std::make_shared<BeastWsClient>(ioc);
     
-    // We can't easily test private members, but we can verify it doesn't throw on connect call
     EXPECT_NO_THROW(client->connect("ws://127.0.0.1:17845/"));
+    EXPECT_FALSE(client->is_ssl());
+
+    EXPECT_NO_THROW(client->connect("wss://127.0.0.1:17845/"));
+    EXPECT_TRUE(client->is_ssl());
 }
 
 // A more involved test would involve a mock server, similar to HttpClientTest but for WS.

@@ -2,6 +2,7 @@
 #include "logger/Logger.hpp"
 #include <boost/url.hpp>
 #include <iostream>
+#include <openssl/err.h>
 
 namespace trade_bot {
 
@@ -9,7 +10,13 @@ BeastWsClient::BeastWsClient(net::io_context& ioc)
     : m_ioc(ioc)
     , m_resolver(net::make_strand(ioc))
     , m_reconnect_timer(ioc)
-    , m_ping_timer(ioc) {}
+    , m_ping_timer(ioc) {
+    m_ctx.set_default_verify_paths();
+    // Default to verify_peer for security.
+    // In local environments where MetaScalp might use self-signed certs,
+    // the user should configure the context appropriately or use a config option.
+    m_ctx.set_verify_mode(net::ssl::verify_peer);
+}
 
 BeastWsClient::~BeastWsClient() {
     disconnect();
@@ -27,8 +34,9 @@ void BeastWsClient::connect(const std::string& url) {
 
         m_host = parsed_url->host_address();
         m_port = parsed_url->port();
+        m_use_ssl = (parsed_url->scheme() == "wss");
         if (m_port.empty()) {
-            m_port = (parsed_url->scheme() == "wss") ? "443" : "80";
+            m_port = m_use_ssl ? "443" : "80";
         }
         m_target = parsed_url->path();
         if (m_target.empty()) m_target = "/";
@@ -49,18 +57,21 @@ void BeastWsClient::disconnect() {
     m_ping_timer.cancel();
     
     if (m_ws && m_connected) {
-        m_ws->async_close(websocket::close_code::normal, [self = shared_from_this()](beast::error_code ec) {
-            if (ec) {
-                LOG_DEBUG("WS close error: {}", ec.message());
-            }
-        });
+        std::visit([self = shared_from_this()](auto& ws) {
+            ws.async_close(websocket::close_code::normal, [self](beast::error_code ec) {
+                if (ec) {
+                    LOG_DEBUG("WS close error: {}", ec.message());
+                }
+            });
+        }, *m_ws);
     }
     m_connected = false;
 }
 
 void BeastWsClient::send(std::string_view message) {
     auto msg = std::string(message);
-    net::post(m_ws->get_executor(), [self = shared_from_this(), msg = std::move(msg)]() {
+    auto executor = std::visit([](auto& ws) { return ws.get_executor(); }, *m_ws);
+    net::post(executor, [self = shared_from_this(), msg = std::move(msg)]() {
         bool write_in_progress = false;
         {
             std::lock_guard<std::mutex> lock(self->m_write_mutex);
@@ -85,9 +96,18 @@ void BeastWsClient::on_resolve(beast::error_code ec, tcp::resolver::results_type
         return;
     }
 
-    m_ws = std::make_unique<websocket::stream<beast::tcp_stream>>(net::make_strand(m_ioc));
-    beast::get_lowest_layer(*m_ws).expires_after(std::chrono::seconds(30));
-    beast::get_lowest_layer(*m_ws).async_connect(results, beast::bind_front_handler(&BeastWsClient::on_connect, shared_from_this()));
+    if (m_use_ssl) {
+        m_ws = std::make_unique<std::variant<plain_stream, ssl_stream>>(
+            std::in_place_type<ssl_stream>, net::make_strand(m_ioc), m_ctx);
+    } else {
+        m_ws = std::make_unique<std::variant<plain_stream, ssl_stream>>(
+            std::in_place_type<plain_stream>, net::make_strand(m_ioc));
+    }
+
+    std::visit([&](auto& ws) {
+        beast::get_lowest_layer(ws).expires_after(std::chrono::seconds(30));
+        beast::get_lowest_layer(ws).async_connect(results, beast::bind_front_handler(&BeastWsClient::on_connect, shared_from_this()));
+    }, *m_ws);
 }
 
 void BeastWsClient::on_connect(beast::error_code ec, tcp::resolver::results_type::endpoint_type ep) {
@@ -98,10 +118,34 @@ void BeastWsClient::on_connect(beast::error_code ec, tcp::resolver::results_type
         return;
     }
 
-    beast::get_lowest_layer(*m_ws).expires_never();
-    m_ws->set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
-    
-    m_ws->async_handshake(m_host, m_target, beast::bind_front_handler(&BeastWsClient::on_handshake, shared_from_this()));
+    std::visit([&](auto& ws) {
+        beast::get_lowest_layer(ws).expires_never();
+        ws.set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
+
+        if constexpr (std::is_same_v<std::decay_t<decltype(ws)>, ssl_stream>) {
+            if (!SSL_set_tlsext_host_name(ws.next_layer().native_handle(), m_host.c_str())) {
+                ec = beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category());
+                LOG_ERROR("WS SSL SNI error: {}", ec.message());
+                schedule_reconnect();
+                return;
+            }
+            ws.next_layer().async_handshake(net::ssl::stream_base::client,
+                beast::bind_front_handler(&BeastWsClient::on_ssl_handshake, shared_from_this()));
+        } else {
+            ws.async_handshake(m_host, m_target, beast::bind_front_handler(&BeastWsClient::on_handshake, shared_from_this()));
+        }
+    }, *m_ws);
+}
+
+void BeastWsClient::on_ssl_handshake(beast::error_code ec) {
+    if (ec) {
+        LOG_ERROR("WS SSL handshake error: {}", ec.message());
+        schedule_reconnect();
+        return;
+    }
+
+    std::get<ssl_stream>(*m_ws).async_handshake(m_host, m_target,
+        beast::bind_front_handler(&BeastWsClient::on_handshake, shared_from_this()));
 }
 
 void BeastWsClient::on_handshake(beast::error_code ec) {
@@ -130,7 +174,9 @@ void BeastWsClient::on_handshake(beast::error_code ec) {
 }
 
 void BeastWsClient::do_read() {
-    m_ws->async_read(m_buffer, beast::bind_front_handler(&BeastWsClient::on_read, shared_from_this()));
+    std::visit([&](auto& ws) {
+        ws.async_read(m_buffer, beast::bind_front_handler(&BeastWsClient::on_read, shared_from_this()));
+    }, *m_ws);
 }
 
 void BeastWsClient::on_read(beast::error_code ec, std::size_t bytes_transferred) {
@@ -167,7 +213,9 @@ void BeastWsClient::do_write() {
         msg = m_write_queue.front();
     }
 
-    m_ws->async_write(net::buffer(msg), beast::bind_front_handler(&BeastWsClient::on_write, shared_from_this()));
+    std::visit([&](auto& ws) {
+        ws.async_write(net::buffer(msg), beast::bind_front_handler(&BeastWsClient::on_write, shared_from_this()));
+    }, *m_ws);
 }
 
 void BeastWsClient::on_write(beast::error_code ec, std::size_t bytes_transferred) {
@@ -223,15 +271,17 @@ void BeastWsClient::on_ping(beast::error_code ec) {
 void BeastWsClient::do_ping() {
     if (!m_connected) return;
 
-    m_ws->async_ping({}, [self = shared_from_this()](beast::error_code ec) {
-        if (ec) {
-            LOG_ERROR("WS ping failed: {}", ec.message());
-            self->m_connected = false;
-            self->schedule_reconnect();
-        } else {
-            self->schedule_ping();
-        }
-    });
+    std::visit([self = shared_from_this()](auto& ws) {
+        ws.async_ping({}, [self](beast::error_code ec) {
+            if (ec) {
+                LOG_ERROR("WS ping failed: {}", ec.message());
+                self->m_connected = false;
+                self->schedule_reconnect();
+            } else {
+                self->schedule_ping();
+            }
+        });
+    }, *m_ws);
 }
 
 } // namespace trade_bot
