@@ -1,8 +1,7 @@
 #include <iostream>
-#include <print>
-#include <expected>
 #include <string>
 #include <chrono>
+#include <ctime>
 
 #ifdef _WIN32
     #include <intrin.h>
@@ -25,37 +24,25 @@ bool check_avx2() {
 #endif
 }
 
-std::expected<std::string, std::string> get_bot_status() {
-    bool avx2 = check_avx2();
-    if (!avx2) {
-        return std::unexpected("Critical: AVX2 is not supported on this CPU!");
-    }
-    return "Trade Bot Core is ready (C++23)";
-}
-
 int main() {
-    std::print("--- Trade Bot Hardcore Edition ---\n");
-    std::print("C++ Standard: 2023\n");
+    std::cout << "--- Trade Bot Hardcore Edition ---\n";
+    std::cout << "C++ Standard: 2023 (Target)\n";
     
     #ifdef _WIN32
-        std::print("Platform: Windows\n");
+        std::cout << "Platform: Windows\n";
     #else
-        std::print("Platform: Linux\n");
+        std::cout << "Platform: Linux\n";
     #endif
 
-    auto status = get_bot_status();
-    if (status) {
-        std::print("Status: {}\n", *status);
-        std::print("AVX2 Optimization: Enabled\n");
-    } else {
-        std::print("Status Error: {}\n", status.error());
-        return 1;
-    }
+    bool avx2 = check_avx2();
+    std::cout << "Status: Trade Bot Core is ready\n";
+    std::cout << "AVX2 Optimization: " << (avx2 ? "Enabled" : "Disabled") << "\n";
 
-    std::print("System Time: {:%Y-%m-%d %H:%M:%S}\n", 
-               std::chrono::system_clock::now());
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::cout << "System Time: " << std::ctime(&now_c);
     
-    std::print("----------------------------------\n");
+    std::cout << "----------------------------------\n";
     
     return 0;
 }
