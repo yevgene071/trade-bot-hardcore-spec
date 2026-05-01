@@ -125,7 +125,7 @@ Out of scope:
 - `bench/bench_orderbook_apply.cpp`: 100k random updates — p50 < 50 µs, p99 < 200 µs (см. SLO ARCH § 3.1)
 - CI gate: regression check — нарушение порога p99 на ±5% от main → fail
 
-**Out of scope: io_uring (опционально, отдельный T0-IOURING если потребуется).
+**Out of scope:** io_uring (опционально, отдельный T0-IOURING если потребуется).
 
 ---
 
