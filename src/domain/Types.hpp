@@ -143,4 +143,30 @@ struct BalanceUpdate {
     bool operator==(const BalanceUpdate&) const = default;
 };
 
+struct FinresEntry {
+    std::string currency;
+    double result;
+    double fee;
+    double funds;
+    double available;
+    double blocked;
+    
+    bool operator==(const FinresEntry&) const = default;
+};
+
+struct FinresUpdate {
+    int connection_id;
+    std::vector<FinresEntry> finreses;
+    
+    bool operator==(const FinresUpdate&) const = default;
+};
+
+struct SignalLevelTriggered {
+    Ticker ticker;
+    double price;
+    std::chrono::system_clock::time_point timestamp;
+    
+    bool operator==(const SignalLevelTriggered&) const = default;
+};
+
 } // namespace trade_bot

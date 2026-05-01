@@ -258,7 +258,7 @@ Out of scope:
 
 ---
 
-### T0-CODEC: Парсинг сообщений MetaScalp (JSON codec)
+### [COMPLETED] T0-CODEC: Парсинг сообщений MetaScalp (JSON codec)
 
 **Depends on:** T0-DOMAIN, T0-WS
 

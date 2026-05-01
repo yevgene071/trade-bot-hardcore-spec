@@ -52,6 +52,7 @@ add_executable(trade_bot
     src/transport/CurlHttpClient.cpp
     src/transport/MetaScalpDiscovery.cpp
     src/transport/BeastWsClient.cpp
+    src/transport/MetaScalpCodec.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -151,6 +152,15 @@ if(BUILD_TESTS)
     target_include_directories(ws_smoke_test PRIVATE src)
     target_link_libraries(ws_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json)
     add_test(NAME ws_smoke COMMAND ws_smoke_test)
+
+    add_executable(codec_test 
+        test/unit/codec_test.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(codec_test PRIVATE src)
+    target_link_libraries(codec_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json)
+    add_test(NAME codec COMMAND codec_test)
 
     # Benchmarks
     add_executable(bench_perf 
