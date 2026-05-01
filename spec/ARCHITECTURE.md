@@ -104,15 +104,17 @@
   - **Почему `absl::btree_map`:** cache-friendly B-tree layout, O(log N) с
     ~4× меньше cache-miss'ов чем `std::map` (red-black tree), стабильная
     производительность при 30+ тикеров × 1000 events/sec. Не `flat_map` —
-    частые insert/erase на середине вектора дороже B-tree. Бенчмарк в
-    T1-ORDERBOOK обязан подтвердить p99 apply_update < 200 µs.
+    частые insert/erase на середине вектора дороже B-tree.
+    *   **Важно:** Бенчмарк в T1-ORDERBOOK обязан подтвердить p99 apply_update < 200 µs **в условиях реальной нагрузки и джиттера**. Логарифмическая сложность операций `insert`/`erase` может стать узким местом при экстремально высокой частоте `orderbook_update`.
+
   - `apply_snapshot(OrderBookSnapshot)` — полная замена; ёмкость предзаложена `reserve(book_capacity_levels=128)`
   - `apply_update(OrderBookUpdate)` — branchless update path (`[[likely]]`
     на «обновить размер»), batched — параллельная обработка через `std::execution::par_unseq` для batch ≥ 8 уровней
   - `best_bid()`, `best_ask()`, `spread()`, `mid()` — **O(1) через cached
     top-of-book** (обновляется только при изменении первого уровня)
-  - `depth(N)` — сумма объёма в первых N уровнях; для N=10 SIMD-summa AVX2
-    (4× double / cycle на Skylake → 2.5 нс на depth(10))
+  - `depth(N)` — сумма объёма в первых N уровнях; для N=10 SIMD-summa AVX2.
+    *   **Примечание:** Заявленные 2.5 нс на `depth(10)` являются **оптимистичной оценкой**. Реальный прирост производительности от SIMD будет сильно зависеть от фактического расположения данных в памяти (`absl::btree_map` не гарантирует плотного размещения) и накладных расходов на подготовку данных для векторных инструкций. Требуется тщательное профилирование.
+
   - `volume_at_range(price_low, price_high)` — объём в диапазоне цен (B-tree range scan)
   - **Hot-path constraints** (см. § 10.1): zero allocations,
     `noexcept` на всех публичных методах, никаких `std::string` в горячих
@@ -132,7 +134,9 @@
   - **Welford's online algorithm** (§ 11.1) для `avg_print_size`, `stdev_print_size` — численно стабильный, O(1) на trade
   - **Hawkes process intensity** для `prints_per_sec`: `λ(t) = μ + Σ α·exp(-β(t-tᵢ))` — exponentially-decaying intensity. Бэйзлайн μ — из 30s окна; всплеск идентифицируется когда `λ(t) > k·μ` (для TapeBurst k=3, конфиг)
   - **CUSUM detector** (Page 1954) для `TapeFade` change-point: позитивная сторона CUSUM на `prints_per_sec - peak_rate * threshold` — раннее детектирование затухания на 200–500 мс быстрее наивного «сравнить current vs peak»
-  - SIMD-prefix-sum для cumulative volumes по окнам 1s/5s/30s (одним проходом всё окно)
+  - SIMD-prefix-sum для cumulative volumes по окнам 1s/5s/30s (одним проходом всё окно).
+    *   **Примечание:** Эффективность SIMD для `TradeStream` также требует верификации. Накладные расходы на подготовку данных и относительно небольшие размеры окон могут нивелировать преимущества векторных операций. Профилирование является ключевым.
+
   - все «volume» поля — fixed-point (`int64_t` cents) с **Kahan summation** (§ 11.2)
   - эвент-колбэки `on_trade(Trade)` для TapeAnalyzer
 
@@ -155,9 +159,11 @@
     над argmax: устойчивость к шумным наблюдениям, smooth tracking при
     дрифте лага во времени, явная uncertainty (`P` covariance) → используем
     как `confidence` для LeaderSignal.
+    *   **Примечание:** Точность фильтра Калмана критически зависит от качества входных данных и их синхронизации. Различные задержки и джиттер от MetaScalp для разных тикеров могут привести к зашумленным наблюдениям, снижая точность оценки лага.
   - **fallback** при недостатке данных (warmup < 60 sec) — argmax
     cross-correlation с шагом 100 мс (та же логика, что описана в § 6
     SIGNAL_DETECTION).
+
 
 ### 2.4. Feature Extractor (`src/features/`)
 

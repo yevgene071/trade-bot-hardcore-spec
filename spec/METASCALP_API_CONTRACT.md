@@ -79,10 +79,16 @@ Important constraints:
   blind second POST; it must enter `SubmitUnknown`, pause the ticker, and require
   recovery/operator ack. Retry is only safe when the HTTP layer proves the body
   was not sent.
+  *   **Компенсаторный механизм для `SubmitUnknown`:** В случае перехода в состояние `SubmitUnknown`, бот должен не просто "паузить тикер", а активировать специализированный механизм разрешения неопределенности. Это может включать:
+      1.  **Периодический опрос открытых ордеров:** `GET /api/connections/{ConnectionId}/orders?Ticker=...` с экспоненциальной задержкой.
+      2.  **Сравнение с локальным состоянием:** Если ордер найден, его `OrderId` должен быть сопоставлен с ожидаемым локальным `OrderId` (если таковой есть) или сгенерирован новым уникальным идентификатором для отслеживания.
+      3.  **Таймаут и ручное вмешательство:** Если ордер не найден в течение заданного таймаута (например, 30 секунд), инициировать алерт для оператора и перейти в режим "только чтение" для данного тикера, ожидая ручного разрешения.
+      4.  **Idempotency Key (если доступен):** Если MetaScalp API в будущем добавит поддержку `clientOrderId` или `Idempotency-Key` в заголовках, этот механизм должен быть приоритетным для обеспечения идемпотентности.
 - Server-side stop/TP support must be verified on demo before live: `Type`
   includes Stop/StopLoss/TakeProfit, but the request schema has no documented
   `TriggerPrice`. Do not assume how trigger price is encoded until a live
   contract test proves it.
+  *   **Важность T4-STOP-CONTRACT-TEST:** Этот тест является критическим блокером для выхода в live. Без подтверждения корректной работы стоп-ордеров на уровне API, бот не сможет эффективно управлять рисками, что может привести к значительным убыткам. Необходимо не только убедиться, что ордера принимаются, но и что их триггерные цены и логика исполнения соответствуют ожиданиям.
 
 ---
 
