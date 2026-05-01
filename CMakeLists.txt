@@ -53,6 +53,7 @@ add_executable(trade_bot
     src/transport/MetaScalpDiscovery.cpp
     src/transport/BeastWsClient.cpp
     src/transport/MetaScalpCodec.cpp
+    src/transport/MarketDataFeed.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -161,6 +162,27 @@ if(BUILD_TESTS)
     target_include_directories(codec_test PRIVATE src)
     target_link_libraries(codec_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json)
     add_test(NAME codec COMMAND codec_test)
+
+    add_executable(feed_test 
+        test/unit/feed_test.cpp
+        src/transport/MarketDataFeed.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(feed_test PRIVATE src)
+    target_link_libraries(feed_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    add_test(NAME feed COMMAND feed_test)
+
+    add_executable(feed_smoke_test 
+        test/integration/feed_smoke_test.cpp
+        src/transport/MarketDataFeed.cpp
+        src/transport/BeastWsClient.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(feed_smoke_test PRIVATE src)
+    target_link_libraries(feed_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json)
+    add_test(NAME feed_smoke COMMAND feed_smoke_test)
 
     # Benchmarks
     add_executable(bench_perf 

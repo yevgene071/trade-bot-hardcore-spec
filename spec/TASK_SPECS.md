@@ -282,7 +282,7 @@ Out of scope:
 
 ---
 
-### T0-FEED: MarketDataFeed (WS-обёртка)
+### [COMPLETED] T0-FEED: MarketDataFeed (WS-обёртка)
 
 **Depends on:** T0-CODEC
 

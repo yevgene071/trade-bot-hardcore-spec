@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## [Unreleased]
+- T0-FEED: Реализован MarketDataFeed для управления подписками и распределения событий маркет-даты и аккаунта.
 - T0-CODEC: Реализован JSON-кодек для парсинга сообщений MetaScalp API с поддержкой дуальных типов ордеров.
 - T0-WS: Реализован асинхронный WebSocket-клиент на базе Boost.Beast с поддержкой авто-реконнекта и heartbeats.
 - T0-DOMAIN: Описаны базовые доменные типы (Ticker, Side, Order, Position, Balance) для работы с MetaScalp API.

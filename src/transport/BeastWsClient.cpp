@@ -115,6 +115,8 @@ void BeastWsClient::on_handshake(beast::error_code ec) {
     m_reconnect_delay_s = 1;
     LOG_INFO("WS connected to {}", m_url);
 
+    if (m_on_connect) m_on_connect();
+
     schedule_ping();
     do_read();
     

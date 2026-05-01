@@ -31,6 +31,7 @@ public:
     void set_on_message(std::function<void(const nlohmann::json&)> callback) override { m_on_message = std::move(callback); }
     void set_on_close(std::function<void(int code, const std::string& reason)> callback) override { m_on_close = std::move(callback); }
     void set_on_error(std::function<void(const std::string& msg)> callback) override { m_on_error = std::move(callback); }
+    void set_on_connect(std::function<void()> callback) override { m_on_connect = std::move(callback); }
 
     bool is_connected() const override { return m_connected; }
 
@@ -74,6 +75,7 @@ private:
     std::function<void(const nlohmann::json&)> m_on_message;
     std::function<void(int code, const std::string& reason)> m_on_close;
     std::function<void(const std::string& msg)> m_on_error;
+    std::function<void()> m_on_connect;
 };
 
 } // namespace trade_bot
