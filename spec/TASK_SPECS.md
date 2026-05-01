@@ -209,7 +209,7 @@ Out of scope:
 
 ---
 
-### T0-WS: WebSocket-клиент
+### [COMPLETED] T0-WS: WebSocket-клиент
 
 **Depends on:** T0-HTTP
 

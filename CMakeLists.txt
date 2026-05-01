@@ -51,6 +51,7 @@ add_executable(trade_bot
     src/config/Config.cpp
     src/transport/CurlHttpClient.cpp
     src/transport/MetaScalpDiscovery.cpp
+    src/transport/BeastWsClient.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -132,6 +133,24 @@ if(BUILD_TESTS)
     target_include_directories(domain_test PRIVATE src)
     target_link_libraries(domain_test PRIVATE GTest::gtest GTest::gtest_main)
     add_test(NAME domain COMMAND domain_test)
+
+    add_executable(ws_test 
+        test/unit/ws_test.cpp
+        src/transport/BeastWsClient.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(ws_test PRIVATE src)
+    target_link_libraries(ws_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json)
+    add_test(NAME ws COMMAND ws_test)
+
+    add_executable(ws_smoke_test 
+        test/integration/ws_smoke_test.cpp
+        src/transport/BeastWsClient.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(ws_smoke_test PRIVATE src)
+    target_link_libraries(ws_smoke_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json)
+    add_test(NAME ws_smoke COMMAND ws_smoke_test)
 
     # Benchmarks
     add_executable(bench_perf 
