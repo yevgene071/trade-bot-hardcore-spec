@@ -145,7 +145,7 @@ Out of scope:
 
 ---
 
-### T0-CONFIG: Конфигурация
+### [COMPLETED] T0-CONFIG: Конфигурация
 
 **Depends on:** T0-LOG
 

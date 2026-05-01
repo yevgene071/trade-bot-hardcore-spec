@@ -1,0 +1,236 @@
+# Trade Bot Configuration Example
+# This file contains all configuration parameters with their defaults as described in:
+# - spec/SIGNAL_DETECTION.md
+# - spec/STRATEGIES.md
+# - spec/RISK_MANAGEMENT.md
+
+[app]
+version = "0.0.1"
+name = "trade_bot_hardcore"
+
+[logger]
+level = "info" # trace, debug, info, warn, error, critical
+path = "logs/trade_bot.log"
+
+[network]
+http_timeout_ms = 5000
+ws_reconnect_delay_ms = 1000
+ws_max_reconnect_delay_ms = 30000
+metascalp_max_rps = 20
+
+[trading]
+symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+max_concurrent_orders = 5
+
+[risk]
+# R2: Daily limit (morj)
+max_daily_loss_pct = 3.0
+# R8: sizing
+max_per_trade_risk_pct = 0.5
+# R14: hard kill
+max_single_position_loss_pct = 1.5
+# R15: slippage control
+max_entry_slippage_bps = 5
+# R8: clip on volume
+max_position_value_pct = 10.0
+# R3: parallel trades
+max_concurrent_positions = 3
+# R9: leverage
+max_leverage = 5.0
+margin_safety_ratio = 0.8
+# R6: Stop validation
+min_stop_bps = 3
+warn_stop_bps = 15
+max_stop_bps = 20
+# R7: TP validation
+min_rr_ratio = 1.0
+min_tp2_rr = 2.0
+# R10: anti-tilt
+max_trades_per_window = 6
+trades_window_min = 5
+# R11: loss-streak
+max_consecutive_losses = 3
+loss_streak_window_min = 15
+loss_streak_cooloff_min = 10
+# R12: news blackout
+news_blackout_min = 5
+news_calendar_check_min = 60
+news_calendar_require_fresh = false
+# R13: funding blackout
+funding_blackout_pre_sec = 30
+funding_blackout_post_sec = 30
+# Other
+allow_hedge = false
+whitelist_tickers = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+exchange_error_streak = 5
+max_clock_drift_ms = 500
+ws_reconnect_timeout_sec = 15
+ws_loss_poll_interval_ms = 500
+position_drift_coin = 0.0001
+kill_switch_close_positions = true
+kill_switch_close_timeout_sec = 30
+kill_switch_step_timeout_sec = 5
+kill_switch_total_timeout_sec = 45
+max_parallel_cancel = 5
+ws_loss_soft_stop_bps = 25
+connection_health_poll_sec = 30
+finres_staleness_sec = 60
+finres_staleness_kill_sec = 300
+finres_kill_on_staleness = false
+
+[external_feeds]
+[external_feeds.funding]
+staleness_warn_sec = 120
+staleness_kill_sec = 900
+kill_on_staleness = false
+
+[signals]
+[signals.density]
+min_size_vs_avg = 10.0
+min_size_usd = 50000.0
+min_distance_bps = 5
+max_distance_bps = 150
+sticky_duration_ms = 2000
+fake_threshold_ms = 300
+sticky_min_trade_ms = 5000
+eating_window_ms = 3000
+eating_ratio_threshold = 0.5
+eating_min_prints = 5
+eating_cooloff_ms = 1000
+
+[signals.iceberg]
+evidence_count_min = 3
+evidence_window_sec = 30
+iceberg_min_size_usd = 100000.0
+size_retention_ratio = 0.5
+iceberg_posterior_threshold = 0.8
+event_join_window_ms = 100
+
+[signals.tape]
+burst_ratio = 3.0
+burst_min_volume_usd = 50000.0
+burst_min_rate = 5.0
+fade_ratio = 0.2
+fade_min_peak_rate = 10.0
+fade_max_delay = 30.0
+fade_cusum_h = 5.0
+flush_min_size_usd = 200000.0
+flush_min_move_bps = 15
+back_window_sec = 10
+distribution_max_range_bps = 20
+distribution_min_volume_usd = 500000.0
+distribution_min_spread_bps = 2.0
+
+[signals.tape.hawkes]
+alpha = 1.0
+half_life_sec = 2.0
+
+[signals.level]
+lookback_min = 60
+min_reversal_bps = 15
+cluster_tolerance_bps = 10
+touches_min = 2
+level_min_age_sec = 300
+cluster_snapshot_timeframes = ["M15", "H1"]
+cluster_min_volume_pct = 0.05
+approach_trigger_bps = 10
+rejection_distance_bps = 20
+break_distance_bps = 25
+break_min_volume_usd = 30000.0
+cluster_kde_smoothness = 1.0
+
+[signals.approach]
+impulse_min_distance_bps = 30
+impulse_max_pullbacks = 1
+impulse_min_speed = 0.8
+slow_min_distance_bps = 30
+slow_min_pullbacks = 3
+slow_min_duration = 120
+consolidation_range_bps = 10
+consolidation_min_volume_usd = 100000.0
+pullback_min_bps = 5
+
+[signals.leader]
+leader_min_correlation = 0.6
+leader_move_min_pct = 0.3
+leader_lag_min_pct = 0.15
+lag_max_age_ms = 3000
+
+[strategies]
+[strategies.common]
+max_spread_bps = 3
+max_vol_bps = 50
+entry_timeout_sec = 10
+move_stop_to_breakeven_after_tp1 = true
+
+[strategies.bounce]
+tp1_size_ratio = 0.5
+no_progress_timeout_sec = 120
+entry_offset_bps = 3
+stop_buffer_bps = 5
+stop_anchor_max_bps = 15
+affinity_threshold = 0.6
+affinity_stable_min = 5
+
+[strategies.breakout]
+tp1_size_ratio = 0.5
+no_progress_timeout_sec = 60
+aggressive_offset_bps = 2
+post_entry_grace_sec = 5
+min_follow_through_bps = 10
+affinity_threshold = 0.55
+affinity_stable_min = 5
+
+[strategies.leaderlag]
+tp1_size_ratio = 0.6
+no_progress_timeout_sec = 15
+stop_distance_bps = 8
+affinity_threshold = 0.5
+affinity_stable_min = 5
+
+[strategies.flush]
+tp1_size_ratio = 0.7
+no_progress_timeout_sec = 90
+flush_window_sec = 120
+affinity_threshold = 0.4
+affinity_stable_min = 5
+
+[universe]
+[universe.affinity]
+# Settings for TickerUniverse
+affinity_stable_min = 5
+require_7d_history = false
+
+[universe.affinity.bounce]
+min_volume_24h_usd = 100000000.0
+max_avg_spread_bps = 3.0
+require_low_news_density = true
+min_density_events_per_hour = 4
+min_levels_in_60min = 3
+min_bounce_success_rate_7d = 0.40
+
+[universe.affinity.breakout]
+min_volume_24h_usd = 100000000.0
+max_avg_spread_bps = 4.0
+min_volatility_1min_bps = 8.0
+min_density_events_per_hour = 3
+min_eating_events_per_hour = 1
+min_follow_through_rate_7d = 0.35
+min_breakout_events_per_day = 5
+
+[universe.affinity.leaderlag]
+require_leader = "BTCUSDT"
+exclude_self_for_leader = true
+min_correlation_60s = 0.6
+min_volume_24h_usd = 50000000.0
+max_avg_spread_bps = 3.0
+min_leader_lag_events_per_hour = 2
+avg_catchup_completion_rate_7d = 0.50
+leader_lag_consistency_7d = 0.40
+
+[universe.affinity.flush]
+min_volume_24h_usd = 50000000.0
+max_avg_spread_bps = 6.0
+min_flush_events_per_day = 3
+flush_return_rate_7d = 0.60
+liquidation_availability = true

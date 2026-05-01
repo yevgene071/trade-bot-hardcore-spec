@@ -1,13 +1,27 @@
 #include "logger/Logger.hpp"
+#include "config/Config.hpp"
+#include <iostream>
+#include <filesystem>
 
 int main() {
-    trade_bot::Logger::init();
+    try {
+        trade_bot::Logger::init();
+        
+        if (!std::filesystem::exists("config.toml")) {
+            LOG_CRITICAL("Config 'config.toml' not found; copy from config/config.example.toml");
+            return 2;
+        }
+        
+        trade_bot::Config::load("config.toml");
 
-    LOG_INFO("trade_bot v0.0.1 starting...");
-    LOG_DEBUG("Debug logging enabled");
-    LOG_TRACE("Trace logging enabled (very verbose)");
-    LOG_WARN("This is a warning example");
-    LOG_ERROR("This is an error example with status: {}", 404);
+        LOG_INFO("trade_bot {} starting...", trade_bot::Config::get<std::string>("app.version"));
+        
+        // ... rest of the bot initialization
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Fatal error during startup: " << e.what() << std::endl;
+        return 1;
+    }
 
     return 0;
 }

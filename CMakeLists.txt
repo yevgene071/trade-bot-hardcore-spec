@@ -36,6 +36,7 @@ find_package(xsimd REQUIRED CONFIG)
 find_package(concurrentqueue REQUIRED CONFIG)
 find_package(benchmark REQUIRED CONFIG)
 find_package(Boost REQUIRED CONFIG)
+find_package(tomlplusplus REQUIRED CONFIG)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
@@ -45,9 +46,10 @@ add_executable(trade_bot
     src/logger/Logger.cpp
     src/perf/CpuPinning.cpp
     src/perf/SimdOps.cpp
+    src/config/Config.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
-target_link_libraries(trade_bot PRIVATE spdlog::spdlog xsimd hdr_histogram::hdr_histogram_static boost::boost concurrentqueue::concurrentqueue)
+target_link_libraries(trade_bot PRIVATE spdlog::spdlog xsimd hdr_histogram::hdr_histogram_static boost::boost concurrentqueue::concurrentqueue tomlplusplus::tomlplusplus)
 
 # Tests
 if(BUILD_TESTS)
@@ -82,6 +84,15 @@ if(BUILD_TESTS)
     target_include_directories(perf_test PRIVATE src)
     target_link_libraries(perf_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog xsimd boost::boost concurrentqueue::concurrentqueue)
     add_test(NAME perf COMMAND perf_test)
+
+    add_executable(config_test 
+        test/unit/config_test.cpp
+        src/config/Config.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(config_test PRIVATE src)
+    target_link_libraries(config_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog tomlplusplus::tomlplusplus)
+    add_test(NAME config COMMAND config_test)
 
     # Benchmarks
     add_executable(bench_perf 
