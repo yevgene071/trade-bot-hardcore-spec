@@ -25,9 +25,32 @@ void MarketDataFeed::add_listener(IMarketDataListener* listener) {
     m_listeners.push_back(listener);
 }
 
+void MarketDataFeed::add_listener(const Ticker& ticker, IMarketDataListener* listener) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_ticker_listeners[ticker].push_back(listener);
+}
+
 void MarketDataFeed::remove_listener(IMarketDataListener* listener) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_listeners.erase(std::remove(m_listeners.begin(), m_listeners.end(), listener), m_listeners.end());
+    for (auto it = m_ticker_listeners.begin(); it != m_ticker_listeners.end(); ) {
+        it->second.erase(std::remove(it->second.begin(), it->second.end(), listener), it->second.end());
+        if (it->second.empty()) {
+            it = m_ticker_listeners.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void MarketDataFeed::remove_listener(const Ticker& ticker, IMarketDataListener* listener) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (auto it = m_ticker_listeners.find(ticker); it != m_ticker_listeners.end()) {
+        it->second.erase(std::remove(it->second.begin(), it->second.end(), listener), it->second.end());
+        if (it->second.empty()) {
+            m_ticker_listeners.erase(it);
+        }
+    }
 }
 
 void MarketDataFeed::subscribe_ticker(const Ticker& ticker) {
@@ -103,6 +126,22 @@ void MarketDataFeed::resubscribe_all() {
     }
 }
 
+std::vector<IMarketDataListener*> MarketDataFeed::get_target_listeners(const Ticker& ticker) {
+    std::vector<IMarketDataListener*> targets;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    targets = m_listeners;
+    if (!ticker.empty()) {
+        if (auto it = m_ticker_listeners.find(ticker); it != m_ticker_listeners.end()) {
+            for (auto* l : it->second) {
+                if (std::find(targets.begin(), targets.end(), l) == targets.end()) {
+                    targets.push_back(l);
+                }
+            }
+        }
+    }
+    return targets;
+}
+
 void MarketDataFeed::handle_message(const nlohmann::json& j) {
     if (!j.contains("Type")) return;
 
@@ -110,35 +149,46 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
     nlohmann::json data = j.value("Data", nlohmann::json::object());
 
     try {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        
         if (type == "trade_update") {
             auto trades = MetaScalpCodec::parse_trade_update(data);
             Ticker ticker = data.value("Ticker", "");
-            for (const auto& t : trades) {
-                for (auto* l : m_listeners) l->on_trade(ticker, t);
-            }
+            auto targets = get_target_listeners(ticker);
+            for (auto* l : targets) l->on_trades(ticker, trades);
         } else if (type == "orderbook_snapshot") {
             Ticker ticker = data.value("Ticker", "");
             auto snap = MetaScalpCodec::parse_orderbook_snapshot(data, ticker);
-            for (auto* l : m_listeners) l->on_orderbook_snapshot(snap);
+            auto targets = get_target_listeners(ticker);
+            for (auto* l : targets) l->on_orderbook_snapshot(snap);
         } else if (type == "orderbook_update") {
             Ticker ticker = data.value("Ticker", "");
             auto upd = MetaScalpCodec::parse_orderbook_update(data, ticker);
-            for (auto* l : m_listeners) l->on_orderbook_update(upd);
+            auto targets = get_target_listeners(ticker);
+            for (auto* l : targets) l->on_orderbook_update(upd);
         } else if (type == "order_update") {
             auto upd = MetaScalpCodec::parse_order_update(data);
-            for (auto* l : m_listeners) l->on_order_update(upd);
+            auto targets = get_target_listeners(upd.ticker);
+            for (auto* l : targets) l->on_order_update(upd);
         } else if (type == "position_update") {
             auto upd = MetaScalpCodec::parse_position_update(data);
-            for (auto* l : m_listeners) l->on_position_update(upd);
+            auto targets = get_target_listeners(upd.ticker);
+            for (auto* l : targets) l->on_position_update(upd);
         } else if (type == "balance_update") {
             auto upd = MetaScalpCodec::parse_balance_update(data);
-            for (auto* l : m_listeners) l->on_balance_update(upd);
+            std::vector<IMarketDataListener*> targets;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                targets = m_listeners;
+            }
+            for (auto* l : targets) l->on_balance_update(upd);
         } else if (type == "error") {
             std::string msg = data.value("Message", "Unknown error");
             LOG_ERROR("WS API error: {}", msg);
-            for (auto* l : m_listeners) l->on_error(msg);
+            std::vector<IMarketDataListener*> targets;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                targets = m_listeners;
+            }
+            for (auto* l : targets) l->on_error(msg);
         }
     } catch (const std::exception& e) {
         LOG_ERROR("Error handling WS message {}: {}", type, e.what());

@@ -7,6 +7,7 @@
 #include <string>
 #include <set>
 #include <mutex>
+#include <unordered_map>
 
 namespace trade_bot {
 
@@ -14,6 +15,9 @@ class IMarketDataListener {
 public:
     virtual ~IMarketDataListener() = default;
     virtual void on_trade(const Ticker& ticker, const Trade& trade) = 0;
+    virtual void on_trades(const Ticker& ticker, const std::vector<Trade>& trades) {
+        for (const auto& t : trades) on_trade(ticker, t);
+    }
     virtual void on_orderbook_snapshot(const OrderBookSnapshot& snapshot) = 0;
     virtual void on_orderbook_update(const OrderBookUpdate& update) = 0;
     virtual void on_order_update(const OrderUpdate& update) = 0;
@@ -27,7 +31,9 @@ public:
     MarketDataFeed(std::shared_ptr<IWsClient> ws_client, int connection_id);
     
     void add_listener(IMarketDataListener* listener);
+    void add_listener(const Ticker& ticker, IMarketDataListener* listener);
     void remove_listener(IMarketDataListener* listener);
+    void remove_listener(const Ticker& ticker, IMarketDataListener* listener);
 
     void subscribe_ticker(const Ticker& ticker);
     void unsubscribe_ticker(const Ticker& ticker);
@@ -38,12 +44,14 @@ public:
 private:
     void handle_message(const nlohmann::json& j);
     void resubscribe_all();
+    std::vector<IMarketDataListener*> get_target_listeners(const Ticker& ticker);
     
     std::shared_ptr<IWsClient> m_ws_client;
     int m_connection_id;
     
     std::set<Ticker> m_subscribed_tickers;
     std::vector<IMarketDataListener*> m_listeners;
+    std::unordered_map<Ticker, std::vector<IMarketDataListener*>> m_ticker_listeners;
     std::mutex m_mutex;
     
     bool m_active = false;
