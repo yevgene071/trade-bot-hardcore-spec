@@ -1,4 +1,5 @@
 #include "logger/Logger.hpp"
+#include "logger/TradeJournal.hpp"
 #include "config/Config.hpp"
 #include "control/KillSwitch.hpp"
 #include "control/ClockDriftMonitor.hpp"
@@ -15,6 +16,7 @@
 #include "strategy/BounceFromDensity.hpp"
 #include "strategy/BreakoutEatThrough.hpp"
 #include "strategy/LeaderLag.hpp"
+#include "executor/PaperExecutor.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -29,6 +31,7 @@ using namespace trade_bot;
 int main() {
     try {
         Logger::init();
+        TradeJournal journal;
 
         if (std::filesystem::exists("./killswitch")) {
             std::cerr << "Kill-switch file present, remove it to run" << std::endl;
@@ -49,10 +52,6 @@ int main() {
         // T0-CLOCK
         auto ntp = std::make_shared<SntpClient>();
         ClockDriftMonitor clock_monitor(ntp, ClockDriftMonitor::Config{});
-        clock_monitor.set_kill_switch([](const std::string& reason) {
-            LOG_ERROR("ClockDriftMonitor escalating to kill-switch: {}", reason);
-            KillSwitch::instance().trigger(KillReason::ClockDrift);
-        });
         clock_monitor.start();
 
         // T3-INTEGRATION
@@ -60,18 +59,12 @@ int main() {
         TickerUniverse universe;
         StrategyEngine strategy_engine(signal_bus);
         
-        strategy_engine.set_on_plan([](const TradePlan& plan) {
-            LOG_INFO("Generated TRADE PLAN: {} {} at {} (Reason: {})", 
-                     plan.strategy_name, plan.ticker, plan.entry_price, plan.reason);
-        });
-
         // Transport
         boost::asio::io_context ioc;
         auto http = std::make_shared<CurlHttpClient>();
         auto ws = std::make_shared<BeastWsClient>(ioc);
-        MarketDataFeed feed(ws, 1); // connection_id=1
+        MarketDataFeed feed(ws, 1);
         
-        // T1-CLUSTER
         ClusterSnapshotClient cluster_client(*http, "http://localhost", 1);
         ClusterSnapshotManager cluster_mgr(cluster_client);
         cluster_mgr.start();
@@ -79,10 +72,21 @@ int main() {
         // Per-ticker controllers
         std::map<Ticker, std::unique_ptr<TickerController>> controllers;
         
+        // Books map for executor
+        std::map<Ticker, const OrderBook*> books_for_executor;
+
+        // Paper Executor
+        PaperExecutor executor(books_for_executor);
+        
+        strategy_engine.set_on_plan([&executor](const TradePlan& plan) {
+            executor.submit(plan);
+        });
+
         universe.set_affinity_change_handler([&](const Ticker& ticker, const std::string& strategy, bool enabled) {
             if (enabled) {
                 if (!controllers.contains(ticker)) {
                     controllers[ticker] = std::make_unique<TickerController>(ticker, signal_bus, universe, cluster_mgr);
+                    books_for_executor[ticker] = controllers[ticker]->book.get();
                     feed.subscribe_ticker(ticker);
                 }
                 
@@ -100,11 +104,9 @@ int main() {
         universe.register_strategy("bounce", [](const Ticker&){ return true; });
         universe.register_strategy("breakout", [](const Ticker&){ return true; });
 
-        // Feed listeners
         struct MDListener : public IMarketDataListener {
             std::map<Ticker, std::unique_ptr<TickerController>>& ctrls;
             explicit MDListener(std::map<Ticker, std::unique_ptr<TickerController>>& c) : ctrls(c) {}
-            
             void on_trade(const Ticker& ticker, const Trade& t) override { if (ctrls.contains(ticker)) ctrls[ticker]->on_trade(t); }
             void on_orderbook_snapshot(const OrderBookSnapshot& s) override { if (ctrls.contains(s.ticker)) ctrls[s.ticker]->book->apply_snapshot(s); }
             void on_orderbook_update(const OrderBookUpdate& u) override { if (ctrls.contains(u.ticker)) ctrls[u.ticker]->on_book_update(u); }
@@ -120,9 +122,8 @@ int main() {
 
         LOG_INFO("System wired, starting main loop...");
 
-        // Main loop (10Hz)
         while (!kill_switch.is_triggered()) {
-            ioc.poll(); // process some network events if any
+            ioc.poll();
             auto now = std::chrono::system_clock::now();
             
             for (auto& [ticker, ctrl] : controllers) {
@@ -131,6 +132,8 @@ int main() {
             }
             
             strategy_engine.tick(now);
+            executor.tick(now);
+
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 

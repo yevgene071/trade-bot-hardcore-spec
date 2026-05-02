@@ -96,6 +96,8 @@ add_executable(trade_bot
     src/strategy/BounceFromDensity.cpp
     src/strategy/BreakoutEatThrough.cpp
     src/strategy/LeaderLag.cpp
+    src/executor/PaperExecutor.cpp
+    src/logger/TradeJournal.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
