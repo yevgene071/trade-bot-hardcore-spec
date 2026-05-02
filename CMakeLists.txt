@@ -67,6 +67,8 @@ add_executable(trade_bot
     src/transport/OrderGateway.cpp
     src/transport/ReplayFeed.cpp
     src/trading/OrderReconciliator.cpp
+    src/control/KillSwitch.cpp
+    src/control/ClockDriftMonitor.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -274,6 +276,32 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json
         boost::boost)
     add_test(NAME replay COMMAND replay_test)
+
+    # T0-KILLSWITCH
+    add_executable(killswitch_test
+        test/unit/killswitch_test.cpp
+        src/control/KillSwitch.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(killswitch_test PRIVATE src)
+    target_link_libraries(killswitch_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog)
+    add_test(NAME killswitch COMMAND killswitch_test)
+
+    # T0-CLOCK
+    add_executable(clock_drift_monitor_test
+        test/unit/clock_drift_monitor_test.cpp
+        src/control/ClockDriftMonitor.cpp
+        src/control/KillSwitch.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(clock_drift_monitor_test PRIVATE src)
+    target_link_libraries(clock_drift_monitor_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        boost::boost)
+    add_test(NAME clock_drift_monitor COMMAND clock_drift_monitor_test)
 
     # Benchmarks
     add_executable(bench_perf 

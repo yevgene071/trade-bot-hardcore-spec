@@ -20,6 +20,9 @@ Thumbs.db
 /logs/
 *.log
 
+# Trading
+/killswitch
+
 # Local agent tooling state
 .claude/
 .claude-flow/
