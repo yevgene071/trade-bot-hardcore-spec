@@ -106,6 +106,22 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
 
     double h = Kde::silverman_bandwidth(kde_points) * cfg_.kde_smoothness;
 
+    // ---- Pass 1: per-cluster centroid + raw KDE density. ----
+    // We collect raw kde_val for every cluster first so we can normalize the
+    // resulting kde_score against the maximum density observed THIS rebuild.
+    // Replaces the previous magic constant (kde_val * 100.0), which produced
+    // either always-saturated or always-near-zero scores depending on the
+    // ticker's absolute volume scale.  Fixes #117.
+    struct Pending {
+        double                                centroid;
+        std::size_t                           cluster_size;
+        double                                kde_val;
+        std::chrono::system_clock::time_point last_ts;
+    };
+    std::vector<Pending> pending;
+    pending.reserve(clusters.size());
+    double max_kde = 0.0;
+
     for (const auto& c : clusters) {
         double sum = 0;
         for (double p : c) sum += p;
@@ -124,21 +140,30 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
             }
         }
 
-        double age_min = std::chrono::duration_cast<std::chrono::minutes>(now - last_ts).count();
-        double recency_score = std::exp(-age_min / 60.0);
-        double touches_score = std::min(1.0, static_cast<double>(c.size()) / 5.0);
-        double kde_score = std::min(1.0, kde_val * 100.0); 
+        if (kde_val > max_kde) max_kde = kde_val;
+        pending.push_back({centroid, c.size(), kde_val, last_ts});
+    }
 
-        double confidence = 0.4 * touches_score + 0.4 * kde_score + 0.2 * recency_score;
+    // ---- Pass 2: build Level entries with normalized kde_score. ----
+    for (const auto& p : pending) {
+        const double age_min = std::chrono::duration_cast<std::chrono::minutes>(
+            now - p.last_ts).count();
+        const double recency_score = std::exp(-age_min / 60.0);
+        const double touches_score = std::min(
+            1.0, static_cast<double>(p.cluster_size) / 5.0);
+        const double kde_score = max_kde > 0.0 ? (p.kde_val / max_kde) : 0.0;
+
+        const double confidence =
+            0.4 * touches_score + 0.4 * kde_score + 0.2 * recency_score;
 
         new_levels.push_back(Level{
-            .price = centroid,
-            .touches = static_cast<int>(c.size()),
-            .kde_score = kde_score,
-            .last_touch = last_ts,
-            .created_at = now,
-            .source = "extreme",
-            .confidence = confidence
+            .price       = p.centroid,
+            .touches     = static_cast<int>(p.cluster_size),
+            .kde_score   = kde_score,
+            .last_touch  = p.last_ts,
+            .created_at  = now,
+            .source      = "extreme",
+            .confidence  = confidence
         });
     }
 

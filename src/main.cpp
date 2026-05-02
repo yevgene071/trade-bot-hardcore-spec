@@ -82,12 +82,10 @@ int main() {
         DashboardServer dashboard(ioc, "0.0.0.0", 8080);
         dashboard.start();
 
-        uint16_t metrics_port = Config::get<uint16_t>("metrics.port", 9090);
+        const auto metrics_port = static_cast<uint16_t>(
+            Config::get_or<int64_t>("metrics.port", 9090));
         MetricsExporter metrics_exporter(ioc, "0.0.0.0", metrics_port);
         metrics_exporter.start();
-
-        std::string alert_url = Config::get<std::string>("metrics.alert_webhook_url", "");
-        AlertWebhook alerts(http, alert_url);
 
         auto signal_to_string = [](SignalKind k) {
             switch(k) {
@@ -142,16 +140,17 @@ int main() {
         auto http = std::make_shared<CurlHttpClient>();
         auto ws = std::make_shared<BeastWsClient>(ioc);
 
-        std::string alert_url = Config::get<std::string>("metrics.alert_webhook_url", "");
+        const std::string alert_url =
+            Config::get_or<std::string>("metrics.alert_webhook_url", std::string{});
         auto alerts = std::make_shared<AlertWebhook>(http, alert_url);
-        
+
         ws->set_on_error([alerts](const std::string& msg) {
             alerts->send_alert("WebSocket error: " + msg);
         });
-
-        kill_switch.set_on_trigger([alerts]() {
-            alerts->send_alert("KILL-SWITCH TRIGGERED! Stopping all trading.");
-        });
+        // KillSwitch has no on_trigger callback by design — the watchdog logs
+        // CRITICAL on trigger() and the kill-file on disk is the authoritative
+        // signal. Operator-side paging happens via the metrics exporter
+        // surfacing `trade_bot_killswitch_triggered`.
         
         MetaScalpDiscovery discovery(http);
         auto port = discovery.discover();

@@ -196,18 +196,20 @@ if(BUILD_TESTS)
     target_link_libraries(domain_test PRIVATE GTest::gtest GTest::gtest_main)
     add_test(NAME domain COMMAND domain_test)
 
-    add_executable(ws_test 
+    add_executable(ws_test
         test/unit/ws_test.cpp
         src/transport/BeastWsClient.cpp
+        src/metrics/MetricsRegistry.cpp
         src/logger/Logger.cpp
     )
     target_include_directories(ws_test PRIVATE src)
     target_link_libraries(ws_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
     add_test(NAME ws COMMAND ws_test)
 
-    add_executable(ws_smoke_test 
+    add_executable(ws_smoke_test
         test/integration/ws_smoke_test.cpp
         src/transport/BeastWsClient.cpp
+        src/metrics/MetricsRegistry.cpp
         src/logger/Logger.cpp
     )
     target_include_directories(ws_smoke_test PRIVATE src)
@@ -233,11 +235,12 @@ if(BUILD_TESTS)
     target_link_libraries(feed_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
     add_test(NAME feed COMMAND feed_test)
 
-    add_executable(feed_smoke_test 
+    add_executable(feed_smoke_test
         test/integration/feed_smoke_test.cpp
         src/transport/MarketDataFeed.cpp
         src/transport/BeastWsClient.cpp
         src/transport/MetaScalpCodec.cpp
+        src/metrics/MetricsRegistry.cpp
         src/logger/Logger.cpp
     )
     target_include_directories(feed_smoke_test PRIVATE src)
@@ -279,6 +282,7 @@ if(BUILD_TESTS)
         src/transport/BeastWsClient.cpp
         src/transport/CurlHttpClient.cpp
         src/transport/MetaScalpDiscovery.cpp
+        src/metrics/MetricsRegistry.cpp
         src/logger/Logger.cpp
     )
     target_include_directories(timestamp_jitter_test PRIVATE src)
@@ -418,6 +422,7 @@ if(BUILD_TESTS)
         src/transport/MetaScalpCodec.cpp
         src/universe/TickerUniverse.cpp
         src/universe/UniverseFilters.cpp
+        src/metrics/MetricsRegistry.cpp
         src/logger/Logger.cpp
     )
     target_include_directories(notification_routing_test PRIVATE src)
@@ -794,6 +799,7 @@ if(BUILD_TESTS)
         src/transport/OrderGateway.cpp
         src/transport/MarketDataFeed.cpp
         src/transport/MetaScalpCodec.cpp
+        src/metrics/MetricsRegistry.cpp
         src/logger/Logger.cpp
     )
     target_include_directories(executor_state_machine_test PRIVATE src)
@@ -808,6 +814,7 @@ if(BUILD_TESTS)
         src/transport/CurlHttpClient.cpp
         src/transport/MarketDataFeed.cpp
         src/transport/BeastWsClient.cpp
+        src/metrics/MetricsRegistry.cpp
         src/logger/Logger.cpp
     )
     target_include_directories(stop_contract_test PRIVATE src)
