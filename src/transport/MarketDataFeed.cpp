@@ -180,6 +180,14 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
                 targets = m_listeners;
             }
             for (auto* l : targets) l->on_balance_update(upd);
+        } else if (type == "finres_update") {
+            auto upd = MetaScalpCodec::parse_finres_update(data);
+            std::vector<IMarketDataListener*> targets;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                targets = m_listeners;
+            }
+            for (auto* l : targets) l->on_finres_update(upd);
         } else if (type == "error") {
             std::string msg = data.value("Message", "Unknown error");
             LOG_ERROR("WS API error: {}", msg);

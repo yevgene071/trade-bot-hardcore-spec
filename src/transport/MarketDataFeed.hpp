@@ -23,6 +23,7 @@ public:
     virtual void on_order_update(const OrderUpdate& update) = 0;
     virtual void on_position_update(const PositionUpdate& update) = 0;
     virtual void on_balance_update(const BalanceUpdate& update) = 0;
+    virtual void on_finres_update(const FinresUpdate& update) = 0;
     virtual void on_error(const std::string& msg) = 0;
 };
 

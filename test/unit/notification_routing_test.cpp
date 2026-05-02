@@ -41,6 +41,11 @@ TEST_F(NotificationRoutingTest, RoutesBigTickToUniverse) {
     
     feed.start();
     
+    auto now_ts = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now_ts);
+    std::stringstream ss;
+    ss << std::put_time(std::gmtime(&in_time_t), "%Y-%m-%dT%H:%M:%S.000");
+
     // Simulate BigTick notification
     nlohmann::json msg = {
         {"Type", "notification_update"},
@@ -51,7 +56,7 @@ TEST_F(NotificationRoutingTest, RoutesBigTickToUniverse) {
             {"Ticker", "BTCUSDT"},
             {"Price", 50000.0},
             {"Size", 1.0},
-            {"Date", "2026-05-02T19:00:00.000"}
+            {"Date", ss.str()}
         }}
     };
     

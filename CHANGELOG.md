@@ -1,6 +1,10 @@
 # CHANGELOG
 
 ## [Unreleased]
+- T4-FINRES: Реализована обработка finres_update для точного отслеживания реализованного PnL дня.
+- T4-FUNDING: Реализован клиент для Binance Futures Funding Rate и интеграция правила R13 (funding blackout) в RiskManager.
+- T4-EXTERNAL: Реализован фреймворк для внешних фидов (ExternalFeedRegistry) и мониторинг их актуальности.
+- T4-RISK: Реализован RiskManager с поддержкой 13 правил (R1-R13), сохранением состояния и UTC-ресетом.
 - T3-INTEGRATION: Выполнена полная сборка системы в main.cpp, включая StrategyEngine и контроллеры тикеров.
 - T3-SIGLEVEL: Реализована интеграция с серверными уровнями MetaScalp с LRU-вытеснением.
 - T3-LEADERLAG: Реализована стратегия LeaderLag.

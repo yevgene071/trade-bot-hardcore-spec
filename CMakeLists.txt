@@ -68,11 +68,14 @@ add_executable(trade_bot
     src/transport/MarketDataFeed.cpp
     src/transport/OrderGateway.cpp
     src/transport/ReplayFeed.cpp
+    src/transport/FinresHandler.cpp
     src/trading/OrderReconciliator.cpp
     src/control/KillSwitch.cpp
     src/control/ClockDriftMonitor.cpp
     src/control/SntpClient.cpp
     src/risk/NewsCalendar.cpp
+    src/risk/RiskManager.cpp
+    src/risk/AccountStatePersister.cpp
     src/marketdata/OrderBook.cpp
     src/marketdata/KalmanLagEstimator.cpp
     src/marketdata/LeaderTracker.cpp
@@ -98,6 +101,7 @@ add_executable(trade_bot
     src/strategy/LeaderLag.cpp
     src/executor/PaperExecutor.cpp
     src/logger/TradeJournal.cpp
+    src/transport/external/BinanceFundingClient.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -687,6 +691,64 @@ if(BUILD_TESTS)
         xsimd
         nlohmann_json::nlohmann_json)
     add_test(NAME signal_level_bridge COMMAND signal_level_bridge_test)
+
+    add_executable(risk_manager_test
+        test/unit/risk_manager_test.cpp
+        src/risk/RiskManager.cpp
+        src/risk/NewsCalendar.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(risk_manager_test PRIVATE src)
+    target_link_libraries(risk_manager_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json
+        nlohmann_json_schema_validator)
+    add_test(NAME risk_manager COMMAND risk_manager_test)
+
+    add_executable(r13_funding_test
+        test/unit/r13_funding_test.cpp
+        src/risk/RiskManager.cpp
+        src/risk/NewsCalendar.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(r13_funding_test PRIVATE src)
+    target_link_libraries(r13_funding_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator)
+    add_test(NAME r13_funding COMMAND r13_funding_test)
+
+    add_executable(trading_day_reset_test
+        test/unit/trading_day_reset_idempotent_test.cpp
+        src/risk/AccountStatePersister.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(trading_day_reset_test PRIVATE src)
+    target_link_libraries(trading_day_reset_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json)
+    add_test(NAME trading_day_reset COMMAND trading_day_reset_test)
+
+    add_executable(risk_flow_test
+        test/integration/risk_flow_test.cpp
+        src/risk/RiskManager.cpp
+        src/risk/NewsCalendar.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(risk_flow_test PRIVATE src)
+    target_link_libraries(risk_flow_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator)
+    add_test(NAME risk_flow COMMAND risk_flow_test)
+
+    add_executable(state_persistence_test
+        test/integration/state_persistence_test.cpp
+        src/risk/AccountStatePersister.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(state_persistence_test PRIVATE src)
+    target_link_libraries(state_persistence_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json)
+    add_test(NAME state_persistence COMMAND state_persistence_test)
 
     # Benchmarks
     add_executable(leader_correlation_welford_test

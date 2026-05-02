@@ -24,6 +24,7 @@ std::string to_string(KillReason reason) {
         case KillReason::File: return "File";
         case KillReason::ClockDrift: return "ClockDrift";
         case KillReason::Manual: return "Manual";
+        case KillReason::FeedStaleness: return "FeedStaleness";
         default: return "Unknown";
     }
 }

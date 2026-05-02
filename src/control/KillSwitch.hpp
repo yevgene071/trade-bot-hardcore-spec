@@ -11,7 +11,8 @@ enum class KillReason {
     Signal,
     File,
     ClockDrift,
-    Manual
+    Manual,
+    FeedStaleness
 };
 
 std::string to_string(KillReason reason);
