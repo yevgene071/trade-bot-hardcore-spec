@@ -70,6 +70,7 @@ add_executable(trade_bot
     src/control/KillSwitch.cpp
     src/control/ClockDriftMonitor.cpp
     src/control/SntpClient.cpp
+    src/risk/NewsCalendar.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -301,6 +302,19 @@ if(BUILD_TESTS)
         GTest::gtest GTest::gtest_main
         spdlog::spdlog)
     add_test(NAME clock_drift_monitor COMMAND clock_drift_monitor_test)
+
+    # T0-NEWS
+    add_executable(news_calendar_test
+        test/unit/news_calendar_test.cpp
+        src/risk/NewsCalendar.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(news_calendar_test PRIVATE src)
+    target_link_libraries(news_calendar_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME news_calendar COMMAND news_calendar_test)
 
     # Benchmarks
     add_executable(bench_perf 

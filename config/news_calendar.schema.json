@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trade-bot.local/schemas/news_calendar.json",
+  "title": "News Calendar",
+  "description": "Array of upcoming macro / ticker-specific news events used by the R12 news-blackout rule.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["ts_utc", "importance"],
+    "properties": {
+      "ts_utc": {
+        "type": "string",
+        "description": "Event timestamp in UTC, ISO 8601 (e.g. 2026-05-15T12:30:00Z)",
+        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z?$"
+      },
+      "importance": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 3,
+        "description": "1=low, 2=medium, 3=high"
+      },
+      "ticker": {
+        "type": "string",
+        "description": "Optional. If omitted, the event applies to every ticker."
+      },
+      "note": {
+        "type": "string"
+      }
+    }
+  }
+}

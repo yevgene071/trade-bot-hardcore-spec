@@ -1,0 +1,18 @@
+[
+  {
+    "ts_utc": "2026-05-15T12:30:00Z",
+    "importance": 3,
+    "note": "US FOMC rate decision"
+  },
+  {
+    "ts_utc": "2026-05-16T08:30:00Z",
+    "importance": 2,
+    "ticker": "BTCUSDT",
+    "note": "BTC ETF weekly flows"
+  },
+  {
+    "ts_utc": "2026-05-17T14:00:00Z",
+    "importance": 1,
+    "note": "EU CPI release"
+  }
+]
