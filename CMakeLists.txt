@@ -444,6 +444,48 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME density_detector COMMAND density_detector_test)
 
+    add_executable(iceberg_bayesian_test
+        test/unit/iceberg_bayesian_test.cpp
+        src/signals/IcebergDetector.cpp
+        src/signals/SignalBus.cpp
+        src/marketdata/OrderBook.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(iceberg_bayesian_test PRIVATE src)
+    target_link_libraries(iceberg_bayesian_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        absl::btree
+        absl::flat_hash_map
+        absl::hash
+        xsimd
+        nlohmann_json::nlohmann_json)
+    add_test(NAME iceberg_bayesian COMMAND iceberg_bayesian_test)
+
+    add_executable(iceberg_detector_test
+        test/unit/iceberg_detector_test.cpp
+        src/signals/IcebergDetector.cpp
+        src/signals/SignalBus.cpp
+        src/marketdata/OrderBook.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(iceberg_detector_test PRIVATE src)
+    target_link_libraries(iceberg_detector_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        absl::btree
+        absl::flat_hash_map
+        absl::hash
+        xsimd
+        nlohmann_json::nlohmann_json)
+    add_test(NAME iceberg_detector COMMAND iceberg_detector_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
