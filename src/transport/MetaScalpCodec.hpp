@@ -63,6 +63,11 @@ namespace api::fields {
     inline constexpr auto kMinSize = "MinSize";
     inline constexpr auto kMaxSize = "MaxSize";
     inline constexpr auto kReduceOnly = "ReduceOnly";
+    inline constexpr auto kItems = "Items";
+    inline constexpr auto kTimeFrame = "TimeFrame";
+    inline constexpr auto kZoomIndex = "ZoomIndex";
+    inline constexpr auto kAskSize = "AskSize";
+    inline constexpr auto kBidSize = "BidSize";
 }
 
 class MetaScalpCodec {
@@ -75,6 +80,7 @@ public:
     static std::vector<Trade> parse_trade_update(const nlohmann::json& j);
     static OrderBookSnapshot parse_orderbook_snapshot(const nlohmann::json& j, const Ticker& ticker);
     static OrderBookUpdate parse_orderbook_update(const nlohmann::json& j, const Ticker& ticker);
+    static ClusterSnapshot parse_cluster_snapshot(const nlohmann::json& j);
     static FinresUpdate parse_finres_update(const nlohmann::json& j);
     static SignalLevelTriggered parse_signal_level_triggered(const nlohmann::json& j);
     

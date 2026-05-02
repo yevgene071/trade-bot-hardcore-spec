@@ -357,7 +357,33 @@ if(BUILD_TESTS)
         xsimd)
     add_test(NAME tradestream COMMAND tradestream_test)
 
-    # T1-LEADER
+    add_executable(cluster_snapshot_codec_test
+        test/unit/cluster_snapshot_codec_test.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(cluster_snapshot_codec_test PRIVATE src)
+    target_link_libraries(cluster_snapshot_codec_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME cluster_snapshot_codec COMMAND cluster_snapshot_codec_test)
+
+    add_executable(cluster_snapshot_manager_test
+        test/unit/cluster_snapshot_manager_test.cpp
+        src/marketdata/ClusterSnapshot.cpp
+        src/transport/ClusterSnapshotClient.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(cluster_snapshot_manager_test PRIVATE src)
+    target_link_libraries(cluster_snapshot_manager_test PRIVATE
+        GTest::gtest GTest::gtest_main GTest::gmock
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME cluster_snapshot_manager COMMAND cluster_snapshot_manager_test)
+
+    # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
         src/logger/Logger.cpp)

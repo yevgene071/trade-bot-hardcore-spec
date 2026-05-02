@@ -169,6 +169,24 @@ struct SignalLevelTriggered {
     bool operator==(const SignalLevelTriggered&) const = default;
 };
 
+struct ClusterItem {
+    double price;
+    double ask_size;
+    double bid_size;
+    
+    bool operator==(const ClusterItem&) const = default;
+};
+
+struct ClusterSnapshot {
+    Ticker ticker;
+    std::string timeframe;
+    int zoom_index;
+    std::vector<ClusterItem> items;
+    std::chrono::system_clock::time_point ts;
+    
+    bool operator==(const ClusterSnapshot&) const = default;
+};
+
 struct ConnectionInfo {
     int id;
     std::string name;

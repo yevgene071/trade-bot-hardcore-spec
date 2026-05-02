@@ -244,6 +244,30 @@ OrderBookUpdate MetaScalpCodec::parse_orderbook_update(const nlohmann::json& j, 
     };
 }
 
+ClusterSnapshot MetaScalpCodec::parse_cluster_snapshot(const nlohmann::json& j) {
+    check_required(j, fields::kTicker);
+    check_required(j, fields::kItems);
+
+    std::vector<ClusterItem> items;
+    if (j.contains(fields::kItems) && j[fields::kItems].is_array()) {
+        for (const auto& item : j[fields::kItems]) {
+            items.push_back({
+                .price = item.value(fields::kPrice, 0.0),
+                .ask_size = item.value(fields::kAskSize, 0.0),
+                .bid_size = item.value(fields::kBidSize, 0.0)
+            });
+        }
+    }
+
+    return ClusterSnapshot {
+        .ticker = j.value(fields::kTicker, ""),
+        .timeframe = j.value(fields::kTimeFrame, ""),
+        .zoom_index = j.value(fields::kZoomIndex, 0),
+        .items = items,
+        .ts = std::chrono::system_clock::now()
+    };
+}
+
 FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
     std::vector<FinresEntry> finreses;
     if (j.contains(fields::kFinreses) && j[fields::kFinreses].is_array()) {
