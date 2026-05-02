@@ -299,6 +299,18 @@ OrderbookSettings MetaScalpCodec::parse_orderbook_settings(const nlohmann::json&
     };
 }
 
+SignalLevel MetaScalpCodec::parse_signal_level(const nlohmann::json& j) {
+    check_required(j, fields::kId);
+    check_required(j, fields::kTicker);
+    return SignalLevel {
+        .id = j.value(fields::kId, 0),
+        .ticker = j.value(fields::kTicker, ""),
+        .price = j.value(fields::kPrice, 0.0),
+        .triggered = j.value(fields::kTriggered, false),
+        .created_at = std::chrono::system_clock::now() // usually not in JSON
+    };
+}
+
 FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
     std::vector<FinresEntry> finreses;
     if (j.contains(fields::kFinreses) && j[fields::kFinreses].is_array()) {

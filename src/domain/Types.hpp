@@ -216,6 +216,14 @@ struct OrderbookSettings {
     bool operator==(const OrderbookSettings&) const = default;
 };
 
+struct SignalLevel {
+    int id;
+    Ticker ticker;
+    double price;
+    bool triggered;
+    std::chrono::system_clock::time_point created_at;
+};
+
 struct ConnectionInfo {
     int id;
     std::string name;

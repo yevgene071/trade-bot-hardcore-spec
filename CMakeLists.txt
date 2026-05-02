@@ -669,6 +669,23 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME leaderlag_strategy COMMAND leaderlag_strategy_test)
 
+    add_executable(signal_level_bridge_test
+        test/unit/signal_level_bridge_test.cpp
+        src/signals/SignalLevelBridge.cpp
+        src/transport/SignalLevelGateway.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/signals/SignalBus.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(signal_level_bridge_test PRIVATE src)
+    target_link_libraries(signal_level_bridge_test PRIVATE
+        GTest::gtest GTest::gtest_main GTest::gmock
+        spdlog::spdlog
+        absl::btree
+        xsimd
+        nlohmann_json::nlohmann_json)
+    add_test(NAME signal_level_bridge COMMAND signal_level_bridge_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
