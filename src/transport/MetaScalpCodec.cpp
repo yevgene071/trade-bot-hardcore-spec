@@ -268,6 +268,28 @@ ClusterSnapshot MetaScalpCodec::parse_cluster_snapshot(const nlohmann::json& j) 
     };
 }
 
+Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
+    const std::string type_str = j.value("Type", "");
+    NotificationKind kind;
+    if (type_str == "Trade") kind = NotificationKind::Trade;
+    else if (type_str == "SignalLevel") kind = NotificationKind::SignalLevel;
+    else if (type_str == "BigOrderBookAmount") kind = NotificationKind::BigOrderBookAmount;
+    else if (type_str == "BigOrderBookAmount2") kind = NotificationKind::BigOrderBookAmount2;
+    else if (type_str == "BigTick") kind = NotificationKind::BigTick;
+    else if (type_str == "ScreenerNewCoin") kind = NotificationKind::ScreenerNewCoin;
+    else throw CodecError("Unknown Notification type: " + type_str);
+
+    return Notification {
+        .kind = kind,
+        .exchange_id = j.value(fields::kExchangeId, 0),
+        .market_type = j.value(fields::kMarketType, 0),
+        .ticker = j.value(fields::kTicker, ""),
+        .price = j.value(fields::kPrice, 0.0),
+        .size = j.value(fields::kSize, 0.0),
+        .timestamp = parse_timestamp(j.value(fields::kDate, ""))
+    };
+}
+
 FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
     std::vector<FinresEntry> finreses;
     if (j.contains(fields::kFinreses) && j[fields::kFinreses].is_array()) {

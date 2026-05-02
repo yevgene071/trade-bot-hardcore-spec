@@ -88,6 +88,10 @@ public:
     bool is_strategy_enabled(const Ticker& ticker, const std::string& strategy) const;
     std::vector<std::string> enabled_strategies(const Ticker& ticker) const;
 
+    void on_big_tick(const Ticker& ticker, double size_usd, std::chrono::system_clock::time_point now);
+    void on_big_amount(const Ticker& ticker, double size_usd, std::chrono::system_clock::time_point now);
+    void on_screener_new_coin(const Ticker& ticker);
+
     void on_big_event(const Ticker& ticker, std::chrono::system_clock::time_point now);
     bool is_boosted(const Ticker& ticker,
                     std::chrono::system_clock::time_point now) const;

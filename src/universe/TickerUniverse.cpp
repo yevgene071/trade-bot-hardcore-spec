@@ -116,6 +116,24 @@ std::vector<std::string> TickerUniverse::enabled_strategies(const Ticker& ticker
     return out;
 }
 
+void TickerUniverse::on_big_tick(const Ticker& ticker, double /*size_usd*/,
+                                 std::chrono::system_clock::time_point now) {
+    on_big_event(ticker, now);
+    refresh_affinity();
+}
+
+void TickerUniverse::on_big_amount(const Ticker& ticker, double /*size_usd*/,
+                                   std::chrono::system_clock::time_point now) {
+    on_big_event(ticker, now);
+    refresh_affinity();
+}
+
+void TickerUniverse::on_screener_new_coin(const Ticker& ticker) {
+    LOG_INFO("TickerUniverse: new coin from screener: {}", ticker);
+    // In a real bot this would trigger an immediate GET /tickers 
+    // or add it to a 'must-warmup' set.
+}
+
 void TickerUniverse::on_big_event(const Ticker& ticker,
                                   std::chrono::system_clock::time_point now) {
     boosts_[ticker] = now;

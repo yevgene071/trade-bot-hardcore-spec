@@ -187,6 +187,27 @@ struct ClusterSnapshot {
     bool operator==(const ClusterSnapshot&) const = default;
 };
 
+enum class NotificationKind {
+    Trade,
+    SignalLevel,
+    BigOrderBookAmount,
+    BigOrderBookAmount2,
+    BigTick,
+    ScreenerNewCoin
+};
+
+struct Notification {
+    NotificationKind kind;
+    int exchange_id;
+    int market_type;
+    Ticker ticker;
+    double price;
+    double size;
+    std::chrono::system_clock::time_point timestamp;
+    
+    bool operator==(const Notification&) const = default;
+};
+
 struct ConnectionInfo {
     int id;
     std::string name;
