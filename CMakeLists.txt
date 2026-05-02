@@ -600,6 +600,19 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME leader_signal COMMAND leader_signal_test)
 
+    add_executable(strategy_engine_test
+        test/unit/strategy_engine_test.cpp
+        src/strategy/StrategyEngine.cpp
+        src/signals/SignalBus.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(strategy_engine_test PRIVATE src)
+    target_link_libraries(strategy_engine_test PRIVATE
+        GTest::gtest GTest::gtest_main GTest::gmock
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME strategy_engine COMMAND strategy_engine_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
