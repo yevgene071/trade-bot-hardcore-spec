@@ -30,17 +30,18 @@ public:
 class MarketDataFeed {
 public:
     MarketDataFeed(std::shared_ptr<IWsClient> ws_client, int connection_id);
+    virtual ~MarketDataFeed() = default;
     
-    void add_listener(IMarketDataListener* listener);
-    void add_listener(const Ticker& ticker, IMarketDataListener* listener);
-    void remove_listener(IMarketDataListener* listener);
-    void remove_listener(const Ticker& ticker, IMarketDataListener* listener);
+    virtual void add_listener(IMarketDataListener* listener);
+    virtual void add_listener(const Ticker& ticker, IMarketDataListener* listener);
+    virtual void remove_listener(IMarketDataListener* listener);
+    virtual void remove_listener(const Ticker& ticker, IMarketDataListener* listener);
 
-    void subscribe_ticker(const Ticker& ticker);
-    void unsubscribe_ticker(const Ticker& ticker);
+    virtual void subscribe_ticker(const Ticker& ticker);
+    virtual void unsubscribe_ticker(const Ticker& ticker);
     
-    void start();
-    void stop();
+    virtual void start();
+    virtual void stop();
 
 private:
     void handle_message(const nlohmann::json& j);

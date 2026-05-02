@@ -100,6 +100,8 @@ add_executable(trade_bot
     src/strategy/BreakoutEatThrough.cpp
     src/strategy/LeaderLag.cpp
     src/executor/PaperExecutor.cpp
+    src/executor/LiveExecutor.cpp
+    src/executor/StartupRecovery.cpp
     src/logger/TradeJournal.cpp
     src/transport/external/BinanceFundingClient.cpp
 )
@@ -749,6 +751,31 @@ if(BUILD_TESTS)
     target_include_directories(state_persistence_test PRIVATE src)
     target_link_libraries(state_persistence_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json)
     add_test(NAME state_persistence COMMAND state_persistence_test)
+
+    add_executable(startup_recovery_test
+        test/unit/startup_recovery_test.cpp
+        src/executor/StartupRecovery.cpp
+        src/risk/AccountStatePersister.cpp
+        src/transport/OrderGateway.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(startup_recovery_test PRIVATE src)
+    target_link_libraries(startup_recovery_test PRIVATE GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json CURL::libcurl)
+    add_test(NAME startup_recovery COMMAND startup_recovery_test)
+
+    add_executable(executor_state_machine_test
+        test/unit/executor_state_machine_test.cpp
+        src/executor/LiveExecutor.cpp
+        src/trading/OrderReconciliator.cpp
+        src/transport/OrderGateway.cpp
+        src/transport/MarketDataFeed.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(executor_state_machine_test PRIVATE src)
+    target_link_libraries(executor_state_machine_test PRIVATE GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json CURL::libcurl)
+    add_test(NAME executor_state_machine COMMAND executor_state_machine_test)
 
     # Benchmarks
     add_executable(leader_correlation_welford_test

@@ -33,6 +33,7 @@ public:
     void on_order_update(const OrderUpdate& u) override { boost::ignore_unused(u); }
     void on_position_update(const PositionUpdate& u) override { boost::ignore_unused(u); }
     void on_balance_update(const BalanceUpdate& u) override { boost::ignore_unused(u); }
+    void on_finres_update(const FinresUpdate& u) override { boost::ignore_unused(u); }
     void on_error(const std::string& msg) override { boost::ignore_unused(msg); }
 
     std::vector<Trade> trades;

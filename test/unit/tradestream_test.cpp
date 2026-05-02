@@ -32,14 +32,14 @@ TEST_F(TradeStreamTest, HawkesIntensityDecays) {
     }
     
     ts.update(now);
-    EXPECT_NEAR(ts.get_stats().hawkes_intensity, 10.0, 1e-7);
+    EXPECT_NEAR(ts.get_stats().hawkes_intensity_total, 10.0, 1e-7);
     
     // Decay for 2 seconds (beta=0.5)
     auto later = now + std::chrono::seconds(2);
     ts.update(later);
     
     // 10 * exp(-0.5 * 2) = 10 * exp(-1) approx 3.678
-    EXPECT_NEAR(ts.get_stats().hawkes_intensity, 10.0 * std::exp(-1.0), 1e-7);
+    EXPECT_NEAR(ts.get_stats().hawkes_intensity_total, 10.0 * std::exp(-1.0), 1e-7);
 }
 
 TEST_F(TradeStreamTest, VolumesAreCorrectByWindow) {

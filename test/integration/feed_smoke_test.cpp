@@ -21,6 +21,7 @@ public:
     void on_order_update(const OrderUpdate& /*u*/) override {}
     void on_position_update(const PositionUpdate& /*u*/) override {}
     void on_balance_update(const BalanceUpdate& /*u*/) override {}
+    void on_finres_update(const FinresUpdate& /*u*/) override {}
     void on_error(const std::string& /*msg*/) override {}
 
     std::atomic<bool> received_trade{false};

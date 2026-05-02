@@ -53,6 +53,7 @@ public:
     void on_order_update(const OrderUpdate&) override {}
     void on_position_update(const PositionUpdate&) override {}
     void on_balance_update(const BalanceUpdate&) override {}
+    void on_finres_update(const FinresUpdate&) override {}
     void on_error(const std::string&) override {}
 
     Ticker last_ticker_;

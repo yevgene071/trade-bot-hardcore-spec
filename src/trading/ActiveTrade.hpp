@@ -6,11 +6,12 @@
 namespace trade_bot {
 
 enum class TradeState {
-    Submitted,
+    PendingEntry,
     Open,
-    TP1_Hit,
-    Recovered,
-    Closed
+    Exiting,
+    Closed,
+    Cancelling,
+    SubmitUnknown
 };
 
 struct ActiveTrade {
