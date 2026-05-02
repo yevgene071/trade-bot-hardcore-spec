@@ -76,6 +76,8 @@ add_executable(trade_bot
     src/marketdata/OrderBook.cpp
     src/marketdata/KalmanLagEstimator.cpp
     src/marketdata/LeaderTracker.cpp
+    src/marketdata/TradeStream.cpp
+    src/features/FeatureExtractor.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -389,6 +391,39 @@ if(BUILD_TESTS)
     target_link_libraries(leader_cusum_decorrelation_test PRIVATE
         GTest::gtest GTest::gtest_main spdlog::spdlog)
     add_test(NAME leader_cusum_decorrelation COMMAND leader_cusum_decorrelation_test)
+
+    # T1-FRAME
+    add_executable(feature_extractor_test
+        test/unit/feature_extractor_test.cpp
+        src/features/FeatureExtractor.cpp
+        src/marketdata/OrderBook.cpp
+        src/marketdata/TradeStream.cpp
+        src/marketdata/LeaderTracker.cpp
+        src/marketdata/KalmanLagEstimator.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(feature_extractor_test PRIVATE src)
+    target_link_libraries(feature_extractor_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog hdr_histogram::hdr_histogram_static
+        absl::btree xsimd)
+    add_test(NAME feature_extractor COMMAND feature_extractor_test)
+
+    add_executable(feature_welford_test
+        test/unit/feature_welford_test.cpp
+        src/features/FeatureExtractor.cpp
+        src/marketdata/OrderBook.cpp
+        src/marketdata/TradeStream.cpp
+        src/marketdata/LeaderTracker.cpp
+        src/marketdata/KalmanLagEstimator.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(feature_welford_test PRIVATE src)
+    target_link_libraries(feature_welford_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog hdr_histogram::hdr_histogram_static
+        absl::btree xsimd)
+    add_test(NAME feature_welford COMMAND feature_welford_test)
 
     # Benchmarks
     add_executable(bench_perf 
