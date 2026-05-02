@@ -85,6 +85,7 @@ target_link_libraries(trade_bot PRIVATE
     tomlplusplus::tomlplusplus
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    nlohmann_json_schema_validator
     OpenSSL::SSL
     OpenSSL::Crypto
     absl::btree
