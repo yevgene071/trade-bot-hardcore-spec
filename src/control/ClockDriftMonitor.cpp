@@ -41,19 +41,27 @@ void ClockDriftMonitor::run() {
     while (running_) {
         auto drift = fetch_drift();
         if (drift) {
-            {
-                std::lock_guard lock(mutex_);
-                accumulator_.update(static_cast<double>(*drift));
-            }
-            
+            // T0-CLOCK: check against average BEFORE update for 1-poll WARN, 2-poll Trigger
+            double avg_before = accumulator_.mean();
             int64_t current_drift = std::abs(*drift);
-            if (current_drift >= config_.max_clock_drift_ms) {
-                LOG_CRITICAL("Clock drift {} ms exceeds maximum {} ms!", *drift, config_.max_clock_drift_ms);
-                KillSwitch::instance().trigger(KillReason::ClockDrift);
-            } else if (current_drift >= config_.warn_drift_ms) {
+            
+            // Check Trigger against average drift (after at least 1 update)
+            if (accumulator_.count() > 0 && std::abs(avg_before) >= config_.max_clock_drift_ms) {
+                LOG_CRITICAL("Clock drift average {} ms exceeds maximum {} ms!", 
+                    static_cast<int64_t>(avg_before), config_.max_clock_drift_ms);
+                KillSwitch::trigger(KillReason::ClockDrift);
+            }
+            // Check WARN against sample
+            else if (current_drift >= config_.warn_drift_ms) {
                 LOG_WARN("Clock drift {} ms exceeds warning threshold {} ms", *drift, config_.warn_drift_ms);
             } else {
                 LOG_DEBUG("Clock drift: {} ms", *drift);
+            }
+            
+            // Update accumulator AFTER checks (Welford update)
+            {
+                std::lock_guard lock(mutex_);
+                accumulator_.update(static_cast<double>(*drift));
             }
         }
 

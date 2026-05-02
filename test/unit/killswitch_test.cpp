@@ -27,20 +27,18 @@ protected:
 };
 
 TEST_F(KillSwitchTest, ManualTrigger) {
-    auto& ks = KillSwitch::instance();
-    ks.start();
+    KillSwitch::instance().start();
     
-    EXPECT_FALSE(ks.is_triggered());
-    ks.trigger(KillReason::Manual);
-    EXPECT_TRUE(ks.is_triggered());
+    EXPECT_FALSE(KillSwitch::is_triggered());
+    KillSwitch::trigger(KillReason::Manual);
+    EXPECT_TRUE(KillSwitch::is_triggered());
     EXPECT_TRUE(std::filesystem::exists("./killswitch"));
 }
 
 TEST_F(KillSwitchTest, FileTrigger) {
-    auto& ks = KillSwitch::instance();
-    ks.start();
+    KillSwitch::instance().start();
     
-    EXPECT_FALSE(ks.is_triggered());
+    EXPECT_FALSE(KillSwitch::is_triggered());
     
     // Manually create the file
     {
@@ -51,7 +49,7 @@ TEST_F(KillSwitchTest, FileTrigger) {
     // Wait for watchdog
     bool triggered = false;
     for (int i = 0; i < 20; ++i) {
-        if (ks.is_triggered()) {
+        if (KillSwitch::is_triggered()) {
             triggered = true;
             break;
         }
@@ -62,17 +60,16 @@ TEST_F(KillSwitchTest, FileTrigger) {
 }
 
 TEST_F(KillSwitchTest, SignalTrigger) {
-    auto& ks = KillSwitch::instance();
-    ks.start();
+    KillSwitch::instance().start();
     
-    EXPECT_FALSE(ks.is_triggered());
+    EXPECT_FALSE(KillSwitch::is_triggered());
     
     std::raise(SIGINT);
     
     // Wait for watchdog
     bool triggered = false;
     for (int i = 0; i < 20; ++i) {
-        if (ks.is_triggered()) {
+        if (KillSwitch::is_triggered()) {
             triggered = true;
             break;
         }
