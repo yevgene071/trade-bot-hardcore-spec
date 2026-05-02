@@ -69,6 +69,7 @@ add_executable(trade_bot
     src/trading/OrderReconciliator.cpp
     src/control/KillSwitch.cpp
     src/control/ClockDriftMonitor.cpp
+    src/control/SntpClient.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -289,18 +290,16 @@ if(BUILD_TESTS)
         spdlog::spdlog)
     add_test(NAME killswitch COMMAND killswitch_test)
 
-    # T0-CLOCK
+    # T0-CLOCK (uses INtpClient mock — SntpClient real impl is wired in trade_bot main only)
     add_executable(clock_drift_monitor_test
         test/unit/clock_drift_monitor_test.cpp
         src/control/ClockDriftMonitor.cpp
-        src/control/KillSwitch.cpp
         src/logger/Logger.cpp
     )
     target_include_directories(clock_drift_monitor_test PRIVATE src)
     target_link_libraries(clock_drift_monitor_test PRIVATE
         GTest::gtest GTest::gtest_main
-        spdlog::spdlog
-        boost::boost)
+        spdlog::spdlog)
     add_test(NAME clock_drift_monitor COMMAND clock_drift_monitor_test)
 
     # Benchmarks

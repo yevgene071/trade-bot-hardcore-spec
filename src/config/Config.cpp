@@ -41,13 +41,13 @@ void Config::validate() {
     get<int64_t>("risk.max_concurrent_positions");
     get<double>("risk.max_leverage");
     
-    // Clock Monitoring (T0-CLOCK)
+    // Clock Monitoring (T0-CLOCK) — optional section: validate types only if present.
     if (has("clock.sources")) {
         get<std::vector<std::string>>("clock.sources");
     }
-    get<int64_t>("clock.check_interval_sec");
-    get<int64_t>("clock.warn_drift_ms");
-    get<int64_t>("clock.max_clock_drift_ms");
+    if (has("clock.check_interval_sec"))  get<int64_t>("clock.check_interval_sec");
+    if (has("clock.warn_drift_ms"))       get<int64_t>("clock.warn_drift_ms");
+    if (has("clock.max_clock_drift_ms"))  get<int64_t>("clock.max_clock_drift_ms");
 
     LOG_INFO("Config validation successful");
 }

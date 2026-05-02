@@ -65,6 +65,13 @@ bool KillSwitch::is_triggered() const {
     return triggered_.load();
 }
 
+void KillSwitch::reset_for_test() {
+    stop();
+    triggered_.store(false);
+    std::error_code ec;
+    std::filesystem::remove(KILL_FILE, ec);
+}
+
 void KillSwitch::trigger(KillReason reason) {
     if (triggered_.exchange(true)) return;
 

@@ -1,141 +1,164 @@
-#include <gtest/gtest.h>
 #include "control/ClockDriftMonitor.hpp"
-#include "control/KillSwitch.hpp"
+#include "control/INtpClient.hpp"
 #include "logger/Logger.hpp"
-#include <boost/asio.hpp>
-#include <thread>
+
+#include <gtest/gtest.h>
+
+#include <atomic>
 #include <chrono>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
 
 using namespace trade_bot;
-using boost::asio::ip::udp;
+using namespace std::chrono_literals;
 
-class MockNtpServer {
+namespace {
+
+class FakeNtpClient : public INtpClient {
 public:
-    explicit MockNtpServer(uint16_t port, int64_t offset_ms = 0)
-        : socket_(io_context_, udp::endpoint(udp::v4(), port)), offset_ms_(offset_ms) {}
+    /// `offsets[host] = how_far_ahead_server_appears_vs_local`
+    std::map<std::string, std::chrono::milliseconds> offsets;
+    std::map<std::string, bool>                       reject;
+    std::atomic<int>                                  call_count{0};
+    std::vector<std::string>                          calls;
+    std::mutex                                        mtx;
 
-    void start() {
-        running_ = true;
-        thread_ = std::thread([this]() {
-            while (running_) {
-                try {
-                    uint8_t buffer[48];
-                    udp::endpoint remote_endpoint;
-                    boost::system::error_code ec;
-                    size_t len = socket_.receive_from(boost::asio::buffer(buffer), remote_endpoint, 0, ec);
-                    if (ec) continue;
-
-                    if (len >= 48) {
-                        uint8_t response[48] = {0};
-                        response[0] = 0x24; // LI=0, VN=4, Mode=4 (server)
-                        
-                        auto now = std::chrono::system_clock::now().time_since_epoch();
-                        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-                        auto ntp_now_ms = now_ms + offset_ms_;
-                        
-                        // Convert ntp_now_ms to NTP format
-                        const uint32_t NTP_UNIX_DIFF = 2208988800U;
-                        uint32_t seconds = static_cast<uint32_t>(ntp_now_ms / 1000) + NTP_UNIX_DIFF;
-                        uint32_t fraction = static_cast<uint32_t>((ntp_now_ms % 1000) * 0x100000000ULL / 1000);
-                        
-                        uint32_t n_seconds = htonl(seconds);
-                        uint32_t n_fraction = htonl(fraction);
-                        
-                        std::memcpy(&response[32], &n_seconds, 4);
-                        std::memcpy(&response[36], &n_fraction, 4);
-                        std::memcpy(&response[40], &n_seconds, 4);
-                        std::memcpy(&response[44], &n_fraction, 4);
-                        
-                        socket_.send_to(boost::asio::buffer(response), remote_endpoint);
-                    }
-                } catch (...) {}
-            }
-        });
+    std::optional<std::chrono::system_clock::time_point>
+    query(const std::string& host, int /*timeout_ms*/) override {
+        ++call_count;
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            calls.push_back(host);
+        }
+        if (reject.count(host) && reject[host]) {
+            return std::nullopt;
+        }
+        if (!offsets.count(host)) {
+            return std::nullopt;
+        }
+        // server_time = local_time - offset → drift_sample = local - server = offset.
+        return std::chrono::system_clock::now() - offsets[host];
     }
-
-    void stop() {
-        running_ = false;
-        socket_.close();
-        if (thread_.joinable()) thread_.join();
-    }
-
-    void set_offset(int64_t offset_ms) { offset_ms_ = offset_ms; }
-
-private:
-    boost::asio::io_context io_context_;
-    udp::socket socket_;
-    std::atomic<bool> running_{false};
-    std::thread thread_;
-    int64_t offset_ms_;
 };
 
 class ClockDriftMonitorTest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        Logger::init();
-        if (std::filesystem::exists("./killswitch")) {
-            std::filesystem::remove("./killswitch");
-        }
-        KillSwitch::instance().start();
-    }
-
-    void TearDown() override {
-        KillSwitch::instance().stop();
-        if (std::filesystem::exists("./killswitch")) {
-            std::filesystem::remove("./killswitch");
-        }
-    }
+    void SetUp() override { Logger::init(); }
 };
 
-TEST_F(ClockDriftMonitorTest, DetectsDrift) {
-    uint16_t port = 12345;
-    MockNtpServer server(port, 700); // 700ms drift
-    server.start();
+}  // namespace
 
-    ClockDriftMonitor::Config cfg;
-    cfg.sources = {"127.0.0.1:12345"};
-    cfg.check_interval_sec = 1;
-    cfg.warn_drift_ms = 200;
-    cfg.max_clock_drift_ms = 500;
-
-    ClockDriftMonitor monitor(cfg);
-    monitor.start();
-
-    // Wait for drift detection and killswitch trigger
-    bool triggered = false;
-    for (int i = 0; i < 50; ++i) {
-        if (KillSwitch::instance().is_triggered()) {
-            triggered = true;
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    EXPECT_TRUE(triggered);
-    
-    monitor.stop();
-    server.stop();
+TEST_F(ClockDriftMonitorTest, NoNtpClientReturnsNullopt) {
+    ClockDriftMonitor mon{nullptr};
+    EXPECT_EQ(mon.tick_once(), std::nullopt);
 }
 
-TEST_F(ClockDriftMonitorTest, Failover) {
-    ClockDriftMonitor::Config cfg;
-    cfg.sources = {"127.0.0.1:12346", "127.0.0.1:12345"}; // First one fails
-    cfg.check_interval_sec = 1;
-    
-    uint16_t port = 12345;
-    MockNtpServer server(port, 100);
-    server.start();
+TEST_F(ClockDriftMonitorTest, ReportsDriftFromSingleSource) {
+    auto ntp = std::make_shared<FakeNtpClient>();
+    ntp->offsets["a"] = 250ms;
 
-    ClockDriftMonitor monitor(cfg);
-    monitor.start();
+    ClockDriftMonitor::Config cfg{};
+    cfg.sources           = {"a"};
+    cfg.moving_avg_window = 1;
+    ClockDriftMonitor mon{ntp, cfg};
 
-    // Should not trigger killswitch (100ms < 500ms)
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-    EXPECT_FALSE(KillSwitch::instance().is_triggered());
-    
-    // Check if we got some drift value
-    EXPECT_NEAR(monitor.drift_ms(), 100, 50);
+    auto drift = mon.tick_once();
+    ASSERT_TRUE(drift.has_value());
+    EXPECT_GE(*drift, 200);
+    EXPECT_LE(*drift, 320);  // headroom for syscall jitter
+}
 
-    monitor.stop();
-    server.stop();
+TEST_F(ClockDriftMonitorTest, FailoverToNextSource) {
+    auto ntp = std::make_shared<FakeNtpClient>();
+    ntp->reject["primary"]   = true;       // primary rejects
+    ntp->offsets["fallback"] = 50ms;        // fallback responds
+
+    ClockDriftMonitor::Config cfg{};
+    cfg.sources           = {"primary", "fallback"};
+    cfg.moving_avg_window = 1;
+    ClockDriftMonitor mon{ntp, cfg};
+
+    auto drift = mon.tick_once();
+    ASSERT_TRUE(drift.has_value());
+    EXPECT_NEAR(*drift, 50, 70);
+
+    std::lock_guard<std::mutex> lk(ntp->mtx);
+    ASSERT_GE(ntp->calls.size(), 2u);
+    EXPECT_EQ(ntp->calls[0], "primary");
+    EXPECT_EQ(ntp->calls[1], "fallback");
+}
+
+TEST_F(ClockDriftMonitorTest, AllSourcesUnreachable) {
+    auto ntp = std::make_shared<FakeNtpClient>();
+    ntp->reject["a"] = true;
+    ntp->reject["b"] = true;
+
+    ClockDriftMonitor::Config cfg{};
+    cfg.sources = {"a", "b"};
+    ClockDriftMonitor mon{ntp, cfg};
+
+    EXPECT_EQ(mon.tick_once(), std::nullopt);
+}
+
+TEST_F(ClockDriftMonitorTest, WarnDoesNotTriggerKill) {
+    auto ntp = std::make_shared<FakeNtpClient>();
+    ntp->offsets["a"] = 300ms;  // > warn_drift_ms (200), < max_clock_drift_ms (500)
+
+    ClockDriftMonitor::Config cfg{};
+    cfg.sources           = {"a"};
+    cfg.moving_avg_window = 1;
+    ClockDriftMonitor mon{ntp, cfg};
+
+    bool kill_called = false;
+    mon.set_kill_switch([&](const std::string&) { kill_called = true; });
+
+    mon.tick_once();
+    EXPECT_FALSE(kill_called);
+}
+
+TEST_F(ClockDriftMonitorTest, ExceedingMaxDriftTriggersKillSwitchOnce) {
+    auto ntp = std::make_shared<FakeNtpClient>();
+    ntp->offsets["a"] = 800ms;  // > max_clock_drift_ms (500)
+
+    ClockDriftMonitor::Config cfg{};
+    cfg.sources           = {"a"};
+    cfg.moving_avg_window = 1;
+    ClockDriftMonitor mon{ntp, cfg};
+
+    int kill_calls = 0;
+    std::string reason_seen;
+    mon.set_kill_switch([&](const std::string& reason) {
+        ++kill_calls;
+        reason_seen = reason;
+    });
+
+    mon.tick_once();
+    mon.tick_once();   // second poll should NOT re-trigger
+    EXPECT_EQ(kill_calls, 1);
+    EXPECT_NE(reason_seen.find("ClockDrift"), std::string::npos);
+}
+
+TEST_F(ClockDriftMonitorTest, MovingAverageSmoothsSpikes) {
+    auto ntp = std::make_shared<FakeNtpClient>();
+
+    ClockDriftMonitor::Config cfg{};
+    cfg.sources           = {"a"};
+    cfg.moving_avg_window = 4;
+    cfg.warn_drift_ms     = 200;
+    cfg.max_clock_drift_ms = 500;
+    ClockDriftMonitor mon{ntp, cfg};
+
+    int kill_calls = 0;
+    mon.set_kill_switch([&](const std::string&) { ++kill_calls; });
+
+    // Three small samples + one big spike → smoothed below max.
+    ntp->offsets["a"] = 50ms;   mon.tick_once();
+    ntp->offsets["a"] = 50ms;   mon.tick_once();
+    ntp->offsets["a"] = 50ms;   mon.tick_once();
+    ntp->offsets["a"] = 1500ms; mon.tick_once();   // spike
+
+    EXPECT_EQ(kill_calls, 0);  // smoothed (~412 ms) < max
+    EXPECT_LT(std::abs(mon.drift_ms()), cfg.max_clock_drift_ms);
 }

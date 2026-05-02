@@ -29,6 +29,10 @@ public:
     bool is_triggered() const;
     void trigger(KillReason reason);
 
+    /// Test-only helper: clears triggered flag and removes the kill-file.
+    /// Production code must NEVER untrigger a real kill-switch.
+    void reset_for_test();
+
 private:
     KillSwitch();
     ~KillSwitch();

@@ -13,16 +13,11 @@ class KillSwitchTest : public ::testing::Test {
 protected:
     void SetUp() override {
         Logger::init();
-        if (std::filesystem::exists("./killswitch")) {
-            std::filesystem::remove("./killswitch");
-        }
+        KillSwitch::instance().reset_for_test();
     }
 
     void TearDown() override {
-        KillSwitch::instance().stop();
-        if (std::filesystem::exists("./killswitch")) {
-            std::filesystem::remove("./killswitch");
-        }
+        KillSwitch::instance().reset_for_test();
     }
 };
 
