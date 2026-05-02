@@ -93,7 +93,11 @@ std::chrono::system_clock::time_point MetaScalpCodec::parse_timestamp(const std:
         try {
             int ms = std::stoi(ts_str.substr(dot + 1, 3));
             tp += std::chrono::milliseconds(ms);
-        } catch (...) {}
+        } catch (const std::exception&) {
+            // Malformed millisecond suffix — keep the integer-second resolution.
+            // Logging here would spam at the trade rate; codec_test pins the
+            // happy/error paths separately.
+        }
     }
     
     return tp;

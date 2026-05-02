@@ -26,7 +26,10 @@ std::vector<SignalLevel> SignalLevelGateway::get_all(const Ticker& ticker) {
             for (const auto& item : j) out.push_back(MetaScalpCodec::parse_signal_level(item));
         }
         return out;
-    } catch (...) { return {}; }
+    } catch (const std::exception& ex) {
+        LOG_WARN("SignalLevelGateway::get_all({}) failed: {}", ticker, ex.what());
+        return {};
+    }
 }
 
 int SignalLevelGateway::create(const Ticker& ticker, double price) {
@@ -38,7 +41,10 @@ int SignalLevelGateway::create(const Ticker& ticker, double price) {
         if (resp.status != 200) return -1;
         auto j = nlohmann::json::parse(resp.body);
         return j.value("Id", -1);
-    } catch (...) { return -1; }
+    } catch (const std::exception& ex) {
+        LOG_WARN("SignalLevelGateway::create({}, {}) failed: {}", ticker, price, ex.what());
+        return -1;
+    }
 }
 
 void SignalLevelGateway::remove(int id) {
