@@ -104,7 +104,7 @@ TEST_F(ClockDriftMonitorTest, DetectsDrift) {
     // Wait for drift detection and killswitch trigger
     bool triggered = false;
     for (int i = 0; i < 50; ++i) {
-        if (KillSwitch::instance().is_triggered()) {
+        if (KillSwitch::is_triggered()) {
             triggered = true;
             break;
         }
@@ -131,7 +131,7 @@ TEST_F(ClockDriftMonitorTest, Failover) {
 
     // Should not trigger killswitch (100ms < 500ms)
     std::this_thread::sleep_for(std::chrono::seconds(2));
-    EXPECT_FALSE(KillSwitch::instance().is_triggered());
+    EXPECT_FALSE(KillSwitch::is_triggered());
     
     // Check if we got some drift value
     EXPECT_NEAR(monitor.drift_ms(), 100, 50);

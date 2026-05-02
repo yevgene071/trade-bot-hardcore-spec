@@ -61,12 +61,13 @@ void KillSwitch::stop() {
     }
 }
 
-bool KillSwitch::is_triggered() const {
-    return triggered_.load();
+bool KillSwitch::is_triggered() {
+    return instance().triggered_.load();
 }
 
 void KillSwitch::trigger(KillReason reason) {
-    if (triggered_.exchange(true)) return;
+    auto& self = instance();
+    if (self.triggered_.exchange(true)) return;
 
     LOG_CRITICAL("Kill-switch TRIGGERED! Reason: {}", to_string(reason));
     

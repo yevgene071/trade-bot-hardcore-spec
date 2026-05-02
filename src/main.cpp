@@ -41,7 +41,7 @@ int main() {
         clock_monitor.start();
 
         // Main loop
-        while (!kill_switch.is_triggered()) {
+        while (!trade_bot::KillSwitch::is_triggered()) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 

@@ -26,8 +26,8 @@ public:
     void start();
     void stop();
 
-    bool is_triggered() const;
-    void trigger(KillReason reason);
+    static bool is_triggered();
+    static void trigger(KillReason reason);
 
 private:
     KillSwitch();
