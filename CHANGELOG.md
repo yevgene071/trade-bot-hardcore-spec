@@ -1,6 +1,10 @@
 # CHANGELOG
 
 ## [Unreleased]
+- T1-UNIVERSE: Реализовано управление пулом тикеров и аффинити стратегий с поддержкой фильтрации и событий BigTick.
+- T1-FRAME: Реализован FeatureExtractor для сборки FeatureFrame на базе OrderBook, TradeStream и LeaderTracker с расчетом волатильности и задержек.
+- T1-LEADER: Реализован LeaderTracker для отслеживания корреляции и лага между тикерами (BTC/ETH) с использованием фильтра Калмана и CUSUM.
+- T1-TRADESTREAM: Реализован поток сделок с Hawkes process intensity, T-Digest для квантилей и Kahan summation для объемов.
 - T1-ORDERBOOK: Реализована локальная реплика стакана с использованием absl::btree_map и SIMD-оптимизированным расчетом глубины.
 - T0-CLOCK: Реализован ClockDriftMonitor для контроля точности системного времени через NTP.
 - T0-KILLSWITCH: Реализован KillSwitch для экстренной остановки бота при критических ошибках или сигналах.
