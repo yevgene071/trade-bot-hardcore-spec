@@ -140,6 +140,36 @@ TEST_F(ClockDriftMonitorTest, ExceedingMaxDriftTriggersKillSwitchOnce) {
     EXPECT_NE(reason_seen.find("ClockDrift"), std::string::npos);
 }
 
+// Spec AC verbatim (T0-CLOCK):
+//   "возвращает смещение +700 мс → через 1 полл WARN, через 2 полла —
+//    KillSwitch triggered"
+TEST_F(ClockDriftMonitorTest, SpecAcceptance_700msYields1WarnThen2Kill) {
+    auto ntp = std::make_shared<FakeNtpClient>();
+    ntp->offsets["pool.ntp.org"] = 700ms;
+
+    ClockDriftMonitor::Config cfg{};                         // defaults
+    cfg.sources = {"pool.ntp.org"};
+    ClockDriftMonitor mon{ntp, cfg};
+
+    int kill_calls = 0;
+    mon.set_kill_switch([&](const std::string&) { ++kill_calls; });
+
+    // Poll 1: rolling avg = (700 + 0)/2 = 350 ms
+    //   |350| > warn (200) → WARN logged, but
+    //   |350| < max  (500) → KillSwitch must NOT be invoked.
+    auto d1 = mon.tick_once();
+    ASSERT_TRUE(d1.has_value());
+    EXPECT_GE(*d1, cfg.warn_drift_ms);          // WARN territory
+    EXPECT_LT(*d1, cfg.max_clock_drift_ms);     // not yet kill-grade
+    EXPECT_EQ(kill_calls, 0);
+
+    // Poll 2: rolling avg = (700 + 700)/2 = 700 ms → KILL exactly here.
+    auto d2 = mon.tick_once();
+    ASSERT_TRUE(d2.has_value());
+    EXPECT_GE(*d2, cfg.max_clock_drift_ms);
+    EXPECT_EQ(kill_calls, 1);
+}
+
 TEST_F(ClockDriftMonitorTest, MovingAverageSmoothsSpikes) {
     auto ntp = std::make_shared<FakeNtpClient>();
 

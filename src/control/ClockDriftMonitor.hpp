@@ -39,7 +39,11 @@ public:
         std::chrono::milliseconds query_timeout{1500};
         int64_t                   warn_drift_ms{200};
         int64_t                   max_clock_drift_ms{500};
-        size_t                    moving_avg_window{4};   // Knuth-style rolling mean
+        // Window for the Knuth-style rolling mean. Per spec AC
+        // ("+700 ms → 1 poll WARN, 2 polls KILL") a window of 2 dilutes a
+        // single sample below the kill threshold while still crossing warn,
+        // and a second matching sample averages back across max.
+        size_t                    moving_avg_window{2};
     };
 
     explicit ClockDriftMonitor(std::shared_ptr<INtpClient> ntp);
