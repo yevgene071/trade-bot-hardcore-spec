@@ -546,6 +546,45 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME level_detector COMMAND level_detector_test)
 
+    add_executable(approach_zigzag_test
+        test/unit/approach_zigzag_test.cpp
+    )
+    target_include_directories(approach_zigzag_test PRIVATE src)
+    target_link_libraries(approach_zigzag_test PRIVATE GTest::gtest GTest::gtest_main)
+    add_test(NAME approach_zigzag COMMAND approach_zigzag_test)
+
+    add_executable(approach_hmm_forward_test
+        test/unit/approach_hmm_forward_test.cpp
+    )
+    target_include_directories(approach_hmm_forward_test PRIVATE src)
+    target_link_libraries(approach_hmm_forward_test PRIVATE GTest::gtest GTest::gtest_main)
+    add_test(NAME approach_hmm_forward COMMAND approach_hmm_forward_test)
+
+    add_executable(approach_analyzer_test
+        test/unit/approach_analyzer_test.cpp
+        src/signals/ApproachAnalyzer.cpp
+        src/signals/LevelDetector.cpp
+        src/signals/SignalBus.cpp
+        src/marketdata/OrderBook.cpp
+        src/marketdata/ClusterSnapshot.cpp
+        src/transport/ClusterSnapshotClient.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(approach_analyzer_test PRIVATE src)
+    target_link_libraries(approach_analyzer_test PRIVATE
+        GTest::gtest GTest::gtest_main GTest::gmock
+        spdlog::spdlog
+        absl::btree
+        absl::flat_hash_map
+        absl::hash
+        xsimd
+        nlohmann_json::nlohmann_json)
+    add_test(NAME approach_analyzer COMMAND approach_analyzer_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
