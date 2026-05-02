@@ -290,6 +290,15 @@ Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
     };
 }
 
+OrderbookSettings MetaScalpCodec::parse_orderbook_settings(const nlohmann::json& j) {
+    check_required(j, fields::kTicker);
+    return OrderbookSettings {
+        .ticker = j.value(fields::kTicker, ""),
+        .large_amount_usd = j.value(fields::kLargeAmountUsd, 0.0),
+        .large_amount_usd2 = j.value(fields::kLargeAmountUsd2, 0.0)
+    };
+}
+
 FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
     std::vector<FinresEntry> finreses;
     if (j.contains(fields::kFinreses) && j[fields::kFinreses].is_array()) {

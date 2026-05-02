@@ -139,6 +139,17 @@ void TickerUniverse::on_big_event(const Ticker& ticker,
     boosts_[ticker] = now;
 }
 
+void TickerUniverse::update_orderbook_settings(const OrderbookSettings& settings) {
+    large_amounts_[settings.ticker] = settings.large_amount_usd;
+}
+
+double TickerUniverse::density_min_size_usd(const Ticker& ticker,
+                                            double config_default) const {
+    auto it = large_amounts_.find(ticker);
+    if (it == large_amounts_.end()) return config_default;
+    return std::max(config_default, it->second);
+}
+
 bool TickerUniverse::is_boosted(const Ticker& ticker,
                                 std::chrono::system_clock::time_point now) const {
     auto it = boosts_.find(ticker);

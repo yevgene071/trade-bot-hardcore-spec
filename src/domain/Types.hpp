@@ -208,6 +208,14 @@ struct Notification {
     bool operator==(const Notification&) const = default;
 };
 
+struct OrderbookSettings {
+    Ticker ticker;
+    double large_amount_usd;
+    double large_amount_usd2;
+    
+    bool operator==(const OrderbookSettings&) const = default;
+};
+
 struct ConnectionInfo {
     int id;
     std::string name;

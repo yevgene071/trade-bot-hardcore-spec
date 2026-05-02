@@ -96,6 +96,9 @@ public:
     bool is_boosted(const Ticker& ticker,
                     std::chrono::system_clock::time_point now) const;
 
+    void update_orderbook_settings(const OrderbookSettings& settings);
+    double density_min_size_usd(const Ticker& ticker, double config_default) const;
+
     void cache_meta(const Ticker& ticker, const TickerMeta& meta);
     std::optional<TickerMeta> meta(const Ticker& ticker) const;
 
@@ -111,6 +114,7 @@ private:
     std::vector<Ticker>                            active_;          // ordered by volume desc
     std::map<Ticker, std::map<std::string, bool>>  affinity_;        // ticker → {strategy → enabled}
     std::unordered_map<Ticker, std::chrono::system_clock::time_point> boosts_;
+    std::unordered_map<Ticker, double>             large_amounts_;
     std::unordered_map<Ticker, TickerMeta>         meta_cache_;
 };
 

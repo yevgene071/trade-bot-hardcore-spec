@@ -398,6 +398,21 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME notification_routing COMMAND notification_routing_test)
 
+    add_executable(orderbook_settings_loader_test
+        test/unit/orderbook_settings_loader_test.cpp
+        src/universe/OrderbookSettingsLoader.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(orderbook_settings_loader_test PRIVATE src)
+    target_link_libraries(orderbook_settings_loader_test PRIVATE
+        GTest::gtest GTest::gtest_main GTest::gmock
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME orderbook_settings_loader COMMAND orderbook_settings_loader_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp

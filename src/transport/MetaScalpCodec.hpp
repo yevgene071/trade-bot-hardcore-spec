@@ -71,6 +71,8 @@ namespace api::fields {
     inline constexpr auto kExchangeId = "ExchangeId";
     inline constexpr auto kMarketType = "MarketType";
     inline constexpr auto kDate = "Date";
+    inline constexpr auto kLargeAmountUsd = "LargeAmountUsd";
+    inline constexpr auto kLargeAmountUsd2 = "LargeAmountUsd2";
 }
 
 class MetaScalpCodec {
@@ -85,6 +87,7 @@ public:
     static OrderBookUpdate parse_orderbook_update(const nlohmann::json& j, const Ticker& ticker);
     static ClusterSnapshot parse_cluster_snapshot(const nlohmann::json& j);
     static Notification    parse_notification(const nlohmann::json& j);
+    static OrderbookSettings parse_orderbook_settings(const nlohmann::json& j);
     static FinresUpdate parse_finres_update(const nlohmann::json& j);
     static SignalLevelTriggered parse_signal_level_triggered(const nlohmann::json& j);
     
