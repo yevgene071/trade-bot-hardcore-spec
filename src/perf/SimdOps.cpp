@@ -42,5 +42,17 @@ double dot_product(const double* a, const double* b, size_t n) {
     return total;
 }
 
+void prefix_sum(const double* data, double* out, size_t n) {
+    if (n == 0) return;
+    double running = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        running += data[i];
+        out[i] = running;
+    }
+    // Note: SIMD prefix sum is complex to implement efficiently for small n, 
+    // using scalar for now as baseline. ARCH mentions SIMD, but for n=10-30 
+    // scalar is often faster due to dependency chain.
+}
+
 } // namespace SimdOps
 } // namespace trade_bot

@@ -39,6 +39,7 @@ find_package(Boost REQUIRED CONFIG)
 find_package(tomlplusplus REQUIRED CONFIG)
 find_package(CURL REQUIRED CONFIG)
 find_package(nlohmann_json REQUIRED CONFIG)
+find_package(nlohmann_json_schema_validator REQUIRED CONFIG)
 find_package(OpenSSL REQUIRED CONFIG)
 find_package(absl REQUIRED CONFIG)
 # Workaround: Conan 2 openssl/3.6.2 recipe forgets to populate INTERFACE_INCLUDE_DIRECTORIES.
@@ -316,7 +317,8 @@ if(BUILD_TESTS)
     target_link_libraries(news_calendar_test PRIVATE
         GTest::gtest GTest::gtest_main
         spdlog::spdlog
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        nlohmann_json_schema_validator)
     add_test(NAME news_calendar COMMAND news_calendar_test)
 
     # T1-ORDERBOOK
@@ -333,6 +335,19 @@ if(BUILD_TESTS)
         absl::btree
         xsimd)
     add_test(NAME orderbook COMMAND orderbook_test)
+
+    add_executable(tradestream_test
+        test/unit/tradestream_test.cpp
+        src/marketdata/TradeStream.cpp
+        src/logger/Logger.cpp
+        src/perf/SimdOps.cpp
+    )
+    target_include_directories(tradestream_test PRIVATE src)
+    target_link_libraries(tradestream_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        xsimd)
+    add_test(NAME tradestream COMMAND tradestream_test)
 
     # Benchmarks
     add_executable(bench_perf 
@@ -359,6 +374,15 @@ if(BUILD_TESTS)
     )
     target_include_directories(bench_orderbook_depth PRIVATE src)
     target_link_libraries(bench_orderbook_depth PRIVATE benchmark::benchmark xsimd absl::btree spdlog::spdlog)
+
+    add_executable(bench_tradestream_on_trade
+        bench/bench_tradestream_on_trade.cpp
+        src/marketdata/TradeStream.cpp
+        src/logger/Logger.cpp
+        src/perf/SimdOps.cpp
+    )
+    target_include_directories(bench_tradestream_on_trade PRIVATE src)
+    target_link_libraries(bench_tradestream_on_trade PRIVATE benchmark::benchmark xsimd spdlog::spdlog)
 endif()
 
 message(STATUS "Project: ${PROJECT_NAME} v${PROJECT_VERSION}")

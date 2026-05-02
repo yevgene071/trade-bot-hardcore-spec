@@ -2,6 +2,7 @@
 
 #include "logger/Logger.hpp"
 
+#include <nlohmann/json-schema.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -46,6 +47,32 @@ std::chrono::system_clock::time_point parse_iso8601(const std::string& s) {
     return std::chrono::system_clock::from_time_t(secs);
 }
 
+const nlohmann::json& get_schema() {
+    static const nlohmann::json schema = nlohmann::json::parse(R"({
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ts_utc", "importance"],
+        "properties": {
+          "ts_utc": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z?$"
+          },
+          "importance": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "ticker": { "type": "string" },
+          "note": { "type": "string" }
+        }
+      }
+    })");
+    return schema;
+}
+
 }  // namespace
 
 void NewsCalendar::install_sighup_handler_() {
@@ -78,32 +105,25 @@ std::vector<NewsCalendar::Event> NewsCalendar::parse_(const std::string& path) {
     } catch (const std::exception& ex) {
         throw std::runtime_error("NewsCalendar: bad JSON in " + path + ": " + ex.what());
     }
-    if (!j.is_array()) {
-        throw std::runtime_error("NewsCalendar: top-level must be array (" + path + ")");
+
+    try {
+        nlohmann::json_schema::json_validator validator;
+        validator.set_root_schema(get_schema());
+        validator.validate(j);
+    } catch (const std::exception& ex) {
+        throw std::runtime_error("NewsCalendar: schema validation failed for " + path + ": " + ex.what());
     }
 
     std::vector<Event> out;
     out.reserve(j.size());
     for (const auto& item : j) {
-        if (!item.is_object()) {
-            throw std::runtime_error("NewsCalendar: non-object event entry");
-        }
-        if (!item.contains("ts_utc") || !item["ts_utc"].is_string()) {
-            throw std::runtime_error("NewsCalendar: missing/invalid ts_utc");
-        }
-        if (!item.contains("importance") || !item["importance"].is_number_integer()) {
-            throw std::runtime_error("NewsCalendar: missing/invalid importance");
-        }
         Event e;
         e.ts_utc     = parse_iso8601(item["ts_utc"].get<std::string>());
         e.importance = item["importance"].get<int>();
-        if (e.importance < 1 || e.importance > 3) {
-            throw std::runtime_error("NewsCalendar: importance must be 1..3");
-        }
-        if (item.contains("ticker") && item["ticker"].is_string()) {
+        if (item.contains("ticker")) {
             e.ticker = item["ticker"].get<std::string>();
         }
-        if (item.contains("note") && item["note"].is_string()) {
+        if (item.contains("note")) {
             e.note = item["note"].get<std::string>();
         }
         out.push_back(std::move(e));
