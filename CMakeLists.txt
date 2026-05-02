@@ -78,6 +78,9 @@ add_executable(trade_bot
     src/marketdata/LeaderTracker.cpp
     src/marketdata/TradeStream.cpp
     src/features/FeatureExtractor.cpp
+    src/universe/UniverseFilters.cpp
+    src/universe/ConnectionSelector.cpp
+    src/universe/TickerUniverse.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -424,6 +427,45 @@ if(BUILD_TESTS)
         spdlog::spdlog hdr_histogram::hdr_histogram_static
         absl::btree xsimd)
     add_test(NAME feature_welford COMMAND feature_welford_test)
+
+    # T1-UNIVERSE
+    add_executable(universe_filters_test
+        test/unit/universe_filters_test.cpp
+        src/universe/UniverseFilters.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(universe_filters_test PRIVATE src)
+    target_link_libraries(universe_filters_test PRIVATE
+        GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME universe_filters COMMAND universe_filters_test)
+
+    add_executable(connection_selector_test
+        test/unit/connection_selector_test.cpp
+        src/universe/ConnectionSelector.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(connection_selector_test PRIVATE src)
+    target_link_libraries(connection_selector_test PRIVATE
+        GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME connection_selector COMMAND connection_selector_test)
+
+    add_executable(ticker_universe_pool_test
+        test/unit/ticker_universe_pool_test.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(ticker_universe_pool_test PRIVATE src)
+    target_link_libraries(ticker_universe_pool_test PRIVATE
+        GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME ticker_universe_pool COMMAND ticker_universe_pool_test)
+
+    add_executable(ticker_universe_affinity_test
+        test/unit/ticker_universe_affinity_test.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(ticker_universe_affinity_test PRIVATE src)
+    target_link_libraries(ticker_universe_affinity_test PRIVATE
+        GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME ticker_universe_affinity COMMAND ticker_universe_affinity_test)
 
     # Benchmarks
     add_executable(bench_perf 
