@@ -74,6 +74,8 @@ add_executable(trade_bot
     src/control/SntpClient.cpp
     src/risk/NewsCalendar.cpp
     src/marketdata/OrderBook.cpp
+    src/marketdata/KalmanLagEstimator.cpp
+    src/marketdata/LeaderTracker.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -349,6 +351,44 @@ if(BUILD_TESTS)
         spdlog::spdlog
         xsimd)
     add_test(NAME tradestream COMMAND tradestream_test)
+
+    # T1-LEADER
+    add_executable(leader_correlation_welford_test
+        test/unit/leader_correlation_welford_test.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(leader_correlation_welford_test PRIVATE src)
+    target_link_libraries(leader_correlation_welford_test PRIVATE
+        GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME leader_correlation_welford COMMAND leader_correlation_welford_test)
+
+    add_executable(kalman_lag_estimator_test
+        test/unit/kalman_lag_estimator_test.cpp
+        src/marketdata/KalmanLagEstimator.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(kalman_lag_estimator_test PRIVATE src)
+    target_link_libraries(kalman_lag_estimator_test PRIVATE
+        GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME kalman_lag_estimator COMMAND kalman_lag_estimator_test)
+
+    add_executable(leader_test
+        test/unit/leader_test.cpp
+        src/marketdata/LeaderTracker.cpp
+        src/marketdata/KalmanLagEstimator.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(leader_test PRIVATE src)
+    target_link_libraries(leader_test PRIVATE
+        GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME leader COMMAND leader_test)
+
+    add_executable(leader_cusum_decorrelation_test
+        test/unit/leader_cusum_decorrelation_test.cpp
+        src/marketdata/LeaderTracker.cpp
+        src/marketdata/KalmanLagEstimator.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(leader_cusum_decorrelation_test PRIVATE src)
+    target_link_libraries(leader_cusum_decorrelation_test PRIVATE
+        GTest::gtest GTest::gtest_main spdlog::spdlog)
+    add_test(NAME leader_cusum_decorrelation COMMAND leader_cusum_decorrelation_test)
 
     # Benchmarks
     add_executable(bench_perf 
