@@ -26,6 +26,26 @@ void PaperExecutor::cancel_all(const Ticker& ticker) {
         active_plans_.end());
 }
 
+std::vector<ActiveTrade> PaperExecutor::get_active_trades() const {
+    std::vector<ActiveTrade> res;
+    for (const auto& [ticker, pos] : positions_) {
+        ActiveTrade t;
+        t.plan.ticker = ticker;
+        t.plan.side = pos.side;
+        t.executed_size = pos.size;
+        t.avg_entry_price = pos.avg_price;
+        t.state = TradeState::Open;
+        res.push_back(t);
+    }
+    for (const auto& plan : active_plans_) {
+        ActiveTrade t;
+        t.plan = plan;
+        t.state = TradeState::PendingEntry;
+        res.push_back(t);
+    }
+    return res;
+}
+
 void PaperExecutor::tick(std::chrono::system_clock::time_point now) {
     (void)now;
     for (auto it = active_plans_.begin(); it != active_plans_.end(); ) {

@@ -25,10 +25,12 @@ public:
     explicit TradeJournal(std::string log_dir = "journal");
 
     void log_entry(const Entry& entry);
+    std::vector<Entry> get_recent_entries(size_t count);
 
 private:
     std::string log_dir_;
     std::mutex  mtx_;
+    std::vector<Entry> cache_; // Keep last N in memory for dashboard
 };
 
 } // namespace trade_bot

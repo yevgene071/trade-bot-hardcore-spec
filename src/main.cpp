@@ -36,6 +36,8 @@
 #include <map>
 #include <boost/asio/io_context.hpp>
 
+#include "control/DashboardServer.hpp"
+
 using namespace trade_bot;
 
 int main() {
@@ -73,8 +75,33 @@ int main() {
         ExternalFeedRegistry::instance().register_feed(FeedKind::Funding, funding_client);
         ext_ioc.start();
 
-        // T3-INTEGRATION
+        boost::asio::io_context ioc;
+        DashboardServer dashboard(ioc, "0.0.0.0", 8080);
+        dashboard.start();
+
+        auto signal_to_string = [](SignalKind k) {
+            switch(k) {
+                case SignalKind::DensityDetected: return "DensityDetected";
+                case SignalKind::DensityRemoved: return "DensityRemoved";
+                case SignalKind::DensityEating: return "DensityEating";
+                case SignalKind::IcebergSuspected: return "IcebergSuspected";
+                case SignalKind::TapeBurst: return "TapeBurst";
+                case SignalKind::TapeFade: return "TapeFade";
+                case SignalKind::TapeFlush: return "TapeFlush";
+                case SignalKind::LevelFormed: return "LevelFormed";
+                case SignalKind::LevelApproach: return "LevelApproach";
+                case SignalKind::LevelRejection: return "LevelRejection";
+                case SignalKind::LevelBreak: return "LevelBreak";
+                case SignalKind::LeaderMove: return "LeaderMove";
+                default: return "Unknown";
+            }
+        };
+
+        std::map<std::string, int> signal_counts;
         SignalBus signal_bus;
+        signal_bus.subscribe([&](const Signal& s) {
+            signal_counts[signal_to_string(s.kind)]++;
+        });
         TickerUniverse universe;
         StrategyEngine strategy_engine(signal_bus);
         
@@ -100,7 +127,6 @@ int main() {
         }
 
         // Transport
-        boost::asio::io_context ioc;
         auto http = std::make_shared<CurlHttpClient>();
         auto ws = std::make_shared<BeastWsClient>(ioc);
         
@@ -224,6 +250,16 @@ int main() {
                 FeedStalenessMonitor::check_all(stale_cfgs);
                 last_stale_check = now;
             }
+
+            // Update Dashboard
+            DashboardServer::State dash_state;
+            dash_state.account = account_state;
+            dash_state.open_trades = executor.get_active_trades();
+            dash_state.recent_journal = journal.get_recent_entries(20);
+            dash_state.signal_counts = signal_counts;
+            dash_state.kill_switch_active = kill_switch.is_triggered();
+            dash_state.version = Config::get<std::string>("app.version");
+            dashboard.update_state(dash_state);
 
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

@@ -73,6 +73,7 @@ add_executable(trade_bot
     src/control/KillSwitch.cpp
     src/control/ClockDriftMonitor.cpp
     src/control/SntpClient.cpp
+    src/control/DashboardServer.cpp
     src/risk/NewsCalendar.cpp
     src/risk/RiskManager.cpp
     src/risk/AccountStatePersister.cpp
@@ -776,6 +777,20 @@ if(BUILD_TESTS)
     target_include_directories(executor_state_machine_test PRIVATE src)
     target_link_libraries(executor_state_machine_test PRIVATE GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json CURL::libcurl)
     add_test(NAME executor_state_machine COMMAND executor_state_machine_test)
+
+    add_executable(stop_contract_test
+        test/contract/stop_contract_test.cpp
+        src/transport/OrderGateway.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/transport/MetaScalpDiscovery.cpp
+        src/transport/CurlHttpClient.cpp
+        src/transport/MarketDataFeed.cpp
+        src/transport/BeastWsClient.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(stop_contract_test PRIVATE src)
+    target_link_libraries(stop_contract_test PRIVATE GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json CURL::libcurl Boost::boost Boost::url)
+    add_test(NAME stop_contract COMMAND stop_contract_test)
 
     # Benchmarks
     add_executable(leader_correlation_welford_test

@@ -34,6 +34,22 @@ void TradeJournal::log_entry(const Entry& entry) {
     std::lock_guard<std::mutex> lk(mtx_);
     std::ofstream out(filename, std::ios::app);
     out << j.dump() << std::endl;
+
+    cache_.push_back(entry);
+    if (cache_.size() > 100) {
+        cache_.erase(cache_.begin());
+    }
+}
+
+std::vector<TradeJournal::Entry> TradeJournal::get_recent_entries(size_t count) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    std::vector<Entry> res;
+    size_t start = (cache_.size() > count) ? cache_.size() - count : 0;
+    for (size_t i = start; i < cache_.size(); ++i) {
+        res.push_back(cache_[i]);
+    }
+    std::reverse(res.begin(), res.end());
+    return res;
 }
 
 } // namespace trade_bot

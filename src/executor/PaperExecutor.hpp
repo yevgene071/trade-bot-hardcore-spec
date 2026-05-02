@@ -2,6 +2,7 @@
 
 #include "IExecutor.hpp"
 #include "marketdata/OrderBook.hpp"
+#include "trading/ActiveTrade.hpp"
 
 #include <map>
 #include <vector>
@@ -25,6 +26,8 @@ public:
 
     /// Update internal state based on latest market data.
     void tick(std::chrono::system_clock::time_point now);
+
+    std::vector<ActiveTrade> get_active_trades() const;
 
     struct Position {
         Ticker ticker;

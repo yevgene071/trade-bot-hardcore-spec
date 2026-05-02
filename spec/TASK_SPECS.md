@@ -1071,13 +1071,14 @@ T3-SIGLEVEL включён и работает (есть события `LevelTr
 
 ---
 
-### T4-DASHBOARD: Минимальный дашборд
+### [COMPLETED] T4-DASHBOARD: Минимальный дашборд
 
 **Depends on:** T4-EXECUTOR
 
 **Deliverables:**
-- `tool/dashboard/` — простой Web UI (один HTML + WS) или TUI на `ncurses/FTXUI`
-- Показывает: текущий PnL, открытые позиции, последние 20 сделок, состояние kill-switch, счётчики сигналов
+- `src/control/DashboardServer.{hpp,cpp}` — встроенный Web UI (HTML + WebSocket)
+- Показывает: PnL, позиции, последние 20 сделок, статус KillSwitch, счетчики сигналов
+- Доступен по адресу `http://localhost:8080`
 
 ---
 
