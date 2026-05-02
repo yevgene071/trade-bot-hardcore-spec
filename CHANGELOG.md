@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## [Unreleased]
+- T1-CLUSTER: Реализован клиент и менеджер для периодического получения футпринтов (кластеров) через REST API.
 - T1-UNIVERSE: Реализовано управление пулом тикеров и аффинити стратегий с поддержкой фильтрации и событий BigTick.
 - T1-FRAME: Реализован FeatureExtractor для сборки FeatureFrame на базе OrderBook, TradeStream и LeaderTracker с расчетом волатильности и задержек.
 - T1-LEADER: Реализован LeaderTracker для отслеживания корреляции и лага между тикерами (BTC/ETH) с использованием фильтра Калмана и CUSUM.
