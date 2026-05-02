@@ -1,0 +1,195 @@
+#include "OrderBook.hpp"
+
+#include "perf/SimdOps.hpp"
+
+#include <array>
+#include <cmath>
+#include <execution>
+#include <algorithm>
+
+namespace trade_bot {
+
+OrderBook::OrderBook(Ticker ticker,
+                     double price_increment,
+                     double size_increment,
+                     std::size_t /*reserve_levels*/)
+    : ticker_(std::move(ticker))
+    , price_increment_(price_increment)
+    , size_increment_(size_increment) {
+    // absl::btree_map allocates per-node. reserve_levels is ignored here 
+    // but kept in API for future PMR/Arena swap-in as per ARCH § 2.3.
+}
+
+void OrderBook::apply_snapshot(const OrderBookSnapshot& snap) {
+    bids_.clear();
+    asks_.clear();
+    for (const auto& level : snap.bids) {
+        if (level.size <= 0.0) continue;
+        const auto tick = PriceTick::from_price(level.price, price_increment_);
+        const auto size = SizeFix::from_double(level.size, size_increment_);
+        bids_.insert_or_assign(tick, size);
+    }
+    for (const auto& level : snap.asks) {
+        if (level.size <= 0.0) continue;
+        const auto tick = PriceTick::from_price(level.price, price_increment_);
+        const auto size = SizeFix::from_double(level.size, size_increment_);
+        asks_.insert_or_assign(tick, size);
+    }
+    refresh_top_of_book_();
+    ++update_count_;
+}
+
+void OrderBook::apply_update(const OrderBookUpdate& upd) {
+    for (const auto& change : upd.changes) {
+        apply_change_(change.side, change.price, change.size);
+    }
+    refresh_top_of_book_();
+    ++update_count_;
+}
+
+void OrderBook::apply_update_batch(const std::vector<PriceLevel>& changes) {
+    if (changes.size() >= 8) {
+        // ARCH § 2.3: Parallel processing for batch >= 8. 
+        // We split by side to avoid race conditions on individual maps.
+        std::array<Side, 2> sides = {Side::Buy, Side::Sell};
+        std::for_each(std::execution::par_unseq, sides.begin(), sides.end(), [&](Side side) {
+            for (const auto& c : changes) {
+                if (c.side == side) {
+                    apply_change_(c.side, c.price, c.size);
+                }
+            }
+        });
+    } else {
+        for (const auto& c : changes) {
+            apply_change_(c.side, c.price, c.size);
+        }
+    }
+    refresh_top_of_book_();
+    ++update_count_;
+}
+
+void OrderBook::apply_change_(Side side, double price, double size) {
+    // Branchless-style hint: updates are more likely than deletes in a busy book
+    if (side == Side::None) [[unlikely]] return;
+
+    const auto tick = PriceTick::from_price(price, price_increment_);
+    const auto sizefix = SizeFix::from_double(size, size_increment_);
+
+    if (side == Side::Buy) {
+        if (size > 0.0) [[likely]] {
+            bids_.insert_or_assign(tick, sizefix);
+        } else {
+            bids_.erase(tick);
+        }
+    } else if (side == Side::Sell) {
+        if (size > 0.0) [[likely]] {
+            asks_.insert_or_assign(tick, sizefix);
+        } else {
+            asks_.erase(tick);
+        }
+    }
+}
+
+void OrderBook::refresh_top_of_book_() noexcept {
+    best_bid_tick_ = bids_.empty() ? std::nullopt : std::optional<PriceTick>{bids_.begin()->first};
+    best_ask_tick_ = asks_.empty() ? std::nullopt : std::optional<PriceTick>{asks_.begin()->first};
+}
+
+std::optional<double> OrderBook::best_bid() const noexcept {
+    if (!best_bid_tick_) return std::nullopt;
+    return best_bid_tick_->to_price(price_increment_);
+}
+
+std::optional<double> OrderBook::best_ask() const noexcept {
+    if (!best_ask_tick_) return std::nullopt;
+    return best_ask_tick_->to_price(price_increment_);
+}
+
+std::optional<double> OrderBook::spread() const noexcept {
+    if (!best_bid_tick_ || !best_ask_tick_) return std::nullopt;
+    return best_ask_tick_->to_price(price_increment_) -
+           best_bid_tick_->to_price(price_increment_);
+}
+
+std::optional<double> OrderBook::mid() const noexcept {
+    if (!best_bid_tick_ || !best_ask_tick_) return std::nullopt;
+    return 0.5 * (best_bid_tick_->to_price(price_increment_) +
+                  best_ask_tick_->to_price(price_increment_));
+}
+
+double OrderBook::bid_depth(int n_levels) const noexcept {
+    if (n_levels <= 0 || bids_.empty()) return 0.0;
+    constexpr std::size_t kMax = 64;
+    std::array<double, kMax> sizes{};
+    std::size_t count = 0;
+    for (const auto& [_, sz] : bids_) {
+        if (count >= static_cast<std::size_t>(n_levels) || count >= kMax) break;
+        sizes[count++] = sz.to_double(size_increment_);
+    }
+    return SimdOps::sum(sizes.data(), count);
+}
+
+double OrderBook::ask_depth(int n_levels) const noexcept {
+    if (n_levels <= 0 || asks_.empty()) return 0.0;
+    constexpr std::size_t kMax = 64;
+    std::array<double, kMax> sizes{};
+    std::size_t count = 0;
+    for (const auto& [_, sz] : asks_) {
+        if (count >= static_cast<std::size_t>(n_levels) || count >= kMax) break;
+        sizes[count++] = sz.to_double(size_increment_);
+    }
+    return SimdOps::sum(sizes.data(), count);
+}
+
+double OrderBook::volume_at_range(double lo, double hi) const noexcept {
+    if (lo > hi) std::swap(lo, hi);
+    const auto lo_tick = PriceTick::from_price(lo, price_increment_);
+    const auto hi_tick = PriceTick::from_price(hi, price_increment_);
+    double total = 0.0;
+    for (const auto& [tick, sz] : bids_) {
+        if (tick > hi_tick) continue;
+        if (tick < lo_tick) break;
+        total += sz.to_double(size_increment_);
+    }
+    for (const auto& [tick, sz] : asks_) {
+        if (tick < lo_tick) continue;
+        if (tick > hi_tick) break;
+        total += sz.to_double(size_increment_);
+    }
+    return total;
+}
+
+std::size_t OrderBook::bid_levels() const noexcept { return bids_.size(); }
+std::size_t OrderBook::ask_levels() const noexcept { return asks_.size(); }
+
+bool OrderBook::is_consistent(const OrderBookSnapshot& snap, int max_diff) const noexcept {
+    int diffs = 0;
+
+    auto check_side = [&](const std::vector<PriceLevel>& snap_levels, const auto& local_map) {
+        auto it = local_map.begin();
+        for (const auto& sl : snap_levels) {
+            if (it == local_map.end()) {
+                diffs++;
+            } else {
+                const auto tick = PriceTick::from_price(sl.price, price_increment_);
+                const auto size = SizeFix::from_double(sl.size, size_increment_);
+                if (it->first != tick || it->second != size) {
+                    diffs++;
+                }
+                ++it;
+            }
+            if (diffs > max_diff) return;
+        }
+        // If local has more levels, we don't necessarily count them as "diffs" 
+        // if the snapshot is partial (top-N), but usually sanity check snapshots 
+        // are compared level-by-level for the N provided.
+    };
+
+    check_side(snap.bids, bids_);
+    if (diffs > max_diff) return false;
+    check_side(snap.asks, asks_);
+    
+    return diffs <= max_diff;
+}
+
+}  // namespace trade_bot

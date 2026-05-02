@@ -40,6 +40,7 @@ find_package(tomlplusplus REQUIRED CONFIG)
 find_package(CURL REQUIRED CONFIG)
 find_package(nlohmann_json REQUIRED CONFIG)
 find_package(OpenSSL REQUIRED CONFIG)
+find_package(absl REQUIRED CONFIG)
 # Workaround: Conan 2 openssl/3.6.2 recipe forgets to populate INTERFACE_INCLUDE_DIRECTORIES.
 # Force-attach include path from the package folder.
 if(DEFINED openssl_PACKAGE_FOLDER_RELEASE)
@@ -71,6 +72,7 @@ add_executable(trade_bot
     src/control/ClockDriftMonitor.cpp
     src/control/SntpClient.cpp
     src/risk/NewsCalendar.cpp
+    src/marketdata/OrderBook.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -84,6 +86,7 @@ target_link_libraries(trade_bot PRIVATE
     nlohmann_json::nlohmann_json
     OpenSSL::SSL
     OpenSSL::Crypto
+    absl::btree
 )
 
 # Tests
@@ -316,6 +319,21 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME news_calendar COMMAND news_calendar_test)
 
+    # T1-ORDERBOOK
+    add_executable(orderbook_test
+        test/unit/orderbook_test.cpp
+        src/marketdata/OrderBook.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(orderbook_test PRIVATE src)
+    target_link_libraries(orderbook_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        absl::btree
+        xsimd)
+    add_test(NAME orderbook COMMAND orderbook_test)
+
     # Benchmarks
     add_executable(bench_perf 
         bench/bench_perf.cpp
@@ -323,6 +341,24 @@ if(BUILD_TESTS)
     )
     target_include_directories(bench_perf PRIVATE src)
     target_link_libraries(bench_perf PRIVATE benchmark::benchmark xsimd)
+
+    add_executable(bench_orderbook_apply
+        bench/bench_orderbook_apply.cpp
+        src/marketdata/OrderBook.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(bench_orderbook_apply PRIVATE src)
+    target_link_libraries(bench_orderbook_apply PRIVATE benchmark::benchmark xsimd absl::btree spdlog::spdlog)
+
+    add_executable(bench_orderbook_depth
+        bench/bench_orderbook_depth.cpp
+        src/marketdata/OrderBook.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(bench_orderbook_depth PRIVATE src)
+    target_link_libraries(bench_orderbook_depth PRIVATE benchmark::benchmark xsimd absl::btree spdlog::spdlog)
 endif()
 
 message(STATUS "Project: ${PROJECT_NAME} v${PROJECT_VERSION}")
