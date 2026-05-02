@@ -585,6 +585,21 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME approach_analyzer COMMAND approach_analyzer_test)
 
+    add_executable(leader_signal_test
+        test/unit/leader_signal_test.cpp
+        src/signals/LeaderSignal.cpp
+        src/signals/SignalBus.cpp
+        src/marketdata/LeaderTracker.cpp
+        src/marketdata/KalmanLagEstimator.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(leader_signal_test PRIVATE src)
+    target_link_libraries(leader_signal_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME leader_signal COMMAND leader_signal_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
