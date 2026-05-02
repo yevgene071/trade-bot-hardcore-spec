@@ -626,6 +626,19 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME bounce_strategy COMMAND bounce_strategy_test)
 
+    add_executable(breakout_strategy_test
+        test/unit/breakout_strategy_test.cpp
+        src/strategy/BreakoutEatThrough.cpp
+        src/signals/SignalBus.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(breakout_strategy_test PRIVATE src)
+    target_link_libraries(breakout_strategy_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME breakout_strategy COMMAND breakout_strategy_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
