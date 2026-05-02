@@ -27,17 +27,18 @@ public:
         double sell_vol_5s;
         double sell_vol_30s;
         double q99_size;      // 99th percentile size from T-Digest
-        double hawkes_intensity;
+        double hawkes_intensity_buy;
+        double hawkes_intensity_sell;
+        double hawkes_intensity_total;
     };
 
     explicit TradeStream(Ticker ticker, 
-                        double hawkes_alpha = 0.5, 
-                        double hawkes_beta = 0.5);
+                        double hawkes_alpha = 1.0, 
+                        double hawkes_beta = 0.3466); // half-life 2.0s: beta = ln(2)/2
 
     void on_trade(const Trade& trade);
     
     /// Update aggregates (evict old trades, recalculate intensity).
-    /// Typically called at 10-20 Hz by FeatureExtractor.
     void update(std::chrono::system_clock::time_point now);
 
     Stats get_stats() const;
@@ -45,29 +46,24 @@ public:
 private:
     Ticker ticker_;
     
-    // Trade storage: ring buffer (ARCH § 2.3)
-    // Using std::vector with manual index for ring buffer or just a deque if small.
-    // ARCH says "ring-buffer std::vector фикс. capacity (избегаем std::deque page allocations)"
+    // Trade storage: ring buffer
     std::vector<Trade> trades_;
     size_t head_ = 0;
     size_t count_ = 0;
     static constexpr size_t kMaxTrades = 65536;
 
-    // Incremental algorithms
+    // Incremental stats
     WelfordAccumulator<double> size_stats_;
     TDigest size_distribution_;
     
-    // Hawkes intensity: λ(t) = μ + Σ α·exp(-β(t-tᵢ))
+    // Hawkes intensities
     double hawkes_alpha_;
     double hawkes_beta_;
-    double hawkes_intensity_ = 0.0;
+    double hawkes_intensity_buy_ = 0.0;
+    double hawkes_intensity_sell_ = 0.0;
     std::chrono::system_clock::time_point last_hawkes_update_;
 
-    // CUSUM for TapeFade
-    double cusum_pos_ = 0.0;
-    double cusum_threshold_ = 5.0; // from config
-
-    // Volume accumulators (Kahan summation for precision)
+    // Volume accumulators
     KahanAccumulator<double> buy_vol_1s_;
     KahanAccumulator<double> buy_vol_5s_;
     KahanAccumulator<double> buy_vol_30s_;

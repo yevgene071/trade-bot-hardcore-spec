@@ -486,6 +486,28 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME iceberg_detector COMMAND iceberg_detector_test)
 
+    add_executable(tape_analyzer_test
+        test/unit/tape_analyzer_test.cpp
+        src/signals/TapeAnalyzer.cpp
+        src/signals/SignalBus.cpp
+        src/marketdata/TradeStream.cpp
+        src/marketdata/OrderBook.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(tape_analyzer_test PRIVATE src)
+    target_link_libraries(tape_analyzer_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        absl::btree
+        absl::flat_hash_map
+        absl::hash
+        xsimd
+        nlohmann_json::nlohmann_json)
+    add_test(NAME tape_analyzer COMMAND tape_analyzer_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp

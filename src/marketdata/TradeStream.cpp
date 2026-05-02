@@ -22,14 +22,20 @@ void TradeStream::on_trade(const Trade& trade) {
     size_distribution_.add(trade.size);
 
     // Hawkes jump
-    hawkes_intensity_ += hawkes_alpha_;
+    if (trade.side == Side::Buy) {
+        hawkes_intensity_buy_ += hawkes_alpha_;
+    } else if (trade.side == Side::Sell) {
+        hawkes_intensity_sell_ += hawkes_alpha_;
+    }
 }
 
 void TradeStream::update(std::chrono::system_clock::time_point now) {
     if (last_hawkes_update_ != std::chrono::system_clock::time_point{}) {
         auto delta = std::chrono::duration<double>(now - last_hawkes_update_).count();
-        // λ(t) decay: λ(t) = λ(0) * exp(-β * t)
-        hawkes_intensity_ *= std::exp(-hawkes_beta_ * delta);
+        // Decay
+        double decay = std::exp(-hawkes_beta_ * delta);
+        hawkes_intensity_buy_ *= decay;
+        hawkes_intensity_sell_ *= decay;
     }
     last_hawkes_update_ = now;
 
@@ -68,7 +74,6 @@ TradeStream::Stats TradeStream::get_stats() const {
     Stats s;
     s.avg_size = size_stats_.mean();
     s.stdev_size = size_stats_.stdev();
-    s.hawkes_intensity = hawkes_intensity_;
     
     s.buy_vol_1s = buy_vol_1s_.sum();
     s.buy_vol_5s = buy_vol_5s_.sum();
@@ -78,16 +83,15 @@ TradeStream::Stats TradeStream::get_stats() const {
     s.sell_vol_5s = sell_vol_5s_.sum();
     s.sell_vol_30s = sell_vol_30s_.sum();
     
-    // T-Digest quantile for q99
-    // Note: get_stats() is const, but T-Digest::quantile() requires merge() which is non-const.
-    // For now we cast or use a mutable distribution if needed. 
-    // Simplified for this task:
     auto& dist = const_cast<TDigest&>(size_distribution_);
     s.q99_size = dist.quantile(0.99);
 
-    // Prints per sec baseline: buy+sell vol 1s / avg size? No, just count trades in last 1s.
-    // Simplified: prints_per_sec is approximated by hawkes_intensity if μ=0.
-    s.prints_per_sec = hawkes_intensity_;
+    s.hawkes_intensity_buy = hawkes_intensity_buy_;
+    s.hawkes_intensity_sell = hawkes_intensity_sell_;
+    s.hawkes_intensity_total = hawkes_intensity_buy_ + hawkes_intensity_sell_;
+    
+    // Prints per sec approximated by total intensity
+    s.prints_per_sec = s.hawkes_intensity_total;
 
     return s;
 }
