@@ -508,6 +508,44 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME tape_analyzer COMMAND tape_analyzer_test)
 
+    add_executable(level_dbscan_test
+        test/unit/level_dbscan_test.cpp
+    )
+    target_include_directories(level_dbscan_test PRIVATE src)
+    target_link_libraries(level_dbscan_test PRIVATE GTest::gtest GTest::gtest_main)
+    add_test(NAME level_dbscan COMMAND level_dbscan_test)
+
+    add_executable(level_kde_test
+        test/unit/level_kde_test.cpp
+    )
+    target_include_directories(level_kde_test PRIVATE src)
+    target_link_libraries(level_kde_test PRIVATE GTest::gtest GTest::gtest_main xsimd)
+    add_test(NAME level_kde COMMAND level_kde_test)
+
+    add_executable(level_detector_test
+        test/unit/level_detector_test.cpp
+        src/signals/LevelDetector.cpp
+        src/signals/SignalBus.cpp
+        src/marketdata/OrderBook.cpp
+        src/marketdata/ClusterSnapshot.cpp
+        src/transport/ClusterSnapshotClient.cpp
+        src/transport/MetaScalpCodec.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(level_detector_test PRIVATE src)
+    target_link_libraries(level_detector_test PRIVATE
+        GTest::gtest GTest::gtest_main GTest::gmock
+        spdlog::spdlog
+        absl::btree
+        absl::flat_hash_map
+        absl::hash
+        xsimd
+        nlohmann_json::nlohmann_json)
+    add_test(NAME level_detector COMMAND level_detector_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp

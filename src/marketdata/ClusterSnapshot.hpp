@@ -41,8 +41,8 @@ public:
     void refresh(const std::vector<Ticker>& active_tickers);
 
     /// Get cached snapshot.
-    std::optional<ClusterSnapshot> get(const Ticker& ticker,
-                                      const std::string& timeframe) const;
+    virtual std::optional<ClusterSnapshot> get(const Ticker& ticker,
+                                              const std::string& timeframe) const;
 
 private:
     void poll_loop_();
