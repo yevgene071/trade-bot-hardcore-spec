@@ -413,6 +413,16 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME orderbook_settings_loader COMMAND orderbook_settings_loader_test)
 
+    add_executable(signal_bus_test
+        test/unit/signal_bus_test.cpp
+        src/signals/SignalBus.cpp
+    )
+    target_include_directories(signal_bus_test PRIVATE src)
+    target_link_libraries(signal_bus_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        nlohmann_json::nlohmann_json)
+    add_test(NAME signal_bus COMMAND signal_bus_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
