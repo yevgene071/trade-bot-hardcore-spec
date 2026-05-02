@@ -74,6 +74,9 @@ add_executable(trade_bot
     src/control/ClockDriftMonitor.cpp
     src/control/SntpClient.cpp
     src/control/DashboardServer.cpp
+    src/metrics/MetricsRegistry.cpp
+    src/metrics/MetricsExporter.cpp
+    src/metrics/AlertWebhook.cpp
     src/risk/NewsCalendar.cpp
     src/risk/RiskManager.cpp
     src/risk/AccountStatePersister.cpp
@@ -752,6 +755,25 @@ if(BUILD_TESTS)
     target_include_directories(state_persistence_test PRIVATE src)
     target_link_libraries(state_persistence_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json)
     add_test(NAME state_persistence COMMAND state_persistence_test)
+
+    add_executable(metrics_test
+        test/unit/metrics_test.cpp
+        src/metrics/MetricsRegistry.cpp
+    )
+    target_include_directories(metrics_test PRIVATE src)
+    target_link_libraries(metrics_test PRIVATE GTest::gtest GTest::gtest_main)
+    add_test(NAME metrics COMMAND metrics_test)
+
+    add_executable(metrics_exporter_test
+        test/unit/metrics_exporter_test.cpp
+        src/metrics/MetricsExporter.cpp
+        src/metrics/MetricsRegistry.cpp
+        src/transport/CurlHttpClient.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(metrics_exporter_test PRIVATE src)
+    target_link_libraries(metrics_exporter_test PRIVATE GTest::gtest GTest::gtest_main CURL::libcurl spdlog::spdlog Boost::boost)
+    add_test(NAME metrics_exporter COMMAND metrics_exporter_test)
 
     add_executable(startup_recovery_test
         test/unit/startup_recovery_test.cpp

@@ -1,6 +1,7 @@
 #include "NotificationFeed.hpp"
 #include "MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
+#include "metrics/MetricsRegistry.hpp"
 
 namespace trade_bot {
 
@@ -51,6 +52,7 @@ void NotificationFeed::route_notification_(const Notification& n) {
     // Filter by exchange and market type
     if (n.exchange_id != cfg_.exchange_id || n.market_type != cfg_.market_type) {
         dropped_wrong_connection_++;
+        MetricsRegistry::instance().counter_inc("trade_bot_notification_dropped_total");
         return;
     }
 

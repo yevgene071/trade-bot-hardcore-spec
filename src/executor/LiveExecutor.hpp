@@ -43,6 +43,8 @@ public:
 
     void tick(std::chrono::system_clock::time_point now);
 
+    void set_alert_callback(std::function<void(const std::string&)> cb) { alert_cb_ = cb; }
+
     const std::map<Ticker, std::vector<ActiveTrade>>& active_trades() const { return trades_; }
 
 private:
@@ -63,6 +65,7 @@ private:
     
     double reserved_balance_usd_{0.0};
     std::chrono::system_clock::time_point last_balance_update_;
+    std::function<void(const std::string&)> alert_cb_;
 };
 
 } // namespace trade_bot

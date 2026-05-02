@@ -1,5 +1,6 @@
 #include "LiveExecutor.hpp"
 #include "logger/Logger.hpp"
+#include "metrics/MetricsRegistry.hpp"
 #include <chrono>
 
 namespace trade_bot {
@@ -32,8 +33,12 @@ void LiveExecutor::submit(const TradePlan& plan) {
     req.type = plan.entry_type;
 
     try {
+        auto start = std::chrono::steady_clock::now();
         auto res = gateway_.place_order(connection_id_, req);
-        
+        auto end = std::chrono::steady_clock::now();
+        double lat_ms = std::chrono::duration<double, std::milli>(end - start).count();
+        MetricsRegistry::instance().histogram_observe("trade_bot_order_latency_ms", lat_ms);
+
         LOG_INFO("LiveExecutor: submitted entry for {} {} @ {}", 
                  plan.ticker, plan.side == Side::Buy ? "BUY" : "SELL", plan.entry_price);
         
@@ -42,7 +47,10 @@ void LiveExecutor::submit(const TradePlan& plan) {
         
     } catch (const std::exception& e) {
         LOG_ERROR("LiveExecutor: place_order error for {}: {}", plan.ticker, e.what());
-        error_streak_++;
+        int streak = ++error_streak_;
+        if (streak >= cfg_.exchange_error_streak_limit) {
+            if (alert_cb_) alert_cb_("Exchange error streak hit: " + std::to_string(streak) + " errors in a row.");
+        }
         
         OrderIntent intent{0, plan.ticker, plan.side, plan.entry_type, plan.entry_price, plan.size_coin};
         reconciliator_.enter_submit_unknown(intent);
@@ -88,6 +96,7 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
                         trade.opened_at = upd.time;
                         
                         LOG_INFO("LiveExecutor: entry FILLED for {} @ {}", upd.ticker, upd.filled_price);
+                        MetricsRegistry::instance().counter_inc("trade_bot_trades_total", {{"ticker", upd.ticker}, {"strategy", trade.plan.strategy_name}});
                         place_stops_(trade);
                     } else if (trade.state == TradeState::Exiting || trade.state == TradeState::Open) {
                         // Exit filled

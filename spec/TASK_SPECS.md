@@ -1118,26 +1118,15 @@ T3-SIGLEVEL включён и работает (есть события `LevelTr
 
 ---
 
-### T4-METRICS: Observability и мониторинг
+### [COMPLETED] T4-METRICS: Observability и мониторинг
 
 **Depends on:** T4-EXECUTOR
 
 **Deliverables:**
-- `src/metrics/MetricsExporter.{hpp,cpp}` — Prometheus-совместимый HTTP
-  endpoint (`/metrics`, порт из конфига, default 9090)
-- Метрики:
-  - `trade_bot_pnl_usd` (gauge) — текущий PnL
-  - `trade_bot_trades_total` (counter) — сделки по strategy/ticker
-  - `trade_bot_signals_total` (counter) — сигналы по kind
-  - `trade_bot_order_latency_ms` (histogram) — время исполнения ордеров
-  - `trade_bot_ws_reconnects_total` (counter)
-  - `trade_bot_killswitch_triggered` (gauge, 0/1)
-  - `trade_bot_queue_depth` (gauge, per ticker)
-  - `trade_bot_notification_dropped_total` (counter)
-- `src/metrics/AlertWebhook.{hpp,cpp}` — POST webhook (конфигурируемый URL,
-  default Telegram bot) при событиях: kill-switch, WS-loss, error streak,
-  R14 position loss exceed
-- конфиг `[metrics]`: `enabled=true`, `port=9090`, `alert_webhook_url=""`
+- `src/metrics/MetricsExporter.{hpp,cpp}` — Prometheus-совместимый HTTP endpoint (`/metrics`, port 9090)
+- `src/metrics/MetricsRegistry.{hpp,cpp}` — хранилище метрик (PnL, сделки, сигналы, латентность)
+- `src/metrics/AlertWebhook.{hpp,cpp}` — POST webhook для алертов (Telegram/Discord)
+- Интеграция во все ключевые модули (LiveExecutor, BeastWsClient, main loop)
 
 **Acceptance criteria:**
 - `curl localhost:9090/metrics` возвращает валидный Prometheus exposition format

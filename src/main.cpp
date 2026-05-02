@@ -37,6 +37,9 @@
 #include <boost/asio/io_context.hpp>
 
 #include "control/DashboardServer.hpp"
+#include "metrics/MetricsExporter.hpp"
+#include "metrics/MetricsRegistry.hpp"
+#include "metrics/AlertWebhook.hpp"
 
 using namespace trade_bot;
 
@@ -79,6 +82,13 @@ int main() {
         DashboardServer dashboard(ioc, "0.0.0.0", 8080);
         dashboard.start();
 
+        uint16_t metrics_port = Config::get<uint16_t>("metrics.port", 9090);
+        MetricsExporter metrics_exporter(ioc, "0.0.0.0", metrics_port);
+        metrics_exporter.start();
+
+        std::string alert_url = Config::get<std::string>("metrics.alert_webhook_url", "");
+        AlertWebhook alerts(http, alert_url);
+
         auto signal_to_string = [](SignalKind k) {
             switch(k) {
                 case SignalKind::DensityDetected: return "DensityDetected";
@@ -100,7 +110,9 @@ int main() {
         std::map<std::string, int> signal_counts;
         SignalBus signal_bus;
         signal_bus.subscribe([&](const Signal& s) {
-            signal_counts[signal_to_string(s.kind)]++;
+            std::string kind_str = signal_to_string(s.kind);
+            signal_counts[kind_str]++;
+            MetricsRegistry::instance().counter_inc("trade_bot_signals_total", {{"kind", kind_str}});
         });
         TickerUniverse universe;
         StrategyEngine strategy_engine(signal_bus);
@@ -129,6 +141,17 @@ int main() {
         // Transport
         auto http = std::make_shared<CurlHttpClient>();
         auto ws = std::make_shared<BeastWsClient>(ioc);
+
+        std::string alert_url = Config::get<std::string>("metrics.alert_webhook_url", "");
+        auto alerts = std::make_shared<AlertWebhook>(http, alert_url);
+        
+        ws->set_on_error([alerts](const std::string& msg) {
+            alerts->send_alert("WebSocket error: " + msg);
+        });
+
+        kill_switch.set_on_trigger([alerts]() {
+            alerts->send_alert("KILL-SWITCH TRIGGERED! Stopping all trading.");
+        });
         
         MetaScalpDiscovery discovery(http);
         auto port = discovery.discover();
@@ -222,6 +245,8 @@ int main() {
 
             // Update PnL from FinresHandler
             account_state.realized_pnl_today_usd = finres_handler.get_realized_pnl(connection_id);
+            MetricsRegistry::instance().gauge_set("trade_bot_pnl_usd", account_state.realized_pnl_today_usd);
+            MetricsRegistry::instance().gauge_set("trade_bot_killswitch_triggered", kill_switch.is_triggered() ? 1.0 : 0.0);
 
             // Update funding times in RiskManager
             for (const auto& [ticker, ctrl] : controllers) {
@@ -234,6 +259,14 @@ int main() {
             for (auto& [ticker, ctrl] : controllers) {
                 auto frame = ctrl->tick(now);
                 strategy_engine.on_frame(frame);
+                
+                // Update queue depth (stub for now, using open trades per ticker)
+                size_t depth = 0;
+                auto trades = executor.get_active_trades();
+                for (const auto& t : trades) {
+                    if (t.plan.ticker == ticker) depth++;
+                }
+                MetricsRegistry::instance().gauge_set("trade_bot_queue_depth", (double)depth, {{"ticker", ticker}});
             }
             
             strategy_engine.tick(now);

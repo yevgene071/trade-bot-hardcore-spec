@@ -1,5 +1,6 @@
 #include "BeastWsClient.hpp"
 #include "logger/Logger.hpp"
+#include "metrics/MetricsRegistry.hpp"
 #include <boost/url.hpp>
 #include <iostream>
 #include <openssl/err.h>
@@ -240,6 +241,7 @@ void BeastWsClient::on_write(beast::error_code ec, std::size_t bytes_transferred
 void BeastWsClient::schedule_reconnect() {
     if (m_closing) return;
 
+    MetricsRegistry::instance().counter_inc("trade_bot_ws_reconnects_total");
     LOG_INFO("WS reconnecting in {}s...", m_reconnect_delay_s);
     m_reconnect_timer.expires_after(std::chrono::seconds(m_reconnect_delay_s));
     m_reconnect_timer.async_wait([self = shared_from_this()](beast::error_code ec) {
