@@ -1,6 +1,8 @@
 # CHANGELOG
 
 ## [Unreleased]
+- T4-RECOVERY: Реализована логика восстановления состояния при запуске (синхронизация позиций и ордеров с сервером).
+- T4-EXECUTOR: Реализован LiveExecutor с машиной состояний, обработкой неопределенных ответов (SubmitUnknown) и управлением стоп-ордерами.
 - T4-FINRES: Реализована обработка finres_update для точного отслеживания реализованного PnL дня.
 - T4-FUNDING: Реализован клиент для Binance Futures Funding Rate и интеграция правила R13 (funding blackout) в RiskManager.
 - T4-EXTERNAL: Реализован фреймворк для внешних фидов (ExternalFeedRegistry) и мониторинг их актуальности.

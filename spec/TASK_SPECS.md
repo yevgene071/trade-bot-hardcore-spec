@@ -963,7 +963,7 @@ T3-SIGLEVEL включён и работает (есть события `LevelTr
 
 ---
 
-### T4-EXECUTOR: LiveExecutor
+### [COMPLETED] T4-EXECUTOR: LiveExecutor
 
 **Depends on:** T4-RISK, T0-GATEWAY, T4-RECOVERY
 
@@ -1041,7 +1041,7 @@ T3-SIGLEVEL включён и работает (есть события `LevelTr
 
 ---
 
-### T4-RECOVERY: Startup recovery (open positions + orders)
+### [COMPLETED] T4-RECOVERY: Startup recovery (open positions + orders)
 
 **Depends on:** T0-GATEWAY, T4-EXECUTOR (частично — интерфейс `ActiveTrade`)
 
