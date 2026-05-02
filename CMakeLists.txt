@@ -81,6 +81,21 @@ add_executable(trade_bot
     src/universe/UniverseFilters.cpp
     src/universe/ConnectionSelector.cpp
     src/universe/TickerUniverse.cpp
+    src/universe/OrderbookSettingsLoader.cpp
+    src/marketdata/ClusterSnapshot.cpp
+    src/transport/ClusterSnapshotClient.cpp
+    src/transport/NotificationFeed.cpp
+    src/signals/SignalBus.cpp
+    src/signals/DensityDetector.cpp
+    src/signals/IcebergDetector.cpp
+    src/signals/TapeAnalyzer.cpp
+    src/signals/LevelDetector.cpp
+    src/signals/ApproachAnalyzer.cpp
+    src/signals/LeaderSignal.cpp
+    src/strategy/StrategyEngine.cpp
+    src/strategy/BounceFromDensity.cpp
+    src/strategy/BreakoutEatThrough.cpp
+    src/strategy/LeaderLag.cpp
 )
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
@@ -96,6 +111,8 @@ target_link_libraries(trade_bot PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
     absl::btree
+    absl::flat_hash_map
+    absl::hash
 )
 
 # Tests
