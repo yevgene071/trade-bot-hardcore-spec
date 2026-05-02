@@ -64,6 +64,7 @@ private:
     
     bool burst_signal_active_{false};
     bool fade_signal_active_{false};
+    bool distribution_signal_active_{false};
 };
 
 } // namespace trade_bot

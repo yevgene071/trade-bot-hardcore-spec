@@ -30,12 +30,30 @@ void DensityDetector::on_frame(const FeatureFrame& frame) {
 
 void DensityDetector::on_trade(const Trade& trade) {
     auto now = trade.timestamp;
-    
-    // Sub-detector: DensityEating
-    // Find tracked density on trade price (opposite side)
-    const auto tick = PriceTick::from_price(trade.price, book_.price_increment());
-    auto it = tracked_.find(tick);
-    
+
+    // Sub-detector: DensityEating.
+    // Match the trade against the tracked level at exactly its tick first; if
+    // that misses, try the neighbouring ticks (-1, +1). Crypto venues sometimes
+    // report aggressor prints with tiny rounding/slippage so the eat-through
+    // event must still fire when the trade lands one tick off the level.
+    // Side check is preserved (eating is the opposite side of resting density).
+    // Fixes #116.
+    const auto base_tick = PriceTick::from_price(trade.price, book_.price_increment());
+    auto it = tracked_.find(base_tick);
+    if (it == tracked_.end() || it->second.side == trade.side) {
+        const PriceTick alt_minus{base_tick.ticks - 1};
+        auto alt = tracked_.find(alt_minus);
+        if (alt != tracked_.end() && alt->second.side != trade.side) {
+            it = alt;
+        } else {
+            const PriceTick alt_plus{base_tick.ticks + 1};
+            alt = tracked_.find(alt_plus);
+            if (alt != tracked_.end() && alt->second.side != trade.side) {
+                it = alt;
+            }
+        }
+    }
+
     if (it != tracked_.end() && it->second.side != trade.side) {
         auto& meta = it->second;
         meta.eaten_volume += trade.size;

@@ -15,6 +15,7 @@ enum class SignalKind {
     TapeBurst,           // всплеск агрессии в одну сторону
     TapeFade,            // затухание ленты
     TapeFlush,           // "прострел"
+    TapeDistribution,    // консолидация / раздача (низкая дисперсия + сохранённый объём)
     LevelFormed,         // сформирован новый горизонтальный уровень
     LevelApproach,       // подход к уровню
     LevelRejection,      // отбой от уровня

@@ -87,6 +87,52 @@ TEST_F(TapeAnalyzerTest, DetectsTapeFade) {
     EXPECT_GT(signals, 0);
 }
 
+// Issue #118: Distribution sub-detector — emits when volatility is low and
+// 30-second volume is sustained (consolidation regime).
+TEST_F(TapeAnalyzerTest, DetectsTapeDistribution) {
+    SignalBus bus;
+    OrderBook book{"BTCUSDT", 0.01, 1e-6};
+    TradeStream stream{"BTCUSDT", 1.0, 0.3466};
+
+    TapeAnalyzer::Config cfg;
+    cfg.distribution_max_range_bps = 20.0;
+    cfg.distribution_min_volume_usd = 500'000.0;
+    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream, cfg);
+
+    int distribution_signals = 0;
+    bus.subscribe([&](const Signal& s) {
+        if (s.kind == SignalKind::TapeDistribution) ++distribution_signals;
+    });
+
+    auto now = std::chrono::system_clock::now();
+
+    // Pump 30 s of small constant-price trades (volume_usd_30s ≫ threshold,
+    // mid = 50 000, total notional ≈ 60×0.5×50 000 = 1.5 M USD).
+    for (int i = 0; i < 60; ++i) {
+        stream.on_trade({50000.0, 0.5, (i % 2 == 0) ? Side::Buy : Side::Sell, now});
+        now += std::chrono::milliseconds{500};
+    }
+    stream.update(now);
+
+    // Frame with low volatility + high sustained volume → must emit Distribution.
+    FeatureFrame f = make_frame("BTCUSDT", now);
+    f.volatility_1min_bps = 5.0;     // well below 20 bps threshold
+    analyzer.on_frame(f);
+    EXPECT_EQ(distribution_signals, 1);
+
+    // Same conditions on the next frame → no re-emit (state-aware).
+    analyzer.on_frame(f);
+    EXPECT_EQ(distribution_signals, 1);
+
+    // Volatility expands past threshold → state clears, next low-vol frame
+    // re-emits.
+    FeatureFrame breakout = f;
+    breakout.volatility_1min_bps = 50.0;
+    analyzer.on_frame(breakout);
+    analyzer.on_frame(f);
+    EXPECT_EQ(distribution_signals, 2);
+}
+
 TEST_F(TapeAnalyzerTest, DetectsTapeFlush) {
     SignalBus bus;
     OrderBook book{"BTCUSDT", 0.01, 1e-6};

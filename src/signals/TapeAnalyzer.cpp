@@ -106,6 +106,44 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
         fade_signal_active_ = false;
         fade_cusum_.reset();
     }
+
+    // 4. TapeDistribution Detection (consolidation / accumulation).
+    // Spec — fixes #118.
+    // A consolidation regime is characterised by:
+    //   - low intra-window price volatility (stdev of log returns), AND
+    //   - non-trivial volume that is NOT being absorbed into a directional move.
+    // The HMM market-regime classifier (T2-APPROACH) consumes this to switch
+    // between breakout and bounce strategies.
+    //
+    // Volatility is read from the FeatureFrame in basis points (already
+    // computed as Welford stdev of 1-min log returns by FeatureExtractor).
+    // Volume is converted from base-asset units to USD via the current mid.
+    const double total_vol_30s = stats.buy_vol_30s + stats.sell_vol_30s;
+    const double volume_usd_30s = total_vol_30s * frame.mid;
+    const bool low_dispersion = frame.volatility_1min_bps > 0.0 &&
+                                frame.volatility_1min_bps <= cfg_.distribution_max_range_bps;
+    const bool sustained_volume = volume_usd_30s >= cfg_.distribution_min_volume_usd;
+
+    if (low_dispersion && sustained_volume) {
+        if (!distribution_signal_active_) {
+            Signal s {
+                .kind = SignalKind::TapeDistribution,
+                .timestamp = frame.timestamp,
+                .ticker = ticker_,
+                .price = frame.mid,
+                .confidence = 1.0,
+                .payload = nlohmann::json{
+                    {"volatility_bps", frame.volatility_1min_bps},
+                    {"volume_usd_30s", volume_usd_30s},
+                    {"max_range_bps", cfg_.distribution_max_range_bps},
+                }
+            };
+            bus_.publish(s);
+            distribution_signal_active_ = true;
+        }
+    } else {
+        distribution_signal_active_ = false;
+    }
 }
 
 void TapeAnalyzer::on_trade(const Trade& trade) {
