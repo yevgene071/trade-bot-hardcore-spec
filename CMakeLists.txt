@@ -639,6 +639,19 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME breakout_strategy COMMAND breakout_strategy_test)
 
+    add_executable(leaderlag_strategy_test
+        test/unit/leaderlag_strategy_test.cpp
+        src/strategy/LeaderLag.cpp
+        src/signals/SignalBus.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(leaderlag_strategy_test PRIVATE src)
+    target_link_libraries(leaderlag_strategy_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME leaderlag_strategy COMMAND leaderlag_strategy_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
