@@ -613,6 +613,19 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME strategy_engine COMMAND strategy_engine_test)
 
+    add_executable(bounce_strategy_test
+        test/unit/bounce_strategy_test.cpp
+        src/strategy/BounceFromDensity.cpp
+        src/signals/SignalBus.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(bounce_strategy_test PRIVATE src)
+    target_link_libraries(bounce_strategy_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json)
+    add_test(NAME bounce_strategy COMMAND bounce_strategy_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp
