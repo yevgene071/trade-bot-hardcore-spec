@@ -63,7 +63,6 @@ funding_blackout_post_sec = 30
 allow_hedge = false
 whitelist_tickers = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 exchange_error_streak = 5
-max_clock_drift_ms = 500
 ws_reconnect_timeout_sec = 15
 ws_loss_poll_interval_ms = 500
 position_drift_coin = 0.0001
@@ -77,6 +76,13 @@ connection_health_poll_sec = 30
 finres_staleness_sec = 60
 finres_staleness_kill_sec = 300
 finres_kill_on_staleness = false
+
+[clock]
+sources = ["pool.ntp.org", "time.google.com"]
+check_interval_sec = 30
+warn_drift_ms = 200
+max_clock_drift_ms = 500
+
 
 [external_feeds]
 [external_feeds.funding]
