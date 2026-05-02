@@ -423,6 +423,27 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json)
     add_test(NAME signal_bus COMMAND signal_bus_test)
 
+    add_executable(density_detector_test
+        test/unit/density_detector_test.cpp
+        src/signals/DensityDetector.cpp
+        src/signals/SignalBus.cpp
+        src/marketdata/OrderBook.cpp
+        src/universe/TickerUniverse.cpp
+        src/universe/UniverseFilters.cpp
+        src/perf/SimdOps.cpp
+        src/logger/Logger.cpp
+    )
+    target_include_directories(density_detector_test PRIVATE src)
+    target_link_libraries(density_detector_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        absl::btree
+        absl::flat_hash_map
+        absl::hash
+        xsimd
+        nlohmann_json::nlohmann_json)
+    add_test(NAME density_detector COMMAND density_detector_test)
+
     # Benchmarks
     add_executable(leader_correlation_welford_test
         test/unit/leader_correlation_welford_test.cpp

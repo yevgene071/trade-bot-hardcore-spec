@@ -23,6 +23,11 @@ struct PriceTick {
 
     auto operator<=>(const PriceTick&) const = default;
 
+    template <typename H>
+    friend H AbslHashValue(H h, const PriceTick& p) {
+        return H::combine(std::move(h), p.ticks);
+    }
+
     PriceTick operator+(const PriceTick& other) const { return { ticks + other.ticks }; }
     PriceTick operator-(const PriceTick& other) const { return { ticks - other.ticks }; }
 };

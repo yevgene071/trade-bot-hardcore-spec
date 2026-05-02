@@ -57,6 +57,8 @@ public:
 
     const Ticker& ticker() const noexcept { return ticker_; }
     int64_t update_count() const noexcept { return update_count_; }
+    double  price_increment() const noexcept { return price_increment_; }
+    double  size_increment() const noexcept { return size_increment_; }
 
     /**
      * Slices the top N levels of each side and compares with a snapshot.
