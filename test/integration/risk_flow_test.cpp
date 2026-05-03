@@ -5,6 +5,7 @@
 using namespace trade_bot;
 
 TEST(RiskFlowTest, DaySimulationWithLossStreak) {
+    Logger::init();   // record_trade_end now logs WARN on streak — needs spdlog
     TickerUniverse universe;
     NewsCalendar news;
     RiskManager::Config cfg;

@@ -15,13 +15,29 @@ enum class TradeState {
 };
 
 struct ActiveTrade {
-    TradePlan plan;
-    int       entry_order_id;
-    TradeState state;
-    double    executed_size;
-    double    avg_entry_price;
+    TradePlan  plan;
+    // Server-assigned OrderIds, captured from the first WS order_update for
+    // each role. 0 means "not yet observed". MetaScalp returns the id only
+    // through the WS stream, not from POST /orders, so these are populated
+    // asynchronously. Issue #129.
+    int64_t    entry_order_id{0};
+    int64_t    stop_order_id{0};
+    int64_t    tp1_order_id{0};
+    int64_t    tp2_order_id{0};
+    TradeState state{TradeState::PendingEntry};
+    double     executed_size{0.0};
+    double     avg_entry_price{0.0};
+    /// Weighted average of entry orders only (PositionUpdate.AvgPriceFix).
+    /// Used to re-price the stop to break-even after TP1 per T4-EXECUTOR
+    /// spec — explicitly NOT AvgPriceDyn, which is adjusted by realized
+    /// exit PnL and would systematically mis-price the BE stop.
+    /// Issue #126.
+    double     avg_price_fix{0.0};
+    /// Set true after the first TakeProfit fill so the executor doesn't
+    /// re-arm the BE-stop on subsequent partial fills.
+    bool       tp1_filled{false};
     std::chrono::system_clock::time_point opened_at;
-    
+
     bool operator==(const ActiveTrade&) const = default;
 };
 

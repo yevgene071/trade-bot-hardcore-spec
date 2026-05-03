@@ -23,12 +23,17 @@ public:
     };
 
     explicit AccountStatePersister(std::string path = "journal/account_state.json");
+    ~AccountStatePersister();
+
+    AccountStatePersister(const AccountStatePersister&)            = delete;
+    AccountStatePersister& operator=(const AccountStatePersister&) = delete;
 
     void save(const PersistedData& data);
     std::optional<PersistedData> load();
 
 private:
     std::string path_;
+    int         lock_fd_{-1};   // advisory exclusive lock — see ctor
 };
 
 // JSON serialization helpers

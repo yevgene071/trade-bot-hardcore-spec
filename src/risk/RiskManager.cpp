@@ -1,9 +1,8 @@
 #include "RiskManager.hpp"
 #include "logger/Logger.hpp"
 
-#include <cmath>
 #include <algorithm>
-#include <iostream>
+#include <cmath>
 
 namespace trade_bot {
 
@@ -22,6 +21,34 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     RiskDecision d;
     auto now = std::chrono::system_clock::now();
 
+    // ---- Input sanity (#125): reject malformed inputs explicitly so we
+    //      never divide by zero further down. Each guard short-circuits
+    //      to RejectReason::InternalError + LOG_ERROR so the operator
+    //      sees a clear cause instead of silent NaNs.
+    if (state.starting_equity_usd <= 0.0) {
+        LOG_ERROR("RiskManager: starting_equity_usd={} is not positive — rejecting plan",
+                  state.starting_equity_usd);
+        d.reason  = RejectReason::InternalError;
+        d.details = "starting_equity_usd is not positive";
+        return d;
+    }
+    if (plan.entry_price <= 0.0) {
+        LOG_ERROR("RiskManager: plan.entry_price={} for {} is not positive",
+                  plan.entry_price, plan.ticker);
+        d.reason  = RejectReason::InternalError;
+        d.details = "entry_price is not positive";
+        return d;
+    }
+    if (cfg_.max_leverage <= 0) {
+        LOG_ERROR("RiskManager: cfg.max_leverage={} is not positive — bad config",
+                  cfg_.max_leverage);
+        d.reason  = RejectReason::InternalError;
+        d.details = "max_leverage is not positive";
+        return d;
+    }
+
+    std::lock_guard lock(mtx_);
+
     // R1. Kill-switch
     if (state.kill_switch_triggered) {
         d.reason = RejectReason::KillSwitchActive;
@@ -29,8 +56,10 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
-    // R2. Daily loss limit
-    double daily_pnl_pct = (state.realized_pnl_today_usd + state.unrealized_pnl_usd) / state.starting_equity_usd * 100.0;
+    // R2. Daily loss limit (starting_equity_usd guarded above)
+    double daily_pnl_pct =
+        (state.realized_pnl_today_usd + state.unrealized_pnl_usd) /
+        state.starting_equity_usd * 100.0;
     if (daily_pnl_pct <= -cfg_.max_daily_loss_pct) {
         d.reason = RejectReason::DailyLossLimitHit;
         d.details = "Daily loss limit hit: " + std::to_string(daily_pnl_pct) + "%";
@@ -92,7 +121,15 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
-    // R8. Sizing
+    // R8. Sizing — stop_dist_bps already passed > min_stop_bps above so
+    //      it's strictly positive; entry_price guarded at top.
+    if (stop_dist_bps <= 0.0) {
+        LOG_ERROR("RiskManager: stop_dist_bps={} non-positive after R6 — invariant broken",
+                  stop_dist_bps);
+        d.reason  = RejectReason::InternalError;
+        d.details = "stop distance is not positive";
+        return d;
+    }
     double risk_usd_target = state.equity_usd * cfg_.max_per_trade_risk_pct / 100.0;
     double size_coin = risk_usd_target / (plan.entry_price * stop_dist_bps / 10000.0);
 
@@ -138,14 +175,23 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
-    // R13. Funding blackout
+    // R13. Funding blackout — funding_times_[ticker] is the timestamp of
+    // the NEXT funding event. Block when now is in the asymmetric window
+    // [next - pre_sec, next + post_sec]. Issue #127.
     auto fit = funding_times_.find(plan.ticker);
     if (fit != funding_times_.end()) {
-        auto delta = now - fit->second;
-        auto secs = std::abs(std::chrono::duration_cast<std::chrono::seconds>(delta).count());
-        if (secs <= cfg_.funding_blackout_pre_sec || secs <= cfg_.funding_blackout_post_sec) {
-            d.reason = RejectReason::FundingBlackout;
-            d.details = "Funding blackout active";
+        const auto next_funding = fit->second;
+        const auto secs_to_next =
+            std::chrono::duration_cast<std::chrono::seconds>(next_funding - now).count();
+        // secs_to_next > 0 => next is in the future; <= 0 => already passed.
+        const bool in_pre  = secs_to_next > 0 &&
+                             secs_to_next <= cfg_.funding_blackout_pre_sec;
+        const bool in_post = secs_to_next <= 0 &&
+                             -secs_to_next <= cfg_.funding_blackout_post_sec;
+        if (in_pre || in_post) {
+            d.reason  = RejectReason::FundingBlackout;
+            d.details = in_pre ? "Funding blackout (pre-window)"
+                               : "Funding blackout (post-window)";
             return d;
         }
     }
@@ -154,27 +200,35 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     return d;
 }
 
-void RiskManager::update_funding_time(const Ticker& ticker, std::chrono::system_clock::time_point ts) {
+void RiskManager::update_funding_time(const Ticker& ticker,
+                                      std::chrono::system_clock::time_point ts) {
+    std::lock_guard lock(mtx_);
     funding_times_[ticker] = ts;
 }
 
-void RiskManager::record_trade_end(bool is_loss, std::chrono::system_clock::time_point ts) {
+void RiskManager::record_trade_end(bool is_loss,
+                                   std::chrono::system_clock::time_point ts) {
+    std::lock_guard lock(mtx_);
     trade_history_.push_back(ts);
     loss_history_.push_back({ts, is_loss});
-    
-    while (!loss_history_.empty() && (ts - loss_history_.front().first) > std::chrono::minutes(cfg_.loss_streak_window_min)) {
+
+    while (!loss_history_.empty() &&
+           (ts - loss_history_.front().first) >
+               std::chrono::minutes(cfg_.loss_streak_window_min)) {
         loss_history_.pop_front();
     }
-    
+
     int consecutive_losses = 0;
     for (auto it = loss_history_.rbegin(); it != loss_history_.rend(); ++it) {
         if (it->second) consecutive_losses++;
         else break;
     }
-    
+
     if (consecutive_losses >= cfg_.max_consecutive_losses) {
         last_loss_streak_ts_ = ts;
-        // LOG_WARN("RiskManager: loss streak circuit breaker triggered");
+        LOG_WARN("RiskManager: loss-streak circuit breaker triggered "
+                 "({} consecutive losses; cooloff for {} min)",
+                 consecutive_losses, cfg_.loss_streak_cooloff_min);
     }
 }
 

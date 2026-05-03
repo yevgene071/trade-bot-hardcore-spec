@@ -5,8 +5,10 @@
 #include "risk/NewsCalendar.hpp"
 #include "universe/TickerUniverse.hpp"
 
-#include <vector>
 #include <deque>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
 namespace trade_bot {
 
@@ -54,10 +56,19 @@ public:
     RiskManager(const TickerUniverse& universe, 
                 const NewsCalendar& news);
 
+    /// Evaluate a TradePlan against R1..R13. Thread-safe — multiple
+    /// threads (strategy engine + executor reconciliation) may call this
+    /// concurrently. Mutates anti-tilt state (trade_history_).
     RiskDecision evaluate(const TradePlan& plan, const AccountState& state);
 
     void record_trade_end(bool is_loss, std::chrono::system_clock::time_point ts);
 
+    /// Push the **next** funding-event timestamp for `ticker`. Used by R13
+    /// to reject inside `[next - pre_sec, next + post_sec]`. The previous
+    /// semantics (last funding time only) blocked post-funding correctly
+    /// but never pre-funding, defeating the whole point of the window
+    /// (#127). Callers should populate this from
+    /// `BinanceFundingClient::next_funding_time_utc`.
     void update_funding_time(const Ticker& ticker, std::chrono::system_clock::time_point ts);
 
 private:
@@ -65,10 +76,13 @@ private:
     const NewsCalendar&   news_;
     Config                cfg_;
 
-    // Anti-tilt / streak history
-    std::deque<std::chrono::system_clock::time_point> trade_history_;
+    // All mutable bookkeeping below is guarded by mtx_. Without it,
+    // evaluate() and record_trade_end() racing on trade_history_ /
+    // loss_history_ is UB (deque push/pop is not atomic). Issue #125.
+    mutable std::mutex                                              mtx_;
+    std::deque<std::chrono::system_clock::time_point>               trade_history_;
     std::deque<std::pair<std::chrono::system_clock::time_point, bool>> loss_history_;
-    std::chrono::system_clock::time_point last_loss_streak_ts_;
+    std::chrono::system_clock::time_point                           last_loss_streak_ts_;
     std::unordered_map<Ticker, std::chrono::system_clock::time_point> funding_times_;
 };
 

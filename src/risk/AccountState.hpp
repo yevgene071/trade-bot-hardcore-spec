@@ -42,7 +42,8 @@ enum class RejectReason {
     NewsBlackout,
     FundingBlackout,
     SinglePositionLossExceeded,
-    EntrySlippageExceeded
+    EntrySlippageExceeded,
+    InternalError                   // malformed inputs (zero divisor, etc.)
 };
 
 struct RiskDecision {

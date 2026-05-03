@@ -1,7 +1,12 @@
 #include "AccountStatePersister.hpp"
+#include "logger/Logger.hpp"
+
 #include <fstream>
 #include <filesystem>
-#include <iostream>
+
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 namespace trade_bot {
 
@@ -9,6 +14,28 @@ AccountStatePersister::AccountStatePersister(std::string path)
     : path_(std::move(path)) {
     auto dir = std::filesystem::path(path_).parent_path();
     if (!dir.empty()) std::filesystem::create_directories(dir);
+
+    // Advisory exclusive lock on the .lock sibling. Two bot processes
+    // pointing at the same journal would otherwise race their tmp+rename
+    // and silently corrupt state. Issue #128.
+    const std::string lock_path = path_ + ".lock";
+    lock_fd_ = ::open(lock_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (lock_fd_ < 0) {
+        LOG_WARN("AccountStatePersister: cannot open lock file {} — running without lock",
+                 lock_path);
+    } else if (::flock(lock_fd_, LOCK_EX | LOCK_NB) != 0) {
+        ::close(lock_fd_);
+        lock_fd_ = -1;
+        throw std::runtime_error(
+            "AccountStatePersister: another instance is using " + path_);
+    }
+}
+
+AccountStatePersister::~AccountStatePersister() {
+    if (lock_fd_ >= 0) {
+        ::flock(lock_fd_, LOCK_UN);
+        ::close(lock_fd_);
+    }
 }
 
 void AccountStatePersister::save(const PersistedData& data) {
@@ -45,7 +72,8 @@ std::optional<AccountStatePersister::PersistedData> AccountStatePersister::load(
         data.kill_switch_reason = j.value("kill_switch_reason", "");
         return data;
     } catch (const std::exception& e) {
-        std::cerr << "AccountStatePersister: failed to load state: " << e.what() << std::endl;
+        LOG_ERROR("AccountStatePersister: failed to load state from {}: {}",
+                  path_, e.what());
         return std::nullopt;
     }
 }
@@ -129,20 +157,30 @@ void from_json(const nlohmann::json& j, TradePlan& p) {
 
 void to_json(nlohmann::json& j, const ActiveTrade& t) {
     j = nlohmann::json{
-        {"plan", t.plan},
-        {"entry_order_id", t.entry_order_id},
-        {"state", static_cast<int>(t.state)},
-        {"executed_size", t.executed_size},
-        {"avg_entry_price", t.avg_entry_price}
+        {"plan",            t.plan},
+        {"entry_order_id",  t.entry_order_id},
+        {"stop_order_id",   t.stop_order_id},
+        {"tp1_order_id",    t.tp1_order_id},
+        {"tp2_order_id",    t.tp2_order_id},
+        {"state",           static_cast<int>(t.state)},
+        {"executed_size",   t.executed_size},
+        {"avg_entry_price", t.avg_entry_price},
+        {"avg_price_fix",   t.avg_price_fix},
+        {"tp1_filled",      t.tp1_filled}
     };
 }
 
 void from_json(const nlohmann::json& j, ActiveTrade& t) {
-    t.plan = j.at("plan").get<TradePlan>();
-    t.entry_order_id = j.at("entry_order_id").get<int>();
-    t.state = static_cast<TradeState>(j.at("state").get<int>());
-    t.executed_size = j.at("executed_size").get<double>();
+    t.plan            = j.at("plan").get<TradePlan>();
+    t.entry_order_id  = j.value("entry_order_id", int64_t{0});
+    t.stop_order_id   = j.value("stop_order_id",  int64_t{0});
+    t.tp1_order_id    = j.value("tp1_order_id",   int64_t{0});
+    t.tp2_order_id    = j.value("tp2_order_id",   int64_t{0});
+    t.state           = static_cast<TradeState>(j.at("state").get<int>());
+    t.executed_size   = j.at("executed_size").get<double>();
     t.avg_entry_price = j.at("avg_entry_price").get<double>();
+    t.avg_price_fix   = j.value("avg_price_fix", 0.0);
+    t.tp1_filled      = j.value("tp1_filled",    false);
 }
 
 } // namespace trade_bot
