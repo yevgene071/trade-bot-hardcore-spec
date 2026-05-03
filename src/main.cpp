@@ -79,12 +79,24 @@ int main() {
         ext_ioc.start();
 
         boost::asio::io_context ioc;
-        DashboardServer dashboard(ioc, "0.0.0.0", 8080);
+        // Dashboard: bind to loopback by default (#121). Operator can opt
+        // into LAN exposure via [dashboard].bind_address but should set an
+        // auth_token in the same section — DashboardServer logs WARN on
+        // public-bind-without-token.
+        const auto dashboard_addr =
+            Config::get_or<std::string>("dashboard.bind_address", "127.0.0.1");
+        const auto dashboard_port = static_cast<uint16_t>(
+            Config::get_or<int64_t>("dashboard.port", 8080));
+        const auto dashboard_token =
+            Config::get_or<std::string>("dashboard.auth_token", std::string{});
+        DashboardServer dashboard(ioc, dashboard_addr, dashboard_port, dashboard_token);
         dashboard.start();
 
         const auto metrics_port = static_cast<uint16_t>(
             Config::get_or<int64_t>("metrics.port", 9090));
-        MetricsExporter metrics_exporter(ioc, "0.0.0.0", metrics_port);
+        const auto metrics_addr =
+            Config::get_or<std::string>("metrics.bind_address", "127.0.0.1");
+        MetricsExporter metrics_exporter(ioc, metrics_addr, metrics_port);
         metrics_exporter.start();
 
         auto signal_to_string = [](SignalKind k) {

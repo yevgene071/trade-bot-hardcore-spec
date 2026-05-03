@@ -931,6 +931,20 @@ if(BUILD_TESTS)
         GTest::gtest GTest::gtest_main spdlog::spdlog)
     add_test(NAME ticker_universe_affinity COMMAND ticker_universe_affinity_test)
 
+    # T4-DASHBOARD
+    add_executable(dashboard_server_test
+        test/unit/dashboard_server_test.cpp
+        src/control/DashboardServer.cpp
+        src/logger/Logger.cpp)
+    target_include_directories(dashboard_server_test PRIVATE src)
+    target_link_libraries(dashboard_server_test PRIVATE
+        GTest::gtest GTest::gtest_main
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json
+        boost::boost
+        OpenSSL::SSL OpenSSL::Crypto)
+    add_test(NAME dashboard_server COMMAND dashboard_server_test)
+
     # Benchmarks
     add_executable(bench_perf 
         bench/bench_perf.cpp

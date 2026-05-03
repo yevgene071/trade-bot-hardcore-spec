@@ -240,3 +240,15 @@ max_avg_spread_bps = 6.0
 min_flush_events_per_day = 3
 flush_return_rate_7d = 0.60
 liquidation_availability = true
+
+# T4-DASHBOARD / T4-METRICS — operator-facing HTTP endpoints
+# Default: loopback-only. To expose on the network, set bind_address AND
+# auth_token; the server logs WARN if a public bind is used without a token.
+[dashboard]
+bind_address  = "127.0.0.1"
+port          = 8080
+auth_token    = ""        # set to a long random string to enable LAN exposure
+
+[metrics]
+bind_address  = "127.0.0.1"
+port          = 9090
