@@ -83,7 +83,7 @@ private:
     Config          cfg_;
 
     std::deque<std::pair<std::chrono::system_clock::time_point, double>> mid_history_;
-    std::vector<Extreme> extremes_;
+    std::deque<Extreme> extremes_;
     
     std::vector<Level> active_levels_;
     

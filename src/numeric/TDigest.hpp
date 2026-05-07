@@ -24,7 +24,9 @@ public:
         bool operator<(const Centroid& other) const { return mean < other.mean; }
     };
 
-    explicit TDigest(double delta = 100.0) : delta_(delta) {}
+    explicit TDigest(double delta = 100.0) 
+        : delta_(delta)
+        , delta_inv_(1.0 / delta) {}
 
     void add(double value, double weight = 1.0) {
         unmerged_.push_back({value, weight});
@@ -62,7 +64,6 @@ public:
             
             // Scale function k(q) = delta/2pi * arcsin(2q-1)
             // Limit cluster size by delta: weight <= total_weight * (k(q1) - k(q0))
-            // Simplification for online performance:
             double limit = total_weight * delta_inv_ * std::min(q1 * (1 - q1), q0 * (1 - q0)) * 4.0;
             
             if (cur.weight + all[i].weight <= std::max(1.0, limit)) {
@@ -106,7 +107,7 @@ public:
 
 private:
     double delta_;
-    double delta_inv_ = 1.0 / 100.0; // dummy, logic above uses it
+    double delta_inv_;
     std::vector<Centroid> centroids_;
     std::vector<Centroid> unmerged_;
     double total_weight_ = 0;

@@ -30,3 +30,6 @@ Thumbs.db
 .mcp.json
 ruvector.db
 GEMINI.md
+
+.gemini/
+gha-creds-*.json

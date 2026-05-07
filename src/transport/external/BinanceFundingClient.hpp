@@ -25,6 +25,9 @@ public:
     std::optional<FundingData> get_funding(const std::string& ticker) const;
     void update_funding(const std::string& ticker, FundingData data);
 
+    void add_ticker(const std::string& ticker);
+    void remove_ticker(const std::string& ticker);
+
     void start_polling(boost::asio::io_context& ioc, std::chrono::seconds interval);
 
 private:
@@ -34,6 +37,7 @@ private:
     std::shared_ptr<IHttpClient> http_;
     mutable std::shared_mutex mutex_;
     std::map<std::string, FeedValue<FundingData>> funding_map_;
+    std::set<std::string> active_tickers_;
     
     std::unique_ptr<boost::asio::steady_timer> timer_;
     std::chrono::seconds poll_interval_{60};

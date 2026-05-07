@@ -59,6 +59,8 @@ public:
     int64_t update_count() const noexcept { return update_count_; }
     double  price_increment() const noexcept { return price_increment_; }
     double  size_increment() const noexcept { return size_increment_; }
+    double  inv_price_increment() const noexcept { return inv_price_increment_; }
+    double  inv_size_increment() const noexcept { return inv_size_increment_; }
 
     /**
      * Slices the top N levels of each side and compares with a snapshot.
@@ -76,6 +78,8 @@ private:
     Ticker      ticker_;
     double      price_increment_;
     double      size_increment_;
+    double      inv_price_increment_;
+    double      inv_size_increment_;
     BidMap      bids_;
     AskMap      asks_;
     std::optional<PriceTick> best_bid_tick_;

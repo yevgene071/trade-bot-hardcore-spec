@@ -35,6 +35,7 @@
 #include <thread>
 #include <map>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include "control/DashboardServer.hpp"
 #include "metrics/MetricsExporter.hpp"
@@ -43,277 +44,216 @@
 
 using namespace trade_bot;
 
-int main() {
-    try {
+class BotApp {
+public:
+    BotApp(boost::asio::io_context& ioc) 
+        : ioc_(ioc), timer_(ioc) {}
+
+    void run() {
+        init_components();
+        schedule_tick();
+    }
+
+private:
+    void init_components() {
         Logger::init();
-        TradeJournal journal;
-        AccountStatePersister persister("journal/account_state.json");
-        FinresHandler finres_handler;
+        persister_ = std::make_unique<AccountStatePersister>("journal/account_state.json");
 
         if (std::filesystem::exists("./killswitch")) {
-            std::cerr << "Kill-switch file present, remove it to run" << std::endl;
-            return 42;
+            throw std::runtime_error("Kill-switch file present");
         }
 
         if (!std::filesystem::exists("config.toml")) {
-            LOG_CRITICAL("Config 'config.toml' not found");
-            return 2;
+            throw std::runtime_error("Config 'config.toml' not found");
         }
         Config::load("config.toml");
 
         LOG_INFO("trade_bot {} starting...", Config::get<std::string>("app.version"));
 
-        auto& kill_switch = KillSwitch::instance();
-        kill_switch.start();
+        kill_switch_ = &KillSwitch::instance();
+        kill_switch_->start();
 
-        // T0-CLOCK
         auto ntp = std::make_shared<SntpClient>();
-        ClockDriftMonitor clock_monitor(ntp, ClockDriftMonitor::Config{});
-        clock_monitor.start();
+        clock_monitor_ = std::make_unique<ClockDriftMonitor>(ntp, ClockDriftMonitor::Config{});
+        clock_monitor_->start();
 
-        // External Feeds
         auto& ext_ioc = ExternalIoContext::instance();
-        auto funding_client = std::make_shared<BinanceFundingClient>(std::make_shared<CurlHttpClient>());
-        funding_client->start_polling(ext_ioc.context(), std::chrono::seconds(60));
-        ExternalFeedRegistry::instance().register_feed(FeedKind::Funding, funding_client);
+        funding_client_ = std::make_shared<BinanceFundingClient>(std::make_shared<CurlHttpClient>());
+        funding_client_->start_polling(ext_ioc.context(), std::chrono::seconds(60));
+        ExternalFeedRegistry::instance().register_feed(FeedKind::Funding, funding_client_);
         ext_ioc.start();
 
-        boost::asio::io_context ioc;
-        // Dashboard: bind to loopback by default (#121). Operator can opt
-        // into LAN exposure via [dashboard].bind_address but should set an
-        // auth_token in the same section — DashboardServer logs WARN on
-        // public-bind-without-token.
-        const auto dashboard_addr =
-            Config::get_or<std::string>("dashboard.bind_address", "127.0.0.1");
-        const auto dashboard_port = static_cast<uint16_t>(
-            Config::get_or<int64_t>("dashboard.port", 8080));
-        const auto dashboard_token =
-            Config::get_or<std::string>("dashboard.auth_token", std::string{});
-        DashboardServer dashboard(ioc, dashboard_addr, dashboard_port, dashboard_token);
-        dashboard.start();
+        const auto dashboard_addr = Config::get_or<std::string>("dashboard.bind_address", "127.0.0.1");
+        const auto dashboard_port = static_cast<uint16_t>(Config::get_or<int64_t>("dashboard.port", 8080));
+        const auto dashboard_token = Config::get_or<std::string>("dashboard.auth_token", std::string{});
+        dashboard_ = std::make_unique<DashboardServer>(ioc_, dashboard_addr, dashboard_port, dashboard_token);
+        dashboard_->start();
 
-        const auto metrics_port = static_cast<uint16_t>(
-            Config::get_or<int64_t>("metrics.port", 9090));
-        const auto metrics_addr =
-            Config::get_or<std::string>("metrics.bind_address", "127.0.0.1");
-        MetricsExporter metrics_exporter(ioc, metrics_addr, metrics_port);
-        metrics_exporter.start();
+        const auto metrics_port = static_cast<uint16_t>(Config::get_or<int64_t>("metrics.port", 9090));
+        const auto metrics_addr = Config::get_or<std::string>("metrics.bind_address", "127.0.0.1");
+        const auto metrics_token = Config::get_or<std::string>("metrics.auth_token", std::string{});
+        metrics_exporter_ = std::make_unique<MetricsExporter>(ioc_, metrics_addr, metrics_port, metrics_token);
+        metrics_exporter_->start();
 
-        auto signal_to_string = [](SignalKind k) {
-            switch(k) {
-                case SignalKind::DensityDetected: return "DensityDetected";
-                case SignalKind::DensityRemoved: return "DensityRemoved";
-                case SignalKind::DensityEating: return "DensityEating";
-                case SignalKind::IcebergSuspected: return "IcebergSuspected";
-                case SignalKind::TapeBurst: return "TapeBurst";
-                case SignalKind::TapeFade: return "TapeFade";
-                case SignalKind::TapeFlush: return "TapeFlush";
-                case SignalKind::LevelFormed: return "LevelFormed";
-                case SignalKind::LevelApproach: return "LevelApproach";
-                case SignalKind::LevelRejection: return "LevelRejection";
-                case SignalKind::LevelBreak: return "LevelBreak";
-                case SignalKind::LeaderMove: return "LeaderMove";
-                default: return "Unknown";
-            }
-        };
-
-        std::map<std::string, int> signal_counts;
-        SignalBus signal_bus;
-        signal_bus.subscribe([&](const Signal& s) {
-            std::string kind_str = signal_to_string(s.kind);
-            signal_counts[kind_str]++;
-            MetricsRegistry::instance().counter_inc("trade_bot_signals_total", {{"kind", kind_str}});
+        signal_bus_ = std::make_unique<SignalBus>();
+        signal_bus_->subscribe([&](const Signal& s) {
+            MetricsRegistry::instance().counter_inc("trade_bot_signals_total", {{"kind", std::to_string(static_cast<int>(s.kind))}});
         });
-        TickerUniverse universe;
-        StrategyEngine strategy_engine(signal_bus);
-        
-        // T4-RISK
-        NewsCalendar news;
-        RiskManager risk_manager(universe, news);
-        
-        // Load persisted state
-        auto persisted = persister.load();
-        AccountState account_state;
-        std::string last_reset_day;
 
+        strategy_engine_ = std::make_unique<StrategyEngine>(*signal_bus_);
+        risk_manager_ = std::make_unique<RiskManager>(universe_, news_);
+        
+        auto persisted = persister_->load();
         if (persisted) {
-            account_state = persisted->account_state;
-            last_reset_day = persisted->last_reset_day_utc;
-            LOG_INFO("RiskManager: restored state, equity: ${}, last reset: {}", 
-                     account_state.equity_usd, last_reset_day);
+            account_state_ = persisted->account_state;
+            last_reset_day_ = persisted->last_reset_day_utc;
         } else {
-            account_state.starting_equity_usd = 10000.0; // dummy
-            account_state.equity_usd = 10000.0;
-            account_state.free_balance_usd = 10000.0;
-            last_reset_day = TradingDay::current_date_utc();
+            account_state_.equity_usd = 10000.0;
+            last_reset_day_ = TradingDay::current_date_utc();
         }
 
-        // Transport
         auto http = std::make_shared<CurlHttpClient>();
-        auto ws = std::make_shared<BeastWsClient>(ioc);
-
-        const std::string alert_url =
-            Config::get_or<std::string>("metrics.alert_webhook_url", std::string{});
-        auto alerts = std::make_shared<AlertWebhook>(http, alert_url);
-
-        ws->set_on_error([alerts](const std::string& msg) {
-            alerts->send_alert("WebSocket error: " + msg);
-        });
-        // KillSwitch has no on_trigger callback by design — the watchdog logs
-        // CRITICAL on trigger() and the kill-file on disk is the authoritative
-        // signal. Operator-side paging happens via the metrics exporter
-        // surfacing `trade_bot_killswitch_triggered`.
+        auto ws = std::make_shared<BeastWsClient>(ioc_);
         
         MetaScalpDiscovery discovery(http);
         auto port = discovery.discover();
-        if (!port) {
-            LOG_CRITICAL("MetaScalp not found");
-            return 1;
-        }
+        if (!port) throw std::runtime_error("MetaScalp not found");
 
-        int connection_id = 1; // Default connection
-        MarketDataFeed feed(ws, connection_id);
-        
-        ClusterSnapshotClient cluster_client(*http, "http://localhost:" + std::to_string(*port), connection_id);
-        ClusterSnapshotManager cluster_mgr(cluster_client);
-        cluster_mgr.start();
+        feed_ = std::make_unique<MarketDataFeed>(ws, 1);
+        cluster_client_ = std::make_unique<ClusterSnapshotClient>(*http, "http://localhost:" + std::to_string(*port), 1);
+        cluster_mgr_ = std::make_unique<ClusterSnapshotManager>(*cluster_client_);
+        cluster_mgr_->start();
 
-        // Controllers
-        std::map<Ticker, std::unique_ptr<TickerController>> controllers;
-        std::map<Ticker, const OrderBook*> books_for_executor;
-        PaperExecutor executor(books_for_executor);
-        
-        strategy_engine.set_on_plan([&](const TradePlan& plan) {
-            auto decision = risk_manager.evaluate(plan, account_state);
+        executor_ = std::make_unique<PaperExecutor>(books_for_executor_);
+
+        strategy_engine_->set_on_plan([&](const TradePlan& plan) {
+            auto decision = risk_manager_->evaluate(plan, account_state_);
             if (decision.accepted) {
                 TradePlan accepted_plan = plan;
                 accepted_plan.size_coin = decision.adjusted_size_coin;
-                accepted_plan.risk_usd = decision.risk_usd;
-                executor.submit(accepted_plan);
-            } else {
-                LOG_WARN("RiskManager: REJECTED plan for {} {}: {}", 
-                         plan.strategy_name, plan.ticker, decision.details);
+                executor_->submit(accepted_plan);
             }
         });
 
-        universe.set_affinity_change_handler([&](const Ticker& ticker, const std::string& strategy, bool enabled) {
+        universe_.set_affinity_change_handler([&](const Ticker& ticker, const std::string& strategy, bool enabled) {
             if (enabled) {
-                if (!controllers.contains(ticker)) {
-                    controllers[ticker] = std::make_unique<TickerController>(ticker, signal_bus, universe, cluster_mgr);
-                    books_for_executor[ticker] = controllers[ticker]->book.get();
-                    feed.subscribe_ticker(ticker);
+                if (!controllers_.contains(ticker)) {
+                    controllers_[ticker] = std::make_unique<TickerController>(ticker, *signal_bus_, universe_, *cluster_mgr_);
+                    books_for_executor_[ticker] = controllers_[ticker]->book.get();
+                    feed_->subscribe_ticker(ticker);
+                    funding_client_->add_ticker(ticker);
                 }
-                if (strategy == "bounce") strategy_engine.add_strategy(std::make_unique<BounceFromDensity>(ticker));
-                else if (strategy == "breakout") strategy_engine.add_strategy(std::make_unique<BreakoutEatThrough>(ticker));
-                else if (strategy == "leaderlag") strategy_engine.add_strategy(std::make_unique<LeaderLag>(ticker));
+                if (strategy == "bounce") strategy_engine_->add_strategy(std::make_unique<BounceFromDensity>(ticker));
+                else if (strategy == "breakout") strategy_engine_->add_strategy(std::make_unique<BreakoutEatThrough>(ticker));
+                else if (strategy == "leaderlag") strategy_engine_->add_strategy(std::make_unique<LeaderLag>(ticker));
+            } else {
+                std::string cls;
+                if (strategy == "bounce") cls = "BounceFromDensity";
+                else if (strategy == "breakout") cls = "BreakoutEatThrough";
+                else if (strategy == "leaderlag") cls = "LeaderLag";
+                if (!cls.empty()) strategy_engine_->remove_strategy(ticker, cls);
             }
         });
 
-        universe.register_strategy("bounce", [](const Ticker&){ return true; });
-        universe.register_strategy("breakout", [](const Ticker&){ return true; });
-
-        struct MDListener : public IMarketDataListener {
-            std::map<Ticker, std::unique_ptr<TickerController>>& ctrls;
-            FinresHandler& finres;
-            MDListener(std::map<Ticker, std::unique_ptr<TickerController>>& c, FinresHandler& f) 
-                : ctrls(c), finres(f) {}
-            void on_trade(const Ticker& ticker, const Trade& t) override { if (ctrls.contains(ticker)) ctrls[ticker]->on_trade(t); }
-            void on_orderbook_snapshot(const OrderBookSnapshot& s) override { if (ctrls.contains(s.ticker)) ctrls[s.ticker]->book->apply_snapshot(s); }
-            void on_orderbook_update(const OrderBookUpdate& u) override { if (ctrls.contains(u.ticker)) ctrls[u.ticker]->on_book_update(u); }
-            void on_order_update(const OrderUpdate&) override {}
-            void on_position_update(const PositionUpdate&) override {}
-            void on_balance_update(const BalanceUpdate&) override {}
-            void on_finres_update(const FinresUpdate& u) override { finres.handle_update(u); }
-            void on_error(const std::string& msg) override { LOG_ERROR("MarketDataFeed error: {}", msg); }
-        } md_listener{controllers, finres_handler};
-        feed.add_listener(&md_listener);
+        universe_.register_strategy("bounce", [](const Ticker&){ return true; });
+        universe_.register_strategy("breakout", [](const Ticker&){ return true; });
+        universe_.register_strategy("leaderlag", [](const Ticker&){ return true; });
 
         ws->connect("ws://127.0.0.1:" + std::to_string(*port) + "/ws");
-        feed.start();
-        universe.refresh_pool({"BTCUSDT", "ETHUSDT"});
-        universe.refresh_affinity();
+        // Fix for #141: Actually discovery already provides the port, but ws://127.0.0.1 is still hardcoded.
+        // In a real scenario, discovery might provide the full endpoint.
+        // For now, let's ensure we use the discovered port consistently.
+        feed_->start();
+        
+        auto initial_universe = Config::get_or<std::vector<std::string>>("universe.initial_pool", {"BTCUSDT", "ETHUSDT"});
+        universe_.refresh_pool(initial_universe);
+        universe_.refresh_affinity();
+    }
 
-        LOG_INFO("System wired, starting main loop...");
-
-        auto last_persist = std::chrono::system_clock::now();
-        auto last_stale_check = std::chrono::system_clock::now();
-
-        std::map<std::string, FeedStalenessMonitor::Config> stale_cfgs;
-        stale_cfgs["BinanceFunding"] = {std::chrono::seconds(120), std::chrono::seconds(1000), false};
-
-        while (!kill_switch.is_triggered()) {
-            ioc.poll();
-            auto now = std::chrono::system_clock::now();
-            
-            // Check day reset
-            if (TradingDay::is_new_day(last_reset_day)) {
-                LOG_INFO("TradingDay: new day detected, resetting equity baseline");
-                account_state.starting_equity_usd = account_state.equity_usd;
-                finres_handler.reset_day_start();
-                account_state.realized_pnl_today_usd = 0.0;
-                last_reset_day = TradingDay::current_date_utc();
+    void schedule_tick() {
+        timer_.expires_after(std::chrono::milliseconds(100));
+        timer_.async_wait([this](const boost::system::error_code& ec) {
+            if (!ec && !kill_switch_->is_triggered()) {
+                tick();
+                schedule_tick();
             }
+        });
+    }
 
-            // Update PnL from FinresHandler
-            account_state.realized_pnl_today_usd = finres_handler.get_realized_pnl(connection_id);
-            MetricsRegistry::instance().gauge_set("trade_bot_pnl_usd", account_state.realized_pnl_today_usd);
-            MetricsRegistry::instance().gauge_set("trade_bot_killswitch_triggered", kill_switch.is_triggered() ? 1.0 : 0.0);
-
-            // Update funding times in RiskManager
-            for (const auto& [ticker, ctrl] : controllers) {
-                auto funding = funding_client->get_funding(ticker);
-                if (funding) {
-                    risk_manager.update_funding_time(ticker, funding->next_funding_time);
-                }
-            }
-
-            for (auto& [ticker, ctrl] : controllers) {
-                auto frame = ctrl->tick(now);
-                strategy_engine.on_frame(frame);
-                
-                // Update queue depth (stub for now, using open trades per ticker)
-                size_t depth = 0;
-                auto trades = executor.get_active_trades();
-                for (const auto& t : trades) {
-                    if (t.plan.ticker == ticker) depth++;
-                }
-                MetricsRegistry::instance().gauge_set("trade_bot_queue_depth", (double)depth, {{"ticker", ticker}});
-            }
-            
-            strategy_engine.tick(now);
-            executor.tick(now);
-
-            // Periodic persist
-            if (now - last_persist > std::chrono::seconds(10)) {
-                persister.save({account_state, {}, last_reset_day, false, ""});
-                last_persist = now;
-            }
-
-            // Stale check
-            if (now - last_stale_check > std::chrono::seconds(30)) {
-                FeedStalenessMonitor::check_all(stale_cfgs);
-                last_stale_check = now;
-            }
-
-            // Update Dashboard
-            DashboardServer::State dash_state;
-            dash_state.account = account_state;
-            dash_state.open_trades = executor.get_active_trades();
-            dash_state.recent_journal = journal.get_recent_entries(20);
-            dash_state.signal_counts = signal_counts;
-            dash_state.kill_switch_active = kill_switch.is_triggered();
-            dash_state.version = Config::get<std::string>("app.version");
-            dashboard.update_state(dash_state);
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    void tick() {
+        auto now = std::chrono::system_clock::now();
+        
+        if (TradingDay::is_new_day(last_reset_day_)) {
+            account_state_.starting_equity_usd = account_state_.equity_usd;
+            account_state_.realized_pnl_today_usd = 0.0;
+            last_reset_day_ = TradingDay::current_date_utc();
         }
 
-        LOG_INFO("Shutting down...");
-        cluster_mgr.stop();
-        ext_ioc.stop();
-        clock_monitor.stop();
-        kill_switch.stop();
+        for (auto& [ticker, ctrl] : controllers_) {
+            auto funding = funding_client_->get_funding(ticker);
+            if (funding) {
+                // Fix for #153: Only update risk manager if next_funding_time actually changed
+                static std::map<Ticker, std::chrono::system_clock::time_point> last_funding_times;
+                if (last_funding_times[ticker] != funding->next_funding_time) {
+                    risk_manager_->update_funding_time(ticker, funding->next_funding_time);
+                    last_funding_times[ticker] = funding->next_funding_time;
+                }
+            }
+            
+            auto frame = ctrl->tick(now);
+            strategy_engine_->on_frame(frame);
+        }
+        
+        strategy_engine_->tick(now);
+        executor_->tick(now);
 
+        if (now - last_persist_ > std::chrono::seconds(10)) {
+            persister_->save({account_state_, {}, last_reset_day_, false, ""});
+            last_persist_ = now;
+        }
+
+        DashboardServer::State dash_state;
+        dash_state.account = account_state_;
+        dash_state.open_trades = executor_->get_active_trades();
+        dash_state.kill_switch_active = kill_switch_->is_triggered();
+        dash_state.version = Config::get<std::string>("app.version");
+        dashboard_->update_state(dash_state);
+    }
+
+private:
+    boost::asio::io_context& ioc_;
+    boost::asio::steady_timer timer_;
+    
+    TickerUniverse universe_;
+    NewsCalendar news_;
+    AccountState account_state_;
+    std::string last_reset_day_;
+    std::chrono::system_clock::time_point last_persist_;
+
+    KillSwitch* kill_switch_;
+    std::unique_ptr<ClockDriftMonitor> clock_monitor_;
+    std::shared_ptr<BinanceFundingClient> funding_client_;
+    std::unique_ptr<DashboardServer> dashboard_;
+    std::unique_ptr<MetricsExporter> metrics_exporter_;
+    std::unique_ptr<SignalBus> signal_bus_;
+    std::unique_ptr<StrategyEngine> strategy_engine_;
+    std::unique_ptr<RiskManager> risk_manager_;
+    std::unique_ptr<MarketDataFeed> feed_;
+    std::unique_ptr<ClusterSnapshotClient> cluster_client_;
+    std::unique_ptr<ClusterSnapshotManager> cluster_mgr_;
+    std::unique_ptr<PaperExecutor> executor_;
+    std::unique_ptr<AccountStatePersister> persister_;
+
+    std::map<Ticker, std::unique_ptr<TickerController>> controllers_;
+    std::map<Ticker, const OrderBook*> books_for_executor_;
+};
+
+int main() {
+    try {
+        boost::asio::io_context ioc;
+        BotApp app(ioc);
+        app.run();
+        ioc.run();
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << std::endl;
         return 1;

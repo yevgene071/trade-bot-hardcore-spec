@@ -20,6 +20,9 @@ public:
 
     void add_strategy(std::unique_ptr<IStrategy> strategy);
 
+    /// Removes all strategies for a specific ticker and strategy name.
+    void remove_strategy(const Ticker& ticker, const std::string& name);
+
     /// Routes a feature frame to all strategies.
     void on_frame(const FeatureFrame& frame);
 

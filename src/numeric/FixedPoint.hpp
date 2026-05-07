@@ -17,6 +17,10 @@ struct PriceTick {
         return { static_cast<int64_t>(std::round(price / increment)) };
     }
 
+    static PriceTick from_price_inv(double price, double inv_increment) {
+        return { static_cast<int64_t>(std::round(price * inv_increment)) };
+    }
+
     double to_price(double increment) const {
         return static_cast<double>(ticks) * increment;
     }
@@ -41,6 +45,10 @@ struct SizeFix {
 
     static SizeFix from_double(double size, double increment = 1e-8) {
         return { static_cast<int64_t>(std::round(size / increment)) };
+    }
+
+    static SizeFix from_double_inv(double size, double inv_increment) {
+        return { static_cast<int64_t>(std::round(size * inv_increment)) };
     }
 
     double to_double(double increment = 1e-8) const {

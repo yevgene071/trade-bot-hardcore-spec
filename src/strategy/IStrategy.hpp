@@ -19,6 +19,9 @@ public:
 
     virtual const std::string& name() const = 0;
 
+    /// The ticker this strategy is focused on.
+    virtual const Ticker& ticker() const = 0;
+
     /// Process periodic feature update.
     virtual void on_frame(const FeatureFrame& frame) = 0;
 

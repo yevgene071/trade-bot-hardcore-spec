@@ -30,7 +30,9 @@ struct TickerController {
                      const TickerUniverse& universe,
                      const ClusterSnapshotManager& cluster_mgr) {
         
-        book = std::make_unique<OrderBook>(ticker, 0.01, 1e-6); 
+        auto meta = universe.meta(ticker).value_or(TickerMeta{0.01, 1e-6, 0, 0});
+        
+        book = std::make_unique<OrderBook>(ticker, meta.price_increment, meta.size_increment); 
         stream = std::make_unique<TradeStream>(ticker);
         extractor = std::make_unique<FeatureExtractor>(ticker);
         extractor->set_sources(book.get(), stream.get(), nullptr);
@@ -38,8 +40,12 @@ struct TickerController {
         detectors.push_back(std::make_unique<DensityDetector>(ticker, bus, *book, universe));
         detectors.push_back(std::make_unique<IcebergDetector>(ticker, bus, *book, universe));
         detectors.push_back(std::make_unique<TapeAnalyzer>(ticker, bus, *book, *stream));
-        detectors.push_back(std::make_unique<LevelDetector>(ticker, bus, *book, cluster_mgr));
-        detectors.push_back(std::make_unique<ApproachAnalyzer>(ticker, bus, *book, static_cast<const LevelDetector&>(*detectors.back())));
+        
+        auto ld = std::make_unique<LevelDetector>(ticker, bus, *book, cluster_mgr);
+        const auto* ld_ptr = ld.get();
+        detectors.push_back(std::move(ld));
+        
+        detectors.push_back(std::make_unique<ApproachAnalyzer>(ticker, bus, *book, *ld_ptr));
     }
     
     void on_trade(const Trade& t) {

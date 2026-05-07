@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include <deque>
 #include <mutex>
 
 namespace trade_bot {
@@ -28,9 +29,11 @@ public:
     std::vector<Entry> get_recent_entries(size_t count);
 
 private:
+    std::string get_current_date_str_();
+
     std::string log_dir_;
     std::mutex  mtx_;
-    std::vector<Entry> cache_; // Keep last N in memory for dashboard
+    std::deque<Entry> cache_; // Keep last N in memory for dashboard
 };
 
 } // namespace trade_bot

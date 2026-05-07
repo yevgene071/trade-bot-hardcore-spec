@@ -23,11 +23,13 @@ MarketDataFeed::MarketDataFeed(std::shared_ptr<IWsClient> ws_client, int connect
 void MarketDataFeed::add_listener(IMarketDataListener* listener) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_listeners.push_back(listener);
+    invalidate_cache_();
 }
 
 void MarketDataFeed::add_listener(const Ticker& ticker, IMarketDataListener* listener) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_ticker_listeners[ticker].push_back(listener);
+    invalidate_cache_();
 }
 
 void MarketDataFeed::remove_listener(IMarketDataListener* listener) {
@@ -41,6 +43,7 @@ void MarketDataFeed::remove_listener(IMarketDataListener* listener) {
             ++it;
         }
     }
+    invalidate_cache_();
 }
 
 void MarketDataFeed::remove_listener(const Ticker& ticker, IMarketDataListener* listener) {
@@ -51,6 +54,11 @@ void MarketDataFeed::remove_listener(const Ticker& ticker, IMarketDataListener* 
             m_ticker_listeners.erase(it);
         }
     }
+    invalidate_cache_();
+}
+
+void MarketDataFeed::invalidate_cache_() {
+    m_merged_cache.clear();
 }
 
 void MarketDataFeed::subscribe_ticker(const Ticker& ticker) {
@@ -79,9 +87,6 @@ void MarketDataFeed::unsubscribe_ticker(const Ticker& ticker) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_subscribed_tickers.erase(ticker);
     }
-    // MetaScalp might not have explicit unsubscribe for trades/orderbook via WS, 
-    // usually it's handled by closing connection or just ignoring.
-    // But we'll send it if documented.
 }
 
 void MarketDataFeed::start() {
@@ -127,9 +132,13 @@ void MarketDataFeed::resubscribe_all() {
 }
 
 std::vector<IMarketDataListener*> MarketDataFeed::get_target_listeners(const Ticker& ticker) {
-    std::vector<IMarketDataListener*> targets;
     std::lock_guard<std::mutex> lock(m_mutex);
-    targets = m_listeners;
+    
+    if (auto it = m_merged_cache.find(ticker); it != m_merged_cache.end()) {
+        return it->second;
+    }
+
+    std::vector<IMarketDataListener*> targets = m_listeners;
     if (!ticker.empty()) {
         if (auto it = m_ticker_listeners.find(ticker); it != m_ticker_listeners.end()) {
             for (auto* l : it->second) {
@@ -139,6 +148,8 @@ std::vector<IMarketDataListener*> MarketDataFeed::get_target_listeners(const Tic
             }
         }
     }
+    
+    m_merged_cache[ticker] = targets;
     return targets;
 }
 
@@ -174,28 +185,16 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
             for (auto* l : targets) l->on_position_update(upd);
         } else if (type == "balance_update") {
             auto upd = MetaScalpCodec::parse_balance_update(data);
-            std::vector<IMarketDataListener*> targets;
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                targets = m_listeners;
-            }
+            auto targets = get_target_listeners("");
             for (auto* l : targets) l->on_balance_update(upd);
         } else if (type == "finres_update") {
             auto upd = MetaScalpCodec::parse_finres_update(data);
-            std::vector<IMarketDataListener*> targets;
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                targets = m_listeners;
-            }
+            auto targets = get_target_listeners("");
             for (auto* l : targets) l->on_finres_update(upd);
         } else if (type == "error") {
             std::string msg = data.value("Message", "Unknown error");
             LOG_ERROR("WS API error: {}", msg);
-            std::vector<IMarketDataListener*> targets;
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                targets = m_listeners;
-            }
+            auto targets = get_target_listeners("");
             for (auto* l : targets) l->on_error(msg);
         }
     } catch (const std::exception& e) {

@@ -14,8 +14,30 @@ TradeStream::TradeStream(Ticker ticker, double hawkes_alpha, double hawkes_beta)
 void TradeStream::on_trade(const Trade& trade) {
     // Add to ring buffer
     trades_[head_] = trade;
+    
+    // Incremental volume addition
+    if (trade.side == Side::Buy) {
+        buy_vol_1s_.add(trade.size);
+        buy_vol_5s_.add(trade.size);
+        buy_vol_30s_.add(trade.size);
+    } else if (trade.side == Side::Sell) {
+        sell_vol_1s_.add(trade.size);
+        sell_vol_5s_.add(trade.size);
+        sell_vol_30s_.add(trade.size);
+    }
+
     head_ = (head_ + 1) % kMaxTrades;
-    if (count_ < kMaxTrades) count_++;
+    if (count_ < kMaxTrades) {
+        count_++;
+    } else {
+        // We just overwrote the oldest trade in the entire buffer.
+        // If any tail index was pointing to it, we MUST advance it.
+        // But normally tail indices are much closer to head than kMaxTrades.
+        // For safety:
+        if (tail_1s_ == head_) tail_1s_ = (tail_1s_ + 1) % kMaxTrades;
+        if (tail_5s_ == head_) tail_5s_ = (tail_5s_ + 1) % kMaxTrades;
+        if (tail_30s_ == head_) tail_30s_ = (tail_30s_ + 1) % kMaxTrades;
+    }
 
     // Incremental stats
     size_stats_.update(trade.size);
@@ -39,35 +61,26 @@ void TradeStream::update(std::chrono::system_clock::time_point now) {
     }
     last_hawkes_update_ = now;
 
-    recalculate_volumes_(now);
+    evict_expired_trades_(now);
 }
 
-void TradeStream::recalculate_volumes_(std::chrono::system_clock::time_point now) {
-    buy_vol_1s_ = {}; buy_vol_5s_ = {}; buy_vol_30s_ = {};
-    sell_vol_1s_ = {}; sell_vol_5s_ = {}; sell_vol_30s_ = {};
+void TradeStream::evict_expired_trades_(std::chrono::system_clock::time_point now) {
+    auto evict = [&](size_t& tail, double seconds, KahanAccumulator<double>& buy_acc, KahanAccumulator<double>& sell_acc) {
+        while (tail != head_) {
+            const auto& t = trades_[tail];
+            auto age = std::chrono::duration<double>(now - t.timestamp).count();
+            if (age <= seconds) break;
 
-    size_t i = 0;
-    size_t current = (head_ + kMaxTrades - 1) % kMaxTrades;
-    
-    while (i < count_) {
-        const auto& t = trades_[current];
-        auto age = std::chrono::duration<double>(now - t.timestamp).count();
-        
-        if (age > 30.0) break;
-
-        if (t.side == Side::Buy) {
-            if (age <= 1.0) buy_vol_1s_.add(t.size);
-            if (age <= 5.0) buy_vol_5s_.add(t.size);
-            buy_vol_30s_.add(t.size);
-        } else if (t.side == Side::Sell) {
-            if (age <= 1.0) sell_vol_1s_.add(t.size);
-            if (age <= 5.0) sell_vol_5s_.add(t.size);
-            sell_vol_30s_.add(t.size);
+            if (t.side == Side::Buy) buy_acc.add(-t.size);
+            else if (t.side == Side::Sell) sell_acc.add(-t.size);
+            
+            tail = (tail + 1) % kMaxTrades;
         }
+    };
 
-        current = (current + kMaxTrades - 1) % kMaxTrades;
-        i++;
-    }
+    evict(tail_1s_, 1.0, buy_vol_1s_, sell_vol_1s_);
+    evict(tail_5s_, 5.0, buy_vol_5s_, sell_vol_5s_);
+    evict(tail_30s_, 30.0, buy_vol_30s_, sell_vol_30s_);
 }
 
 TradeStream::Stats TradeStream::get_stats() const {
@@ -82,9 +95,8 @@ TradeStream::Stats TradeStream::get_stats() const {
     s.sell_vol_1s = sell_vol_1s_.sum();
     s.sell_vol_5s = sell_vol_5s_.sum();
     s.sell_vol_30s = sell_vol_30s_.sum();
-    
-    auto& dist = const_cast<TDigest&>(size_distribution_);
-    s.q99_size = dist.quantile(0.99);
+
+    s.q99_size = size_distribution_.quantile(0.99);
 
     s.hawkes_intensity_buy = hawkes_intensity_buy_;
     s.hawkes_intensity_sell = hawkes_intensity_sell_;

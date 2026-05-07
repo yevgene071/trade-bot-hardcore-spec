@@ -114,11 +114,36 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     }
 
     // R7. TP validation
+    if (plan.tp1_price <= 0.0) {
+        d.reason = RejectReason::PoorRewardRisk;
+        d.details = "TP1 price must be positive";
+        return d;
+    }
+
+    bool tp_correct_side = (plan.side == Side::Buy && plan.tp1_price > plan.entry_price) ||
+                           (plan.side == Side::Sell && plan.tp1_price < plan.entry_price);
+    
+    if (!tp_correct_side) {
+        d.reason = RejectReason::PoorRewardRisk;
+        d.details = "TP1 price on wrong side of entry";
+        return d;
+    }
+
     double tp1_dist_bps = std::abs(plan.tp1_price - plan.entry_price) / plan.entry_price * 10000.0;
     if (tp1_dist_bps < cfg_.min_rr_ratio * stop_dist_bps) {
         d.reason = RejectReason::PoorRewardRisk;
         d.details = "TP1 R:R too low";
         return d;
+    }
+
+    if (plan.tp2_price && *plan.tp2_price > 0.0) {
+        bool tp2_correct_side = (plan.side == Side::Buy && *plan.tp2_price > plan.entry_price) ||
+                                (plan.side == Side::Sell && *plan.tp2_price < plan.entry_price);
+        if (!tp2_correct_side) {
+            d.reason = RejectReason::PoorRewardRisk;
+            d.details = "TP2 price on wrong side of entry";
+            return d;
+        }
     }
 
     // R8. Sizing — stop_dist_bps already passed > min_stop_bps above so

@@ -10,18 +10,22 @@ AlertWebhook::AlertWebhook(std::shared_ptr<IHttpClient> http_client, const std::
 void AlertWebhook::send_alert(const std::string& message) {
     if (url_.empty()) return;
 
-    nlohmann::json body;
-    body["text"] = "⚠️ *Trade Bot Alert*\n" + message;
-    body["parse_mode"] = "Markdown";
+    // Fix for #144: Offload blocking HTTP POST to a background thread
+    auto& ext_ioc = ExternalIoContext::instance().context();
+    boost::asio::post(ext_ioc, [this, message, url = url_]() {
+        nlohmann::json body;
+        body["text"] = "⚠️ *Trade Bot Alert*\n" + message;
+        body["parse_mode"] = "Markdown";
 
-    try {
-        auto res = http_client_->post(url_, body.dump());
-        if (res.status != 200) {
-            LOG_ERROR("AlertWebhook failed: status {}, body: {}", res.status, res.body);
+        try {
+            auto res = http_client_->post(url, body.dump());
+            if (res.status != 200) {
+                LOG_ERROR("AlertWebhook failed: status {}, body: {}", res.status, res.body);
+            }
+        } catch (const std::exception& e) {
+            LOG_ERROR("AlertWebhook exception: {}", e.what());
         }
-    } catch (const std::exception& e) {
-        LOG_ERROR("AlertWebhook exception: {}", e.what());
-    }
+    });
 }
 
 } // namespace trade_bot

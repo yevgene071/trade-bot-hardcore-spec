@@ -47,15 +47,19 @@ private:
     void handle_message(const nlohmann::json& j);
     void resubscribe_all();
     std::vector<IMarketDataListener*> get_target_listeners(const Ticker& ticker);
-    
+    void invalidate_cache_();
+
     std::shared_ptr<IWsClient> m_ws_client;
     int m_connection_id;
-    
+
     std::set<Ticker> m_subscribed_tickers;
     std::vector<IMarketDataListener*> m_listeners;
     std::unordered_map<Ticker, std::vector<IMarketDataListener*>> m_ticker_listeners;
-    std::mutex m_mutex;
-    
+
+    // Cache for merged listeners (m_listeners + m_ticker_listeners[ticker])
+    std::unordered_map<Ticker, std::vector<IMarketDataListener*>> m_merged_cache;
+
+    std::mutex m_mutex;    
     bool m_active = false;
 };
 

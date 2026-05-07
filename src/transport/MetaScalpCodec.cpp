@@ -82,22 +82,33 @@ PositionStatus MetaScalpCodec::parse_position_status(const nlohmann::json& v) {
 }
 
 std::chrono::system_clock::time_point MetaScalpCodec::parse_timestamp(const std::string& ts_str) {
+    if (ts_str.size() < 19) [[unlikely]] return {};
+
+    // Faster than stringstream + std::get_time
+    auto p2 = [](const char* p) { 
+        return static_cast<int>((p[0] - '0') * 10 + (p[1] - '0')); 
+    };
+    
     std::tm tm = {};
-    std::stringstream ss(ts_str);
-    ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+    try {
+        tm.tm_year = ((ts_str[0] - '0') * 1000 + (ts_str[1] - '0') * 100 + (ts_str[2] - '0') * 10 + (ts_str[3] - '0')) - 1900;
+        tm.tm_mon  = p2(&ts_str[5]) - 1;
+        tm.tm_mday = p2(&ts_str[8]);
+        tm.tm_hour = p2(&ts_str[11]);
+        tm.tm_min  = p2(&ts_str[14]);
+        tm.tm_sec  = p2(&ts_str[17]);
+    } catch (...) {
+        return {};
+    }
     
     auto tp = std::chrono::system_clock::from_time_t(timegm(&tm));
     
-    size_t dot = ts_str.find('.');
-    if (dot != std::string::npos) {
-        try {
-            int ms = std::stoi(ts_str.substr(dot + 1, 3));
-            tp += std::chrono::milliseconds(ms);
-        } catch (const std::exception&) {
-            // Malformed millisecond suffix — keep the integer-second resolution.
-            // Logging here would spam at the trade rate; codec_test pins the
-            // happy/error paths separately.
-        }
+    if (ts_str.size() > 20 && ts_str[19] == '.') {
+        int ms = 0;
+        if (std::isdigit(ts_str[20])) ms += (ts_str[20] - '0') * 100;
+        if (ts_str.size() > 21 && std::isdigit(ts_str[21])) ms += (ts_str[21] - '0') * 10;
+        if (ts_str.size() > 22 && std::isdigit(ts_str[22])) ms += (ts_str[22] - '0');
+        tp += std::chrono::milliseconds(ms);
     }
     
     return tp;

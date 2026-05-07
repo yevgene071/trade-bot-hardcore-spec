@@ -64,6 +64,21 @@ StartupRecovery::Result StartupRecovery::run() {
                 double stop_dist = pit->avg_price * cfg_.max_recovery_stop_bps / 10000.0;
                 trade.plan.stop_price = pit->avg_price + (pit->side == Side::Buy ? -stop_dist : stop_dist);
                 
+                // Fix for #131: Actually place the emergency stop on the exchange
+                PlaceOrderRequest req;
+                req.ticker = ticker;
+                req.side = (pit->side == Side::Buy ? Side::Sell : Side::Buy); // Opposite to close
+                req.type = OrderType::Stop;
+                req.price = trade.plan.stop_price;
+                req.size = trade.plan.size_coin;
+                
+                auto resp = gateway_.place_order(connection_id_, req);
+                if (resp.success) {
+                    res.log_entries.push_back("Placed emergency stop for " + ticker + " at " + std::to_string(trade.plan.stop_price));
+                } else {
+                    res.log_entries.push_back("ERROR: Failed to place emergency stop for " + ticker + ": " + resp.error_msg);
+                }
+                
                 drift_detected = true;
             }
             trade.state = TradeState::Open;

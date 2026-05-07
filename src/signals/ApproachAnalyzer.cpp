@@ -71,11 +71,9 @@ ApproachAnalyzer::Analysis ApproachAnalyzer::analyze(double level_price,
     double dist_bps = std::abs(history_.back().second - history_.front().second) / history_.front().second * 10000.0;
     double speed = dist_bps / std::max(0.1, duration);
 
-    // To give HMM more "room" to converge from 1 observation, 
-    // we can either pass a sequence of growing windows or just repeat observation.
     // Repeating observation 5 times effectively sharpens the posterior.
     std::vector<std::array<double, 3>> obs(5, {speed, static_cast<double>(pullbacks), dist_bps});
-    auto probs = const_cast<ApproachHmm&>(hmm_).predict(obs);
+    auto probs = hmm_.predict(obs);
 
     Analysis a;
     a.impulse_prob = probs[0];

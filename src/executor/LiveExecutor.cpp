@@ -310,11 +310,16 @@ void LiveExecutor::place_stops_(ActiveTrade& trade) {
         tp.type = OrderType::TakeProfit;
         tp.reduce_only = true;
         
-        try {
-            gateway_.place_order(connection_id_, tp);
-            LOG_INFO("LiveExecutor: placed TP1 for {} @ {}", tp.ticker, tp.price);
-        } catch (const std::exception& e) {
-             LOG_ERROR("LiveExecutor: failed to place TP1 for {}: {}", tp.ticker, e.what());
+        if (tp.size > 0) {
+            try {
+                gateway_.place_order(connection_id_, tp);
+                LOG_INFO("LiveExecutor: placed TP1 for {} @ {}", tp.ticker, tp.price);
+            } catch (const std::exception& e) {
+                 LOG_ERROR("LiveExecutor: failed to place TP1 for {}: {}", tp.ticker, e.what());
+            }
+        } else {
+            LOG_WARN("LiveExecutor: TP1 size is zero for {} (executed_size={}), skipping", 
+                     tp.ticker, trade.executed_size);
         }
     }
 }

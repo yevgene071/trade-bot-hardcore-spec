@@ -15,7 +15,7 @@ namespace trade_bot {
  */
 class MetricsExporter {
 public:
-    MetricsExporter(boost::asio::io_context& ioc, const std::string& address, uint16_t port);
+    MetricsExporter(boost::asio::io_context& ioc, const std::string& address, uint16_t port, std::string auth_token = "");
     
     void start();
 
@@ -25,6 +25,7 @@ private:
 
     boost::asio::io_context& ioc_;
     boost::asio::ip::tcp::acceptor acceptor_;
+    std::string auth_token_;
 };
 
 } // namespace trade_bot

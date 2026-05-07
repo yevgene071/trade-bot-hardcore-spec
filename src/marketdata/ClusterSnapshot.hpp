@@ -9,8 +9,8 @@
 #include <map>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
+#include <boost/asio/steady_timer.hpp>
 
 namespace trade_bot {
 
@@ -30,7 +30,7 @@ public:
 
     ClusterSnapshotManager(ClusterSnapshotClient& client, Config cfg);
     ClusterSnapshotManager(ClusterSnapshotClient& client);
-    ~ClusterSnapshotManager();
+    virtual ~ClusterSnapshotManager();
 
     void start();
     void stop();
@@ -45,7 +45,8 @@ public:
                                               const std::string& timeframe) const;
 
 private:
-    void poll_loop_();
+    void schedule_poll_();
+    void poll_();
     void refresh_ticker_(const Ticker& ticker);
 
     ClusterSnapshotClient& client_;
@@ -53,7 +54,7 @@ private:
     OnSnapshot             on_snapshot_;
     
     std::atomic<bool>      running_{false};
-    std::thread            poller_thread_;
+    std::unique_ptr<boost::asio::steady_timer> timer_;
     
     mutable std::mutex     cache_mtx_;
     // ticker -> timeframe -> snapshot

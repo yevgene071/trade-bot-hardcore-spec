@@ -17,6 +17,15 @@ void StrategyEngine::add_strategy(std::unique_ptr<IStrategy> strategy) {
     strategies_.push_back(std::move(strategy));
 }
 
+void StrategyEngine::remove_strategy(const Ticker& ticker, const std::string& name) {
+    strategies_.erase(
+        std::remove_if(strategies_.begin(), strategies_.end(),
+                       [&](const auto& s) {
+                           return s->ticker() == ticker && s->name() == name;
+                       }),
+        strategies_.end());
+}
+
 void StrategyEngine::on_frame(const FeatureFrame& frame) {
     for (auto& strat : strategies_) {
         strat->on_frame(frame);

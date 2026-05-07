@@ -33,7 +33,7 @@ public:
      * Forward algorithm to compute state probabilities.
      * obs: vector of [speed, pullbacks, dist]
      */
-    std::array<double, kStates> predict(const std::vector<std::array<double, 3>>& observations) {
+    std::array<double, kStates> predict(const std::vector<std::array<double, 3>>& observations) const {
         if (observations.empty()) return params_.start_probs;
 
         std::array<double, kStates> alpha;

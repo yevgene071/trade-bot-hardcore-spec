@@ -76,6 +76,11 @@ void LevelDetector::update_extremes_(const FeatureFrame& frame) {
             extremes_.push_back({cur, mid_history_[i].first, is_max});
         }
     }
+
+    // Fix for #145: Prune extremes history to stay within lookback
+    while (!extremes_.empty() && (frame.timestamp - extremes_.front().ts) > cfg_.lookback) {
+        extremes_.pop_front();
+    }
 }
 
 void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {

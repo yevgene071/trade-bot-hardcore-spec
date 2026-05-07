@@ -30,22 +30,18 @@ public:
     std::vector<ActiveTrade> get_active_trades() const;
 
     struct Position {
-        Ticker ticker;
-        Side   side;
-        double size;
-        double avg_price;
+        TradePlan plan;
+        double    executed_size;
+        double    avg_price;
     };
 
     const std::map<Ticker, Position>& positions() const { return positions_; }
 
 private:
-    void execute_plan_(const TradePlan& plan);
-    void check_fills_(const Ticker& ticker);
-
     const std::map<Ticker, const OrderBook*>& books_;
     Config cfg_;
 
-    std::vector<TradePlan> active_plans_;
+    std::vector<TradePlan> pending_entries_;
     std::map<Ticker, Position> positions_;
 };
 

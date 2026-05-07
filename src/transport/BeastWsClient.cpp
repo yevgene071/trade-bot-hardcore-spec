@@ -77,6 +77,14 @@ void BeastWsClient::send(std::string_view message) {
         {
             std::lock_guard<std::mutex> lock(self->m_write_mutex);
             write_in_progress = !self->m_write_queue.empty();
+            
+            // Fix for #146: Bound the write queue to prevent OOM
+            constexpr size_t kMaxQueueSize = 1000;
+            if (self->m_write_queue.size() >= kMaxQueueSize) {
+                self->m_write_queue.pop(); // Drop oldest
+                LOG_WARN("BeastWsClient: write queue overflow, dropping oldest message");
+            }
+            
             self->m_write_queue.push(msg);
         }
 

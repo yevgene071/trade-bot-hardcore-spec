@@ -3,12 +3,28 @@
 #include <fstream>
 #include <filesystem>
 #include <iomanip>
+#include <ctime>
+#include <algorithm>
 
 namespace trade_bot {
 
 TradeJournal::TradeJournal(std::string log_dir) 
     : log_dir_(std::move(log_dir)) {
     std::filesystem::create_directories(log_dir_);
+}
+
+std::string TradeJournal::get_current_date_str_() {
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm buf;
+#ifdef _WIN32
+    localtime_s(&buf, &in_time_t);
+#else
+    localtime_r(&in_time_t, &buf);
+#endif
+    std::stringstream ss;
+    ss << std::put_time(&buf, "%Y-%m-%d");
+    return ss.str();
 }
 
 void TradeJournal::log_entry(const Entry& entry) {
@@ -24,12 +40,7 @@ void TradeJournal::log_entry(const Entry& entry) {
     j["reason"] = entry.plan.reason;
     j["cause_of_exit"] = entry.cause_of_exit;
     
-    // Get filename by date YYYY-MM-DD
-    auto now = std::chrono::system_clock::now();
-    auto in_time_t = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d");
-    std::string filename = log_dir_ + "/" + ss.str() + ".jsonl";
+    std::string filename = log_dir_ + "/" + get_current_date_str_() + ".jsonl";
     
     std::lock_guard<std::mutex> lk(mtx_);
     std::ofstream out(filename, std::ios::app);
@@ -37,18 +48,21 @@ void TradeJournal::log_entry(const Entry& entry) {
 
     cache_.push_back(entry);
     if (cache_.size() > 100) {
-        cache_.erase(cache_.begin());
+        cache_.pop_front(); // O(1) for deque
     }
 }
 
 std::vector<TradeJournal::Entry> TradeJournal::get_recent_entries(size_t count) {
     std::lock_guard<std::mutex> lk(mtx_);
     std::vector<Entry> res;
-    size_t start = (cache_.size() > count) ? cache_.size() - count : 0;
-    for (size_t i = start; i < cache_.size(); ++i) {
-        res.push_back(cache_[i]);
+    size_t actual_count = std::min(count, cache_.size());
+    
+    // We want the most recent 'count' entries, which are at the end of the deque
+    auto it = cache_.rbegin();
+    for (size_t i = 0; i < actual_count; ++i, ++it) {
+        res.push_back(*it);
     }
-    std::reverse(res.begin(), res.end());
+    // Resulting res is already in reverse order (most recent first)
     return res;
 }
 

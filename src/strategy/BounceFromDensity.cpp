@@ -46,7 +46,7 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
     // C3: DensityDetected on the same level
     auto it_density = ctx_.recent_signals.find(SignalKind::DensityDetected);
     if (it_density == ctx_.recent_signals.end() ||
-        std::abs(it_density->second.price - level_price) > 0.0001 ||
+        std::abs(it_density->second.price - level_price) / level_price * 10000.0 > 1.0 || // 1 bps tolerance
         (now - it_density->second.timestamp) > std::chrono::seconds(10)) return std::nullopt;
 
     // C4: TapeFade
@@ -57,7 +57,7 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
     // C5: No Iceberg
     auto it_iceberg = ctx_.recent_signals.find(SignalKind::IcebergSuspected);
     if (it_iceberg != ctx_.recent_signals.end() &&
-        std::abs(it_iceberg->second.price - level_price) < 0.0001 &&
+        std::abs(it_iceberg->second.price - level_price) / level_price * 10000.0 < 2.0 && // 2 bps proximity
         (now - it_iceberg->second.timestamp) < std::chrono::seconds(30)) return std::nullopt;
 
     // Direction

@@ -26,6 +26,7 @@ public:
     LeaderLag(Ticker ticker);
 
     const std::string& name() const override { return name_; }
+    const Ticker& ticker() const override { return ticker_; }
 
     void on_frame(const FeatureFrame& frame) override;
     void on_signal(const Signal& signal) override;
