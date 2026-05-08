@@ -31,6 +31,7 @@ public:
     void add(double value, double weight = 1.0) {
         unmerged_.push_back({value, weight});
         unmerged_weight_ += weight;
+        total_weight_ += weight;
         
         // ARCH/SIGNAL § 3.3: online merge when unmerged buffer is large
         if (unmerged_.size() >= delta_ * 10) {
@@ -49,10 +50,6 @@ public:
         unmerged_weight_ = 0;
         centroids_.clear();
         
-        double total_weight = std::accumulate(all.begin(), all.end(), 0.0, [](double sum, const auto& c) {
-            return sum + c.weight;
-        });
-        
         if (all.empty()) return;
         
         Centroid cur = all[0];
@@ -60,12 +57,12 @@ public:
         
         for (size_t i = 1; i < all.size(); ++i) {
             double next_weight = weight_so_far + all[i].weight;
-            double q0 = weight_so_far / total_weight;
-            double q1 = next_weight / total_weight;
+            double q0 = weight_so_far / total_weight_;
+            double q1 = next_weight / total_weight_;
             
             // Scale function k(q) = delta/2pi * arcsin(2q-1)
             // Limit cluster size by delta: weight <= total_weight * (k(q1) - k(q0))
-            double limit = total_weight * delta_inv_ * std::min(q1 * (1 - q1), q0 * (1 - q0)) * 4.0;
+            double limit = total_weight_ * delta_inv_ * std::min(q1 * (1 - q1), q0 * (1 - q0)) * 4.0;
             
             if (cur.weight + all[i].weight <= std::max(1.0, limit)) {
                 cur.mean = (cur.mean * cur.weight + all[i].mean * all[i].weight) / (cur.weight + all[i].weight);
@@ -77,7 +74,6 @@ public:
             weight_so_far = next_weight;
         }
         centroids_.push_back(cur);
-        total_weight_ = total_weight;
     }
 
     double quantile(double q) {

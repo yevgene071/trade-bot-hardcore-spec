@@ -85,6 +85,7 @@ private:
     std::optional<PriceTick> best_bid_tick_;
     std::optional<PriceTick> best_ask_tick_;
     int64_t     update_count_{0};
+    bool        top_dirty_{false};
 };
 
 }  // namespace trade_bot

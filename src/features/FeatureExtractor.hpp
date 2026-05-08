@@ -44,7 +44,7 @@ public:
     const HdrHistogram& book_to_feature_hist() const noexcept { return hist_book_; }
     const HdrHistogram& feature_total_hist()   const noexcept { return hist_total_; }
 
-    std::size_t history_size() const noexcept { return mid_history_.size(); }
+    std::size_t history_size() const noexcept { return mid_count_; }
 
 private:
     struct MidSample {
@@ -52,17 +52,15 @@ private:
         double mid;
     };
 
-    double price_change_pct_(std::chrono::system_clock::time_point now,
-                             std::chrono::seconds horizon) const;
-    double volatility_1min_log_returns_() const;
-
     Ticker                  ticker_;
     Config                  cfg_;
     const OrderBook*        ob_{nullptr};
     const TradeStream*      ts_{nullptr};
     const LeaderTracker*    lt_{nullptr};
 
-    std::deque<MidSample>   mid_history_;
+    std::vector<MidSample>  mid_history_;
+    std::size_t             mid_head_{0};
+    std::size_t             mid_count_{0};
     HdrHistogram            hist_book_;
     HdrHistogram            hist_total_;
 };

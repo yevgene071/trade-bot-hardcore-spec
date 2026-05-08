@@ -48,9 +48,14 @@ public:
 
             // Expand cluster (using indices for the queue to avoid iterator invalidation)
             std::vector<size_t> queue;
+            std::vector<bool> in_queue(points.size(), false);
+            
             for (auto it = range.first; it != range.second; ++it) {
                 size_t idx = static_cast<size_t>(std::distance(points.begin(), it));
-                if (idx != i) queue.push_back(idx);
+                if (idx != i) {
+                    queue.push_back(idx);
+                    in_queue[idx] = true;
+                }
             }
 
             for (size_t k = 0; k < queue.size(); ++k) {
@@ -62,10 +67,9 @@ public:
                     if (static_cast<size_t>(std::distance(q_range.first, q_range.second)) >= min_pts) {
                         for (auto it = q_range.first; it != q_range.second; ++it) {
                             size_t n_idx = static_cast<size_t>(std::distance(points.begin(), it));
-                            if (points[n_idx].cluster_id == -1) {
-                                if (std::find(queue.begin(), queue.end(), n_idx) == queue.end()) {
-                                    queue.push_back(n_idx);
-                                }
+                            if (points[n_idx].cluster_id == -1 && !in_queue[n_idx]) {
+                                queue.push_back(n_idx);
+                                in_queue[n_idx] = true;
                             }
                         }
                     }

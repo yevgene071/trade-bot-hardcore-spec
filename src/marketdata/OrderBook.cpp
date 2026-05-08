@@ -38,6 +38,7 @@ void OrderBook::apply_snapshot(const OrderBookSnapshot& snap) {
         asks_.insert_or_assign(tick, size);
     }
     refresh_top_of_book_();
+    top_dirty_ = false;
     ++update_count_;
 }
 
@@ -45,13 +46,17 @@ void OrderBook::apply_update(const OrderBookUpdate& upd) {
     for (const auto& change : upd.changes) {
         apply_change_(change.side, change.price, change.size);
     }
-    refresh_top_of_book_();
+    if (top_dirty_) {
+        refresh_top_of_book_();
+        top_dirty_ = false;
+    }
     ++update_count_;
 }
 
 void OrderBook::apply_update_batch(const std::vector<PriceLevel>& changes) {
-    if (changes.size() >= 8) {
-        // ARCH § 2.3: Parallel processing for batch >= 8. 
+    // THRESHOLD ADJUSTMENT: Threshold raised to 64 to avoid parallel overhead on small batches.
+    if (changes.size() >= 64) {
+        // ARCH § 2.3: Parallel processing for large batches. 
         // We split by side to avoid race conditions on individual maps.
         std::array<Side, 2> sides = {Side::Buy, Side::Sell};
         std::for_each(std::execution::par_unseq, sides.begin(), sides.end(), [&](Side side) {
@@ -66,7 +71,11 @@ void OrderBook::apply_update_batch(const std::vector<PriceLevel>& changes) {
             apply_change_(c.side, c.price, c.size);
         }
     }
-    refresh_top_of_book_();
+    
+    if (top_dirty_) {
+        refresh_top_of_book_();
+        top_dirty_ = false;
+    }
     ++update_count_;
 }
 
@@ -83,6 +92,7 @@ void OrderBook::apply_change_(Side side, double price, double size) {
     } else {
         map.erase(tick);
     }
+    top_dirty_ = true;
 }
 
 void OrderBook::refresh_top_of_book_() noexcept {

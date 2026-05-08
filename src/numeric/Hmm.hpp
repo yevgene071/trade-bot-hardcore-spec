@@ -42,23 +42,28 @@ public:
         for (size_t s = 0; s < kStates; ++s) {
             alpha[s] = params_.start_probs[s] * emission_prob_(s, observations[0]);
         }
-        double sum = std::accumulate(alpha.begin(), alpha.end(), 0.0);
-        if (sum > 0) std::for_each(alpha.begin(), alpha.end(), [sum](auto& a) { a /= sum; });
+        double sum = alpha[0] + alpha[1] + alpha[2];
+        if (sum > 0) {
+            double inv_sum = 1.0 / sum;
+            alpha[0] *= inv_sum; alpha[1] *= inv_sum; alpha[2] *= inv_sum;
+        }
 
         // Recursive steps
         for (size_t t = 1; t < observations.size(); ++t) {
             std::array<double, kStates> next_alpha;
+            // Manual unroll for kStates=3 to avoid inner_product/lambda overhead
             for (size_t j = 0; j < kStates; ++j) {
-                double trans_sum = std::inner_product(alpha.begin(), alpha.end(), params_.trans_matrix.begin(), 0.0, 
-                    std::plus<>(), [&](double a, const auto& row) {
-                        return a * row[j];
-                    });
+                double trans_sum = alpha[0] * params_.trans_matrix[0][j] +
+                                 alpha[1] * params_.trans_matrix[1][j] +
+                                 alpha[2] * params_.trans_matrix[2][j];
                 next_alpha[j] = trans_sum * emission_prob_(j, observations[t]);
             }
-            double next_sum = std::accumulate(next_alpha.begin(), next_alpha.end(), 0.0);
+            double next_sum = next_alpha[0] + next_alpha[1] + next_alpha[2];
             if (next_sum > 0) {
-                std::for_each(next_alpha.begin(), next_alpha.end(), [next_sum](auto& a) { a /= next_sum; });
-                alpha = next_alpha;
+                double inv_sum = 1.0 / next_sum;
+                alpha[0] = next_alpha[0] * inv_sum;
+                alpha[1] = next_alpha[1] * inv_sum;
+                alpha[2] = next_alpha[2] * inv_sum;
             }
         }
 

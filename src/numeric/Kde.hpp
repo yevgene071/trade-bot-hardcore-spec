@@ -11,12 +11,14 @@ namespace trade_bot {
 
 /**
  * Kernel Density Estimation with Gaussian kernel.
+ * Optimized with SIMD and SoA (Structure of Arrays) layout.
  */
 class Kde {
 public:
-    struct Point {
-        double value;
-        double weight;
+    struct DataSet {
+        std::vector<double> values;
+        std::vector<double> weights;
+        double total_weight{0.0};
     };
 
     static double gaussian_kernel(double x) {
@@ -25,20 +27,17 @@ public:
     }
 
     /**
-     * Compute density at given points using SIMD if possible.
+     * Compute density at given points using SIMD with SoA data.
      */
-    static std::vector<double> estimate(const std::vector<Point>& data, 
+    static std::vector<double> estimate(const DataSet& data, 
                                        const std::vector<double>& query_points,
                                        double bandwidth) {
-        if (data.empty() || query_points.empty()) return {};
+        if (data.values.empty() || query_points.empty()) return {};
         if (bandwidth <= 0) bandwidth = 1e-6;
 
         std::vector<double> densities(query_points.size(), 0.0);
         double inv_h = 1.0 / bandwidth;
-        double total_weight = std::accumulate(data.begin(), data.end(), 0.0, [](double sum, const auto& d) {
-            return sum + d.weight;
-        });
-        if (total_weight <= 0) return densities;
+        if (data.total_weight <= 0) return densities;
 
         // SIMD batch size
         using batch_type = xsimd::batch<double>;
@@ -46,63 +45,46 @@ public:
 
         for (size_t i = 0; i < query_points.size(); ++i) {
             double q = query_points[i];
-            double sum = 0.0;
-
-            // Gaussian kernel sum: sum( w_j * K((q - x_j)/h) )
-            // We can vectorize the loop over data points
+            
             size_t j = 0;
             batch_type q_batch(q);
             batch_type inv_h_batch(inv_h);
             batch_type acc(0.0);
             
-            // To use xsimd efficiently, we need to prepare data in arrays
-            // For simplicity and to meet ≤ 50 µs on 200x30 points, 
-            // even a scalar loop with compiler auto-vectorization might work,
-            // but let's try a direct SIMD loop for the kernel.
-            
-            for (; j + simd_size <= data.size(); j += simd_size) {
-                std::array<double, simd_size> vals, weights;
-                for (size_t k = 0; k < simd_size; ++k) {
-                    vals[k] = data[j + k].value;
-                    weights[k] = data[j + k].weight;
-                }
-                batch_type x_batch = batch_type::load_unaligned(vals.data());
-                batch_type w_batch = batch_type::load_unaligned(weights.data());
+            // SoA allows direct unaligned loads without stack gather
+            for (; j + simd_size <= data.values.size(); j += simd_size) {
+                batch_type x_batch = batch_type::load_unaligned(&data.values[j]);
+                batch_type w_batch = batch_type::load_unaligned(&data.weights[j]);
                 
                 batch_type diff = (q_batch - x_batch) * inv_h_batch;
-                // K(u) = C * exp(-0.5 * u^2)
                 batch_type kernel_val = xsimd::exp(batch_type(-0.5) * diff * diff);
                 acc += w_batch * kernel_val;
             }
             
-            sum = xsimd::reduce_add(acc);
-            for (; j < data.size(); ++j) {
-                double diff = (q - data[j].value) * inv_h;
-                sum += data[j].weight * std::exp(-0.5 * diff * diff);
+            double sum = xsimd::reduce_add(acc);
+            for (; j < data.values.size(); ++j) {
+                double diff = (q - data.values[j]) * inv_h;
+                sum += data.weights[j] * std::exp(-0.5 * diff * diff);
             }
 
-            // Normalization: sum / (total_weight * h * sqrt(2pi))
-            // But for local maxima search, constant factors don't matter.
-            // We'll normalize by total weight at least.
-            densities[i] = sum / (total_weight * bandwidth * 2.506628);
+            densities[i] = sum / (data.total_weight * bandwidth * 2.506628);
         }
 
         return densities;
     }
 
-    static double silverman_bandwidth(const std::vector<Point>& data) {
-        if (data.size() < 2) return 1.0;
+    static double silverman_bandwidth(const DataSet& data) {
+        if (data.values.size() < 2) return 1.0;
         
         WeightedWelfordAccumulator<double> acc;
-        std::for_each(data.begin(), data.end(), [&](const auto& d) {
-            acc.update(d.value, d.weight);
-        });
+        for (size_t i = 0; i < data.values.size(); ++i) {
+            acc.update(data.values[i], data.weights[i]);
+        }
         
         double sigma = acc.stdev();
         if (sigma <= 0) sigma = 1e-6;
         
-        // h = 1.06 * sigma * n^(-1/5)
-        return 1.06 * sigma * std::pow(static_cast<double>(data.size()), -0.2);
+        return 1.06 * sigma * std::pow(static_cast<double>(data.values.size()), -0.2);
     }
 };
 

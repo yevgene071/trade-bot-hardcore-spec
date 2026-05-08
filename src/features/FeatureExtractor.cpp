@@ -16,7 +16,9 @@ FeatureExtractor::FeatureExtractor(Ticker ticker, Config cfg)
     : ticker_(std::move(ticker))
     , cfg_(cfg)
     , hist_book_(cfg.latency_max_us, cfg.hdr_significant_digits)
-    , hist_total_(cfg.latency_max_us, cfg.hdr_significant_digits) {}
+    , hist_total_(cfg.latency_max_us, cfg.hdr_significant_digits) {
+    mid_history_.resize(cfg_.reserve_history);
+}
 
 void FeatureExtractor::set_sources(const OrderBook* ob,
                                    const TradeStream* ts,
@@ -24,41 +26,6 @@ void FeatureExtractor::set_sources(const OrderBook* ob,
     ob_ = ob;
     ts_ = ts;
     lt_ = lt;
-}
-
-double FeatureExtractor::price_change_pct_(std::chrono::system_clock::time_point now,
-                                           std::chrono::seconds horizon) const {
-    if (mid_history_.empty()) return 0.0;
-    const auto cutoff = now - horizon;
-    auto it = std::find_if(mid_history_.begin(), mid_history_.end(), [&](const auto& s) {
-        return s.t >= cutoff;
-    });
-    double ref_mid = (it != mid_history_.end()) ? it->mid : mid_history_.front().mid;
-    const double current = mid_history_.back().mid;
-    if (ref_mid == 0.0) return 0.0;
-    return (current - ref_mid) / ref_mid * 100.0;
-}
-
-double FeatureExtractor::volatility_1min_log_returns_() const {
-    if (mid_history_.size() < 2) return 0.0;
-    const auto cutoff = mid_history_.back().t - std::chrono::seconds{60};
-
-    // First sample inside the window (skip pre-roll).
-    auto first = std::find_if(mid_history_.begin(), mid_history_.end(), [&](const auto& s) {
-        return s.t >= cutoff;
-    });
-    if (first == mid_history_.end() || std::distance(first, mid_history_.end()) < 2) return 0.0;
-
-    // Log-returns + Welford in one pass; we need stdev only.
-    WelfordAccumulator<double> acc;
-    auto prev = first;
-    std::for_each(std::next(first), mid_history_.end(), [&](const auto& s) {
-        if (prev->mid > 0.0 && s.mid > 0.0) {
-            acc.update(std::log(s.mid / prev->mid));
-        }
-        prev = std::next(prev); // Manual advance for prev logic
-    });
-    return acc.stdev();
 }
 
 FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now) {
@@ -114,17 +81,55 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
 
     // ----- Maintain mid history before computing dynamics -----
     if (f.mid > 0.0) {
-        if (mid_history_.size() >= cfg_.reserve_history) {
-            mid_history_.pop_front();
-        }
-        mid_history_.push_back({now, f.mid});
+        mid_history_[mid_head_] = {now, f.mid};
+        mid_head_ = (mid_head_ + 1) % cfg_.reserve_history;
+        if (mid_count_ < cfg_.reserve_history) mid_count_++;
     }
 
-    // ----- Price dynamics -----
-    f.price_change_1s   = price_change_pct_(now, std::chrono::seconds{1});
-    f.price_change_5s   = price_change_pct_(now, std::chrono::seconds{5});
-    f.price_change_30s  = price_change_pct_(now, std::chrono::seconds{30});
-    f.volatility_1min   = volatility_1min_log_returns_();
+    // ----- Price dynamics & Volatility (Single Pass) -----
+    if (mid_count_ >= 2) {
+        const auto t1 = now - std::chrono::seconds{1};
+        const auto t5 = now - std::chrono::seconds{5};
+        const auto t30 = now - std::chrono::seconds{30};
+        const auto t60 = now - std::chrono::seconds{60};
+
+        double mid1 = 0, mid5 = 0, mid30 = 0, mid60 = 0;
+        WelfordAccumulator<double> vol_acc;
+        
+        // Scan backwards in circular buffer
+        double current_mid = f.mid;
+        double last_mid = current_mid;
+        
+        for (std::size_t i = 0; i < mid_count_; ++i) {
+            std::size_t idx = (mid_head_ + cfg_.reserve_history - 1 - i) % cfg_.reserve_history;
+            const auto& sample = mid_history_[idx];
+            
+            if (i > 0) { // Skip the very first (current) sample which we already have in last_mid
+                if (sample.t >= t1) mid1 = sample.mid;
+                if (sample.t >= t5) mid5 = sample.mid;
+                if (sample.t >= t30) mid30 = sample.mid;
+                if (sample.t >= t60) {
+                    mid60 = sample.mid;
+                    if (sample.mid > 0 && last_mid > 0) {
+                        vol_acc.update(std::log(last_mid / sample.mid));
+                    }
+                } else {
+                    break;
+                }
+                last_mid = sample.mid;
+            }
+        }
+
+        auto calc_pct = [current_mid](double ref) {
+            return (ref > 0) ? (current_mid - ref) / ref * 100.0 : 0.0;
+        };
+
+        f.price_change_1s = calc_pct(mid1 > 0 ? mid1 : mid_history_[(mid_head_ + cfg_.reserve_history - mid_count_) % cfg_.reserve_history].mid);
+        f.price_change_5s = calc_pct(mid5 > 0 ? mid5 : mid_history_[(mid_head_ + cfg_.reserve_history - mid_count_) % cfg_.reserve_history].mid);
+        f.price_change_30s = calc_pct(mid30 > 0 ? mid30 : mid_history_[(mid_head_ + cfg_.reserve_history - mid_count_) % cfg_.reserve_history].mid);
+        f.volatility_1min = vol_acc.stdev();
+    }
+    
     f.volatility_1min_bps = f.volatility_1min * kBpsScale;
 
     // ----- Leader -----

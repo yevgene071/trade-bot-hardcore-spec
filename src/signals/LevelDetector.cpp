@@ -97,16 +97,19 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
     
     std::vector<Level> new_levels;
     
-    std::vector<Kde::Point> kde_points;
+    Kde::DataSet kde_data;
     auto m15 = cluster_mgr_.get(ticker_, "M15");
     if (m15) {
-        kde_points.resize(m15->items.size());
-        std::transform(m15->items.begin(), m15->items.end(), kde_points.begin(), [](const auto& item) {
-            return Kde::Point{item.price, item.ask_size + item.bid_size};
-        });
+        kde_data.values.resize(m15->items.size());
+        kde_data.weights.resize(m15->items.size());
+        for (size_t i = 0; i < m15->items.size(); ++i) {
+            kde_data.values[i] = m15->items[i].price;
+            kde_data.weights[i] = m15->items[i].ask_size + m15->items[i].bid_size;
+            kde_data.total_weight += kde_data.weights[i];
+        }
     }
 
-    double h = Kde::silverman_bandwidth(kde_points) * cfg_.kde_smoothness;
+    double h = Kde::silverman_bandwidth(kde_data) * cfg_.kde_smoothness;
 
     // ---- Pass 1: per-cluster centroid + raw KDE density. ----
     // We collect raw kde_val for every cluster first so we can normalize the
@@ -128,8 +131,8 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
         double centroid = std::accumulate(c.begin(), c.end(), 0.0) / static_cast<double>(c.size());
 
         double kde_val = 0.0;
-        if (!kde_points.empty()) {
-            auto dens = Kde::estimate(kde_points, {centroid}, h);
+        if (!kde_data.values.empty()) {
+            auto dens = Kde::estimate(kde_data, {centroid}, h);
             kde_val = dens[0];
         }
 
