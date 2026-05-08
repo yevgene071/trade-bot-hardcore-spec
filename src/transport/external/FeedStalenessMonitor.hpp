@@ -16,7 +16,7 @@ public:
     };
 
     static void check_all(const std::map<std::string, Config>& configs) {
-        auto& registry = ExternalFeedRegistry::instance();
+        const auto& registry = ExternalFeedRegistry::instance();
         for (const auto& [kind, feed] : registry.all_feeds()) {
             std::string name = feed->name();
             auto it = configs.find(name);

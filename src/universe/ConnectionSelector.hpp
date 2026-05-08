@@ -24,7 +24,7 @@ public:
     explicit ConnectionSelector(Config cfg);
 
     /// Returns the chosen connection id or std::nullopt if no eligible one.
-    std::optional<int> select(const std::vector<ConnectionInfo>& conns) const;
+    static std::optional<int> select(const std::vector<ConnectionInfo>& conns);
 
 private:
     static bool eligible_(const ConnectionInfo& c) noexcept;

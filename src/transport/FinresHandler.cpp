@@ -6,13 +6,9 @@ void FinresHandler::handle_update(const FinresUpdate& update) {
     std::lock_guard lock(mutex_);
     auto& state = states_[update.connection_id];
     
-    double total_result = 0.0;
-    for (const auto& entry : update.finreses) {
-        // In MetaScalp, there's usually one primary currency result we care about (e.g. USDT)
-        // For simplicity, we sum all results if multiple currencies exist, 
-        // but typically it's just one entry.
-        total_result += entry.result;
-    }
+    double total_result = std::accumulate(update.finreses.begin(), update.finreses.end(), 0.0, [](double sum, const auto& entry) {
+        return sum + entry.result;
+    });
 
     state.current_result = total_result;
     if (!state.initialized) {

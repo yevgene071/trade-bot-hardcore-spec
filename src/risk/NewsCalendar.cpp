@@ -175,10 +175,14 @@ std::optional<int64_t> NewsCalendar::minutes_to_next_news(
     if (!snap || snap->empty()) {
         return std::nullopt;
     }
-    for (const auto& e : *snap) {
-        if (e.ts_utc < now) continue;
-        if (e.ticker.has_value() && *e.ticker != ticker) continue;
-        const auto delta = e.ts_utc - now;
+    auto it = std::find_if(snap->begin(), snap->end(), [&](const auto& e) {
+        if (e.ts_utc < now) return false;
+        if (e.ticker.has_value() && *e.ticker != ticker) return false;
+        return true;
+    });
+
+    if (it != snap->end()) {
+        const auto delta = it->ts_utc - now;
         return std::chrono::duration_cast<std::chrono::minutes>(delta).count();
     }
     return std::nullopt;

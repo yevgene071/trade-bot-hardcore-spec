@@ -22,8 +22,8 @@ public:
         std::chrono::seconds entry_timeout{5};
     };
 
-    LeaderLag(Ticker ticker, Config cfg);
-    LeaderLag(Ticker ticker);
+    LeaderLag(Ticker ticker, const Config& cfg);
+    explicit LeaderLag(Ticker ticker);
 
     const std::string& name() const override { return name_; }
     const Ticker& ticker() const override { return ticker_; }

@@ -30,7 +30,7 @@ public:
         std::vector<std::string> log_entries;
     };
 
-    StartupRecovery(int connection_id, IOrderGateway& gateway, AccountStatePersister& persister, Config cfg);
+    StartupRecovery(int connection_id, IOrderGateway& gateway, AccountStatePersister& persister, const Config& cfg);
 
     Result run();
 

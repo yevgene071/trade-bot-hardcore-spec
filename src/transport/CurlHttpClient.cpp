@@ -34,12 +34,12 @@ HttpResponse CurlHttpClient::del(const std::string& url) {
 }
 
 size_t CurlHttpClient::write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
-    ((std::string*)userp)->append((char*)contents, size * nmemb);
+    static_cast<std::string*>(userp)->append(static_cast<char*>(contents), size * nmemb);
     return size * nmemb;
 }
 
 size_t CurlHttpClient::header_callback(char* buffer, size_t size, size_t nitems, void* userdata) {
-    auto* headers = (std::map<std::string, std::string>*)userdata;
+    auto* headers = static_cast<std::map<std::string, std::string>*>(userdata);
     std::string line(buffer, size * nitems);
     size_t colon = line.find(':');
     if (colon != std::string::npos) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "domain/Types.hpp"
 #include <vector>
 #include <cmath>
 
@@ -29,7 +30,7 @@ public:
 
         for (size_t i = 1; i < prices.size(); ++i) {
             double cur = prices[i];
-            double diff_bps = std::abs(cur - last_peak_price) / last_peak_price * 10000.0;
+            double diff_bps = std::abs(cur - last_peak_price) / last_peak_price * kBpsBase;
 
             if (state == State::FindingHigh) {
                 if (cur > last_peak_price) {

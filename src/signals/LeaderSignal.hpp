@@ -23,7 +23,7 @@ public:
                 Ticker leader_ticker,
                 SignalBus& bus,
                 const LeaderTracker& tracker,
-                Config cfg);
+                const Config& cfg);
 
     LeaderSignal(Ticker ticker,
                 Ticker leader_ticker,

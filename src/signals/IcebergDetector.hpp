@@ -35,7 +35,7 @@ public:
                    SignalBus& bus,
                    const OrderBook& book,
                    const TickerUniverse& universe,
-                   Config cfg);
+                   const Config& cfg);
 
     IcebergDetector(Ticker ticker,
                    SignalBus& bus,

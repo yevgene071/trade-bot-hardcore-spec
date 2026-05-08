@@ -4,7 +4,7 @@
 
 namespace trade_bot {
 
-BounceFromDensity::BounceFromDensity(Ticker ticker, Config cfg)
+BounceFromDensity::BounceFromDensity(Ticker ticker, const Config& cfg)
     : ticker_(std::move(ticker))
     , name_("BounceFromDensity")
     , cfg_(cfg) {}
@@ -46,7 +46,7 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
     // C3: DensityDetected on the same level
     auto it_density = ctx_.recent_signals.find(SignalKind::DensityDetected);
     if (it_density == ctx_.recent_signals.end() ||
-        std::abs(it_density->second.price - level_price) / level_price * 10000.0 > 1.0 || // 1 bps tolerance
+        std::abs(it_density->second.price - level_price) / level_price * kBpsBase > 1.0 || // 1 bps tolerance
         (now - it_density->second.timestamp) > std::chrono::seconds(10)) return std::nullopt;
 
     // C4: TapeFade
@@ -57,7 +57,7 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
     // C5: No Iceberg
     auto it_iceberg = ctx_.recent_signals.find(SignalKind::IcebergSuspected);
     if (it_iceberg != ctx_.recent_signals.end() &&
-        std::abs(it_iceberg->second.price - level_price) / level_price * 10000.0 < 2.0 && // 2 bps proximity
+        std::abs(it_iceberg->second.price - level_price) / level_price * kBpsBase < 2.0 && // 2 bps proximity
         (now - it_iceberg->second.timestamp) < std::chrono::seconds(30)) return std::nullopt;
 
     // Direction
@@ -69,8 +69,8 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
 
     // Calculate Prices
     double entry_price, stop_price;
-    double offset = level_price * (cfg_.entry_offset_bps / 10000.0);
-    double buffer = level_price * (cfg_.stop_buffer_bps / 10000.0);
+    double offset = level_price * (cfg_.entry_offset_bps / kBpsBase);
+    double buffer = level_price * (cfg_.stop_buffer_bps / kBpsBase);
 
     if (plan_side == Side::Buy) {
         entry_price = level_price + offset;

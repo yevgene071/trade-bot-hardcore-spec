@@ -16,7 +16,7 @@ class StrategyEngine {
 public:
     using PlanCallback = std::function<void(const TradePlan&)>;
 
-    StrategyEngine(SignalBus& signal_bus);
+    explicit StrategyEngine(SignalBus& signal_bus);
 
     void add_strategy(std::unique_ptr<IStrategy> strategy);
 

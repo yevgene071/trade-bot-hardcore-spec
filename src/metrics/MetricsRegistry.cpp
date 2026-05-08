@@ -35,28 +35,25 @@ void MetricsRegistry::histogram_observe(const std::string& name, double val, con
     auto& h = histograms_[key];
     if (h.buckets.empty()) {
         h.buckets = {0.1, 1.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0}; // Default latency buckets in ms
-        for (double b : h.buckets) {
-            h.counts[b] = 0;
-        }
+        std::for_each(h.buckets.begin(), h.buckets.end(), [&](double b) { h.counts[b] = 0; });
     }
     h.sum += val;
     h.count++;
-    for (double b : h.buckets) {
+    
+    std::for_each(h.buckets.begin(), h.buckets.end(), [&](double b) {
         if (val <= b) {
             h.counts[b]++;
         }
-    }
+    });
 }
 
 static std::string format_labels(const std::map<std::string, std::string>& labels) {
     if (labels.empty()) return "";
     std::stringstream ss;
     ss << "{";
-    bool first = true;
-    for (const auto& [k, v] : labels) {
-        if (!first) ss << ",";
-        ss << k << "=\"" << v << "\"";
-        first = false;
+    for (auto it = labels.begin(); it != labels.end(); ++it) {
+        if (it != labels.begin()) ss << ",";
+        ss << it->first << "=\"" << it->second << "\"";
     }
     ss << "}";
     return ss.str();

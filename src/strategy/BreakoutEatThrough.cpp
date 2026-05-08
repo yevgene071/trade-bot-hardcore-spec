@@ -4,7 +4,7 @@
 
 namespace trade_bot {
 
-BreakoutEatThrough::BreakoutEatThrough(Ticker ticker, Config cfg)
+BreakoutEatThrough::BreakoutEatThrough(Ticker ticker, const Config& cfg)
     : ticker_(std::move(ticker))
     , name_("BreakoutEatThrough")
     , cfg_(cfg) {}
@@ -52,37 +52,35 @@ std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::tim
 
     // C3: Support behind (DensityDetected or IcebergSuspected on our side)
     // Scan history for recent signals on our side
-    std::optional<double> support_price;
-    for (auto it = ctx_.signal_history.rbegin(); it != ctx_.signal_history.rend(); ++it) {
-        if ((now - it->timestamp) > std::chrono::seconds(30)) break;
+    auto it_support = std::find_if(ctx_.signal_history.rbegin(), ctx_.signal_history.rend(), [&](const auto& sig) {
+        if ((now - sig.timestamp) > std::chrono::seconds(30)) return false;
         
         bool is_support = false;
-        if (it->kind == SignalKind::DensityDetected) {
-            std::string s = it->payload.value("side", "");
+        if (sig.kind == SignalKind::DensityDetected) {
+            std::string s = sig.payload.value("side", "");
             if ((breakout_side == Side::Buy && s == "Bid") ||
                 (breakout_side == Side::Sell && s == "Ask")) is_support = true;
-        } else if (it->kind == SignalKind::IcebergSuspected) {
-             std::string s = it->payload.value("side", "");
+        } else if (sig.kind == SignalKind::IcebergSuspected) {
+             std::string s = sig.payload.value("side", "");
              if ((breakout_side == Side::Buy && s == "Bid") ||
                  (breakout_side == Side::Sell && s == "Ask")) is_support = true;
         }
         
         if (is_support) {
-            double dist_bps = std::abs(it->price - density_price) / density_price * 10000.0;
-            if (dist_bps <= cfg_.support_search_range_bps) {
-                support_price = it->price;
-                break;
-            }
+            double dist_bps = std::abs(sig.price - density_price) / density_price * kBpsBase;
+            return dist_bps <= cfg_.support_search_range_bps;
         }
-    }
+        return false;
+    });
     
-    if (!support_price) return std::nullopt;
+    if (it_support == ctx_.signal_history.rend()) return std::nullopt;
+    double support_price = it_support->price;
 
     // Prices
-    double entry_price = (breakout_side == Side::Buy) ? density_price + density_price * (cfg_.aggressive_offset_bps / 10000.0)
-                                                    : density_price - density_price * (cfg_.aggressive_offset_bps / 10000.0);
-    double stop_price = (breakout_side == Side::Buy) ? *support_price - density_price * (cfg_.stop_buffer_bps / 10000.0)
-                                                    : *support_price + density_price * (cfg_.stop_buffer_bps / 10000.0);
+    double entry_price = (breakout_side == Side::Buy) ? density_price + density_price * (cfg_.aggressive_offset_bps / kBpsBase)
+                                                    : density_price - density_price * (cfg_.aggressive_offset_bps / kBpsBase);
+    double stop_price = (breakout_side == Side::Buy) ? support_price - density_price * (cfg_.stop_buffer_bps / kBpsBase)
+                                                    : support_price + density_price * (cfg_.stop_buffer_bps / kBpsBase);
 
     double risk_per_coin = std::abs(entry_price - stop_price);
     double tp1_price = (breakout_side == Side::Buy) ? entry_price + cfg_.tp1_r * risk_per_coin 

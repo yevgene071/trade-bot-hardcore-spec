@@ -26,7 +26,7 @@ public:
     void set_port(int port) { m_port = port; }
 
 private:
-    std::string get_base_url() const { return "http://127.0.0.1"; } // Port will be appended or found via discovery
+    static std::string get_base_url() { return "http://127.0.0.1"; } // Port will be appended or found via discovery
     std::shared_ptr<IHttpClient> m_http_client;
     int m_port = 17845; // Default, should be set via discovery
 };

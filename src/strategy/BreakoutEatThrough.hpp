@@ -24,8 +24,8 @@ public:
         std::chrono::seconds entry_timeout{10};
     };
 
-    BreakoutEatThrough(Ticker ticker, Config cfg);
-    BreakoutEatThrough(Ticker ticker);
+    BreakoutEatThrough(Ticker ticker, const Config& cfg);
+    explicit BreakoutEatThrough(Ticker ticker);
 
     const std::string& name() const override { return name_; }
     const Ticker& ticker() const override { return ticker_; }

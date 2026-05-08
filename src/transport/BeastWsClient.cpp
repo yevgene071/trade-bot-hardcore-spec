@@ -2,6 +2,7 @@
 #include "logger/Logger.hpp"
 #include "metrics/MetricsRegistry.hpp"
 #include <boost/url.hpp>
+#include <boost/asio/connect.hpp>
 #include <iostream>
 #include <openssl/err.h>
 
@@ -20,7 +21,11 @@ BeastWsClient::BeastWsClient(net::io_context& ioc)
 }
 
 BeastWsClient::~BeastWsClient() {
-    disconnect();
+    m_closing = true;
+    m_reconnect_timer.cancel();
+    m_ping_timer.cancel();
+    // Socket will be closed when m_ws is destroyed. 
+    // We can't use shared_from_this() here.
 }
 
 void BeastWsClient::connect(const std::string& url) {
@@ -33,13 +38,13 @@ void BeastWsClient::connect(const std::string& url) {
             throw std::runtime_error("Invalid URL: " + url);
         }
 
-        m_host = parsed_url->host_address();
-        m_port = parsed_url->port();
+        m_host = std::string(parsed_url->host_address());
+        m_port = std::string(parsed_url->port());
         m_use_ssl = (parsed_url->scheme() == "wss");
         if (m_port.empty()) {
             m_port = m_use_ssl ? "443" : "80";
         }
-        m_target = parsed_url->path();
+        m_target = std::string(parsed_url->path());
         if (m_target.empty()) m_target = "/";
         if (parsed_url->has_query()) {
             m_target += "?" + std::string(parsed_url->query());
@@ -56,7 +61,7 @@ void BeastWsClient::disconnect() {
     m_closing = true;
     m_reconnect_timer.cancel();
     m_ping_timer.cancel();
-    
+
     if (m_ws && m_connected) {
         std::visit([self = shared_from_this()](auto& ws) {
             ws.async_close(websocket::close_code::normal, [self](beast::error_code ec) {

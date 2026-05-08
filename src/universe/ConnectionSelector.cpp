@@ -10,12 +10,10 @@ bool ConnectionSelector::eligible_(const ConnectionInfo& c) noexcept {
 }
 
 std::optional<int> ConnectionSelector::select(
-    const std::vector<ConnectionInfo>& conns) const {
-    // First pass: eligible connections only.
-    for (const auto& c : conns) {
-        if (eligible_(c)) {
-            return c.id;
-        }
+    const std::vector<ConnectionInfo>& conns) {
+    auto it = std::find_if(conns.begin(), conns.end(), eligible_);
+    if (it != conns.end()) {
+        return it->id;
     }
     return std::nullopt;
 }

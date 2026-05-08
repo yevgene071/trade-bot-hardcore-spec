@@ -18,8 +18,8 @@ public:
         double slippage_bps{1.0};
     };
 
-    PaperExecutor(const std::map<Ticker, const OrderBook*>& books, Config cfg);
-    PaperExecutor(const std::map<Ticker, const OrderBook*>& books);
+    explicit PaperExecutor(const std::map<Ticker, const OrderBook*>& books, Config cfg);
+    explicit PaperExecutor(const std::map<Ticker, const OrderBook*>& books);
 
     void submit(const TradePlan& plan) override;
     void cancel_all(const Ticker& ticker) override;

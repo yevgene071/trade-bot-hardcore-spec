@@ -50,7 +50,7 @@ public:
                  SignalBus& bus,
                  const OrderBook& book,
                  const ClusterSnapshotManager& cluster_mgr,
-                 Config cfg);
+                 const Config& cfg);
 
     LevelDetector(Ticker ticker,
                  SignalBus& bus,

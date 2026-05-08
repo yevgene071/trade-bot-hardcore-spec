@@ -51,10 +51,10 @@ public:
 
     RiskManager(const TickerUniverse& universe, 
                 const NewsCalendar& news,
-                Config cfg);
+                const Config& cfg);
 
-    RiskManager(const TickerUniverse& universe, 
-                const NewsCalendar& news);
+    explicit RiskManager(const TickerUniverse& universe, 
+                         const NewsCalendar& news);
 
     /// Evaluate a TradePlan against R1..R13. Thread-safe — multiple
     /// threads (strategy engine + executor reconciliation) may call this

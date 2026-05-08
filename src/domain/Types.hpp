@@ -10,6 +10,8 @@ namespace trade_bot {
 
 using Ticker = std::string;
 
+constexpr double kBpsBase = 10000.0;
+
 enum class Side {
     None,
     Buy,

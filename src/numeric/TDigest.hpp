@@ -49,8 +49,9 @@ public:
         unmerged_weight_ = 0;
         centroids_.clear();
         
-        double total_weight = 0;
-        for (const auto& c : all) total_weight += c.weight;
+        double total_weight = std::accumulate(all.begin(), all.end(), 0.0, [](double sum, const auto& c) {
+            return sum + c.weight;
+        });
         
         if (all.empty()) return;
         

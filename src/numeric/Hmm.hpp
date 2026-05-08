@@ -39,27 +39,25 @@ public:
         std::array<double, kStates> alpha;
         
         // Initial step
-        double sum = 0;
         for (size_t s = 0; s < kStates; ++s) {
             alpha[s] = params_.start_probs[s] * emission_prob_(s, observations[0]);
-            sum += alpha[s];
         }
-        if (sum > 0) for (auto& a : alpha) a /= sum;
+        double sum = std::accumulate(alpha.begin(), alpha.end(), 0.0);
+        if (sum > 0) std::for_each(alpha.begin(), alpha.end(), [sum](auto& a) { a /= sum; });
 
         // Recursive steps
         for (size_t t = 1; t < observations.size(); ++t) {
             std::array<double, kStates> next_alpha;
-            double next_sum = 0;
             for (size_t j = 0; j < kStates; ++j) {
-                double trans_sum = 0;
-                for (size_t i = 0; i < kStates; ++i) {
-                    trans_sum += alpha[i] * params_.trans_matrix[i][j];
-                }
+                double trans_sum = std::inner_product(alpha.begin(), alpha.end(), params_.trans_matrix.begin(), 0.0, 
+                    std::plus<>(), [&](double a, const auto& row) {
+                        return a * row[j];
+                    });
                 next_alpha[j] = trans_sum * emission_prob_(j, observations[t]);
-                next_sum += next_alpha[j];
             }
+            double next_sum = std::accumulate(next_alpha.begin(), next_alpha.end(), 0.0);
             if (next_sum > 0) {
-                for (auto& a : next_alpha) a /= next_sum;
+                std::for_each(next_alpha.begin(), next_alpha.end(), [next_sum](auto& a) { a /= next_sum; });
                 alpha = next_alpha;
             }
         }
@@ -73,8 +71,7 @@ private:
         double p = 1.0;
         for (size_t i = 0; i < 3; ++i) {
             double diff = obs[i] - e.means[i];
-            double var = e.stds[i] * e.stds[i];
-            if (var <= 0) var = 1e-6;
+            double var = std::max(e.stds[i] * e.stds[i], 1e-6);
             p *= (1.0 / (e.stds[i] * 2.5066)) * std::exp(-0.5 * diff * diff / var);
         }
         return std::max(p, 1e-10);

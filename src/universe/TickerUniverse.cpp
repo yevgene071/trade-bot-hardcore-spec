@@ -64,8 +64,10 @@ void TickerUniverse::refresh_pool(const std::vector<Ticker>& available) {
     }
 
     active_.clear();
-    active_.reserve(survivors.size());
-    for (auto& s : survivors) active_.push_back(std::move(s.first));
+    active_.resize(survivors.size());
+    std::transform(survivors.begin(), survivors.end(), active_.begin(), [](auto& s) {
+        return std::move(s.first);
+    });
 
     // Drop affinity entries for tickers that fell out of the pool.
     const std::set<Ticker> active_set(active_.begin(), active_.end());
@@ -95,7 +97,7 @@ void TickerUniverse::refresh_affinity() {
     }
 }
 
-std::vector<Ticker> TickerUniverse::active() const { return active_; }
+const std::vector<Ticker>& TickerUniverse::active() const { return active_; }
 std::size_t TickerUniverse::pool_size() const noexcept { return active_.size(); }
 
 bool TickerUniverse::is_strategy_enabled(const Ticker& ticker,

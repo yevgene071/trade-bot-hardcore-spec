@@ -34,7 +34,7 @@ public:
     };
 
     KalmanLagEstimator();
-    explicit KalmanLagEstimator(Config cfg);
+    explicit KalmanLagEstimator(const Config& cfg);
 
     /// Advance state by `dt_sec` and incorporate observed lag in ms.
     void update(double dt_sec, double observed_lag_ms);

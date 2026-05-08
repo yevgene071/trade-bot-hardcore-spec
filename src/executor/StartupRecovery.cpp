@@ -7,7 +7,7 @@
 
 namespace trade_bot {
 
-StartupRecovery::StartupRecovery(int connection_id, IOrderGateway& gateway, AccountStatePersister& persister, Config cfg)
+StartupRecovery::StartupRecovery(int connection_id, IOrderGateway& gateway, AccountStatePersister& persister, const Config& cfg)
     : connection_id_(connection_id), gateway_(gateway), persister_(persister), cfg_(cfg) {}
 
 StartupRecovery::Result StartupRecovery::run() {
@@ -104,7 +104,7 @@ StartupRecovery::Result StartupRecovery::run() {
         }
         
         // Handle orphan orders
-        auto& orders = open_orders[ticker];
+        const auto& orders = open_orders[ticker];
         for (const auto& o : orders) {
             bool is_used = std::any_of(res.recovered_trades.begin(), res.recovered_trades.end(), [&](const ActiveTrade& t) {
                 return t.plan.ticker == ticker;

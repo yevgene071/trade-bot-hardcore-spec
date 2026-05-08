@@ -60,15 +60,13 @@ ApproachAnalyzer::Analysis ApproachAnalyzer::analyze(double level_price,
     (void)level_price; (void)now;
     if (history_.size() < 10) return {ApproachType::Unknown, 0, 0, 0, 0, 0};
 
-    std::vector<double> prices;
-    for (const auto& h : history_) prices.push_back(h.second);
+    std::vector<double> prices(history_.size());
+    std::transform(history_.begin(), history_.end(), prices.begin(), [](const auto& h) { return h.second; });
 
     auto peaks = ZigZag::calculate(prices, cfg_.pullback_min_bps);
-    int pullbacks = 0;
-    for (const auto& p : peaks) if (!p.is_high) pullbacks++; 
-
+    int pullbacks = static_cast<int>(std::count_if(peaks.begin(), peaks.end(), [](const auto& p) { return !p.is_high; }));
     double duration = std::chrono::duration<double>(history_.back().first - history_.front().first).count();
-    double dist_bps = std::abs(history_.back().second - history_.front().second) / history_.front().second * 10000.0;
+    double dist_bps = std::abs(history_.back().second - history_.front().second) / history_.front().second * kBpsBase;
     double speed = dist_bps / std::max(0.1, duration);
 
     // Repeating observation 5 times effectively sharpens the posterior.

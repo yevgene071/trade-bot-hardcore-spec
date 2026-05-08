@@ -66,7 +66,7 @@ public:
     };
 
     OrderReconciliator();
-    explicit OrderReconciliator(Config cfg);
+    explicit OrderReconciliator(const Config& cfg);
 
     /// Inject the open-orders fetcher (typically wraps OrderGateway::get_open_orders).
     void set_fetch_open_orders(FetchOpenOrders fn);

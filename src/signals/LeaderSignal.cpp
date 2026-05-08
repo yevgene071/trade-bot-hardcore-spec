@@ -5,15 +5,11 @@
 namespace trade_bot {
 
 LeaderSignal::LeaderSignal(Ticker ticker,
-                          Ticker leader_ticker,
-                          SignalBus& bus,
-                          const LeaderTracker& tracker,
-                          Config cfg)
-    : ticker_(std::move(ticker))
-    , leader_ticker_(std::move(leader_ticker))
-    , bus_(bus)
-    , tracker_(tracker)
-    , cfg_(cfg) {}
+                           Ticker leader_ticker,
+                           SignalBus& bus,
+                           const LeaderTracker& tracker,
+                           const Config& cfg)
+    : ticker_(std::move(ticker)), leader_ticker_(std::move(leader_ticker)), bus_(bus), tracker_(tracker), cfg_(cfg) {}
 
 LeaderSignal::LeaderSignal(Ticker ticker,
                           Ticker leader_ticker,

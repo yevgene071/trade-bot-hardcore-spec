@@ -4,6 +4,8 @@
 #include <cmath>
 #include <algorithm>
 #include <xsimd/xsimd.hpp>
+#include "Welford.hpp"
+#include <numeric>
 
 namespace trade_bot {
 
@@ -33,8 +35,9 @@ public:
 
         std::vector<double> densities(query_points.size(), 0.0);
         double inv_h = 1.0 / bandwidth;
-        double total_weight = 0;
-        for (const auto& d : data) total_weight += d.weight;
+        double total_weight = std::accumulate(data.begin(), data.end(), 0.0, [](double sum, const auto& d) {
+            return sum + d.weight;
+        });
         if (total_weight <= 0) return densities;
 
         // SIMD batch size
@@ -90,15 +93,12 @@ public:
     static double silverman_bandwidth(const std::vector<Point>& data) {
         if (data.size() < 2) return 1.0;
         
-        double mean = 0, m2 = 0, weight_sum = 0;
-        for (const auto& d : data) {
-            double old_mean = mean;
-            weight_sum += d.weight;
-            mean += (d.value - mean) * (d.weight / weight_sum);
-            m2 += d.weight * (d.value - mean) * (d.value - old_mean);
-        }
-        double variance = m2 / weight_sum;
-        double sigma = std::sqrt(variance);
+        WeightedWelfordAccumulator<double> acc;
+        std::for_each(data.begin(), data.end(), [&](const auto& d) {
+            acc.update(d.value, d.weight);
+        });
+        
+        double sigma = acc.stdev();
         if (sigma <= 0) sigma = 1e-6;
         
         // h = 1.06 * sigma * n^(-1/5)

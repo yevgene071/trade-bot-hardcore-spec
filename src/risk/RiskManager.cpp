@@ -8,7 +8,7 @@ namespace trade_bot {
 
 RiskManager::RiskManager(const TickerUniverse& universe,
                         const NewsCalendar& news,
-                        Config cfg)
+                        const Config& cfg)
     : universe_(universe)
     , news_(news)
     , cfg_(cfg) {}
@@ -243,11 +243,10 @@ void RiskManager::record_trade_end(bool is_loss,
         loss_history_.pop_front();
     }
 
-    int consecutive_losses = 0;
-    for (auto it = loss_history_.rbegin(); it != loss_history_.rend(); ++it) {
-        if (it->second) consecutive_losses++;
-        else break;
-    }
+    auto first_non_loss = std::find_if(loss_history_.rbegin(), loss_history_.rend(), [](const auto& p) {
+        return !p.second;
+    });
+    int consecutive_losses = static_cast<int>(std::distance(loss_history_.rbegin(), first_non_loss));
 
     if (consecutive_losses >= cfg_.max_consecutive_losses) {
         last_loss_streak_ts_ = ts;

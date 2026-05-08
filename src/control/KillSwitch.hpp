@@ -39,7 +39,7 @@ private:
     ~KillSwitch();
 
     void watchdog_loop();
-    void setup_signal_handlers();
+    static void setup_signal_handlers();
 
     std::atomic<bool> triggered_{false};
     std::atomic<bool> running_{false};

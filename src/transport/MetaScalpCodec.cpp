@@ -2,6 +2,7 @@
 #include "logger/Logger.hpp"
 #include <iomanip>
 #include <sstream>
+#include <algorithm>
 
 namespace trade_bot {
 
@@ -165,22 +166,13 @@ RestOrder MetaScalpCodec::parse_rest_order(const nlohmann::json& j) {
     };
 }
 
-PlaceOrderResult MetaScalpCodec::parse_place_order_result(const nlohmann::json& j) {
-    check_required(j, fields::kStatus);
-    return PlaceOrderResult {
-        .status = j.value(fields::kStatus, ""),
-        .client_id = j.value(fields::kClientId, ""),
-        .execution_time_ms = j.value(fields::kExecutionTimeMs, 0.0)
-    };
-}
-
 PositionUpdate MetaScalpCodec::parse_position_update(const nlohmann::json& j) {
-    check_required(j, fields::kPositionId);
+    check_required(j, fields::kId);
     check_required(j, fields::kTicker);
     
     return PositionUpdate {
         .connection_id = j.value(fields::kConnectionId, 0),
-        .position_id = j.value(fields::kPositionId, 0L),
+        .position_id = j.value(fields::kId, 0L),
         .ticker = j.value(fields::kTicker, ""),
         .side = parse_side(j.value(fields::kSide, nlohmann::json())),
         .size = j.value(fields::kSize, 0.0),
@@ -194,14 +186,16 @@ PositionUpdate MetaScalpCodec::parse_position_update(const nlohmann::json& j) {
 BalanceUpdate MetaScalpCodec::parse_balance_update(const nlohmann::json& j) {
     std::vector<BalanceEntry> balances;
     if (j.contains(fields::kBalances) && j[fields::kBalances].is_array()) {
-        for (const auto& item : j[fields::kBalances]) {
-            balances.push_back({
+        const auto& ja = j[fields::kBalances];
+        balances.reserve(ja.size());
+        std::transform(ja.begin(), ja.end(), std::back_inserter(balances), [](const auto& item) {
+            return BalanceEntry {
                 .coin = item.value(fields::kCoin, ""),
                 .total = item.value(fields::kTotal, 0.0),
                 .free = item.value(fields::kFree, 0.0),
                 .locked = item.value(fields::kLocked, 0.0)
-            });
-        }
+            };
+        });
     }
     return BalanceUpdate {
         .connection_id = j.value(fields::kConnectionId, 0),
@@ -212,14 +206,16 @@ BalanceUpdate MetaScalpCodec::parse_balance_update(const nlohmann::json& j) {
 std::vector<Trade> MetaScalpCodec::parse_trade_update(const nlohmann::json& j) {
     std::vector<Trade> trades;
     if (j.contains(fields::kTrades) && j[fields::kTrades].is_array()) {
-        for (const auto& item : j[fields::kTrades]) {
-            trades.push_back({
+        const auto& ja = j[fields::kTrades];
+        trades.resize(ja.size());
+        std::transform(ja.begin(), ja.end(), trades.begin(), [&](const auto& item) {
+            return Trade {
                 .price = item.value(fields::kPrice, 0.0),
                 .size = item.value(fields::kSize, 0.0),
                 .side = parse_side(item.value(fields::kSide, nlohmann::json())),
                 .timestamp = parse_timestamp(item.value(fields::kTime, ""))
-            });
-        }
+            };
+        });
     }
     return trades;
 }
@@ -227,14 +223,18 @@ std::vector<Trade> MetaScalpCodec::parse_trade_update(const nlohmann::json& j) {
 OrderBookSnapshot MetaScalpCodec::parse_orderbook_snapshot(const nlohmann::json& j, const Ticker& ticker) {
     std::vector<PriceLevel> asks, bids;
     if (j.contains(fields::kAsks) && j[fields::kAsks].is_array()) {
-        for (const auto& item : j[fields::kAsks]) {
-            asks.push_back({item.value(fields::kPrice, 0.0), item.value(fields::kSize, 0.0), Side::Sell});
-        }
+        const auto& ja = j[fields::kAsks];
+        asks.reserve(ja.size());
+        std::transform(ja.begin(), ja.end(), std::back_inserter(asks), [](const auto& item) {
+            return PriceLevel{item.value(fields::kPrice, 0.0), item.value(fields::kSize, 0.0), Side::Sell};
+        });
     }
     if (j.contains(fields::kBids) && j[fields::kBids].is_array()) {
-        for (const auto& item : j[fields::kBids]) {
-            bids.push_back({item.value(fields::kPrice, 0.0), item.value(fields::kSize, 0.0), Side::Buy});
-        }
+        const auto& ja = j[fields::kBids];
+        bids.reserve(ja.size());
+        std::transform(ja.begin(), ja.end(), std::back_inserter(bids), [](const auto& item) {
+            return PriceLevel{item.value(fields::kPrice, 0.0), item.value(fields::kSize, 0.0), Side::Buy};
+        });
     }
     return OrderBookSnapshot {
         .ticker = ticker,
@@ -247,10 +247,15 @@ OrderBookSnapshot MetaScalpCodec::parse_orderbook_snapshot(const nlohmann::json&
 OrderBookUpdate MetaScalpCodec::parse_orderbook_update(const nlohmann::json& j, const Ticker& ticker) {
     std::vector<PriceLevel> changes;
     if (j.contains(fields::kUpdates) && j[fields::kUpdates].is_array()) {
-        for (const auto& item : j[fields::kUpdates]) {
-            Side side = parse_side(item.value(fields::kSide, nlohmann::json()));
-            changes.push_back({item.value(fields::kPrice, 0.0), item.value(fields::kSize, 0.0), side});
-        }
+        const auto& ja = j[fields::kUpdates];
+        changes.reserve(ja.size());
+        std::transform(ja.begin(), ja.end(), std::back_inserter(changes), [&](const auto& item) {
+            return PriceLevel {
+                .price = item.value(fields::kPrice, 0.0),
+                .size = item.value(fields::kSize, 0.0),
+                .side = parse_side(item.value(fields::kSide, nlohmann::json()))
+            };
+        });
     }
     return OrderBookUpdate {
         .ticker = ticker,
@@ -259,106 +264,7 @@ OrderBookUpdate MetaScalpCodec::parse_orderbook_update(const nlohmann::json& j, 
     };
 }
 
-ClusterSnapshot MetaScalpCodec::parse_cluster_snapshot(const nlohmann::json& j) {
-    check_required(j, fields::kTicker);
-    check_required(j, fields::kItems);
-
-    std::vector<ClusterItem> items;
-    if (j.contains(fields::kItems) && j[fields::kItems].is_array()) {
-        for (const auto& item : j[fields::kItems]) {
-            items.push_back({
-                .price = item.value(fields::kPrice, 0.0),
-                .ask_size = item.value(fields::kAskSize, 0.0),
-                .bid_size = item.value(fields::kBidSize, 0.0)
-            });
-        }
-    }
-
-    return ClusterSnapshot {
-        .ticker = j.value(fields::kTicker, ""),
-        .timeframe = j.value(fields::kTimeFrame, ""),
-        .zoom_index = j.value(fields::kZoomIndex, 0),
-        .items = items,
-        .ts = std::chrono::system_clock::now()
-    };
-}
-
-Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
-    const std::string type_str = j.value("Type", "");
-    NotificationKind kind;
-    if (type_str == "Trade") kind = NotificationKind::Trade;
-    else if (type_str == "SignalLevel") kind = NotificationKind::SignalLevel;
-    else if (type_str == "BigOrderBookAmount") kind = NotificationKind::BigOrderBookAmount;
-    else if (type_str == "BigOrderBookAmount2") kind = NotificationKind::BigOrderBookAmount2;
-    else if (type_str == "BigTick") kind = NotificationKind::BigTick;
-    else if (type_str == "ScreenerNewCoin") kind = NotificationKind::ScreenerNewCoin;
-    else throw CodecError("Unknown Notification type: " + type_str);
-
-    return Notification {
-        .kind = kind,
-        .exchange_id = j.value(fields::kExchangeId, 0),
-        .market_type = j.value(fields::kMarketType, 0),
-        .ticker = j.value(fields::kTicker, ""),
-        .price = j.value(fields::kPrice, 0.0),
-        .size = j.value(fields::kSize, 0.0),
-        .timestamp = parse_timestamp(j.value(fields::kDate, ""))
-    };
-}
-
-OrderbookSettings MetaScalpCodec::parse_orderbook_settings(const nlohmann::json& j) {
-    check_required(j, fields::kTicker);
-    return OrderbookSettings {
-        .ticker = j.value(fields::kTicker, ""),
-        .large_amount_usd = j.value(fields::kLargeAmountUsd, 0.0),
-        .large_amount_usd2 = j.value(fields::kLargeAmountUsd2, 0.0)
-    };
-}
-
-SignalLevel MetaScalpCodec::parse_signal_level(const nlohmann::json& j) {
-    check_required(j, fields::kId);
-    check_required(j, fields::kTicker);
-    return SignalLevel {
-        .id = j.value(fields::kId, 0),
-        .ticker = j.value(fields::kTicker, ""),
-        .price = j.value(fields::kPrice, 0.0),
-        .triggered = j.value(fields::kTriggered, false),
-        .created_at = std::chrono::system_clock::now() // usually not in JSON
-    };
-}
-
-FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
-    std::vector<FinresEntry> finreses;
-    if (j.contains(fields::kFinreses) && j[fields::kFinreses].is_array()) {
-        for (const auto& item : j[fields::kFinreses]) {
-            finreses.push_back({
-                .currency = item.value(fields::kCurrency, ""),
-                .result = item.value(fields::kResult, 0.0),
-                .fee = item.value(fields::kFee, 0.0),
-                .funds = item.value(fields::kFunds, 0.0),
-                .available = item.value(fields::kAvailable, 0.0),
-                .blocked = item.value(fields::kBlocked, 0.0)
-            });
-        }
-    }
-    return FinresUpdate {
-        .connection_id = j.value(fields::kConnectionId, 0),
-        .finreses = finreses
-    };
-}
-
-SignalLevelTriggered MetaScalpCodec::parse_signal_level_triggered(const nlohmann::json& j) {
-    check_required(j, fields::kTicker);
-    check_required(j, fields::kPrice);
-    
-    return SignalLevelTriggered {
-        .ticker = j.value(fields::kTicker, ""),
-        .price = j.value(fields::kPrice, 0.0),
-        .timestamp = parse_timestamp(j.value(fields::kTime, ""))
-    };
-}
-
 ConnectionInfo MetaScalpCodec::parse_connection_info(const nlohmann::json& j) {
-    check_required(j, fields::kId);
     return ConnectionInfo {
         .id = j.value(fields::kId, 0),
         .name = j.value(fields::kName, ""),
@@ -368,16 +274,49 @@ ConnectionInfo MetaScalpCodec::parse_connection_info(const nlohmann::json& j) {
 }
 
 TickerInfo MetaScalpCodec::parse_ticker_info(const nlohmann::json& j) {
-    check_required(j, fields::kName);
     return TickerInfo {
         .name = j.value(fields::kName, ""),
         .base_asset = j.value(fields::kBaseAsset, ""),
         .quote_asset = j.value(fields::kQuoteAsset, ""),
-        .is_trading_allowed = j.value(fields::kIsTradingAllowed, false),
+        .is_trading_allowed = j.value(fields::kIsTradingAllowed, true),
         .price_increment = j.value(fields::kPriceIncrement, 0.0),
         .size_increment = j.value(fields::kSizeIncrement, 0.0),
         .min_size = j.value(fields::kMinSize, 0.0),
         .max_size = j.value(fields::kMaxSize, 0.0)
+    };
+}
+
+FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
+    std::vector<FinresEntry> finreses;
+    if (j.contains(fields::kFinreses) && j[fields::kFinreses].is_array()) {
+        const auto& ja = j[fields::kFinreses];
+        finreses.reserve(ja.size());
+        std::transform(ja.begin(), ja.end(), std::back_inserter(finreses), [](const auto& item) {
+            return FinresEntry {
+                .currency = item.value(fields::kCurrency, ""),
+                .result = item.value(fields::kResult, 0.0),
+                .fee = item.value(fields::kFee, 0.0),
+                .funds = item.value(fields::kFunds, 0.0),
+                .available = item.value(fields::kAvailable, 0.0),
+                .blocked = item.value(fields::kBlocked, 0.0)
+            };
+        });
+    }
+    return FinresUpdate {
+        .connection_id = j.value(fields::kConnectionId, 0),
+        .finreses = finreses
+    };
+}
+
+Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
+    return Notification {
+        .kind = static_cast<NotificationKind>(j.value(fields::kKind, 0)),
+        .exchange_id = j.value(fields::kExchangeId, 0),
+        .market_type = j.value(fields::kMarketType, 0),
+        .ticker = j.value(fields::kTicker, ""),
+        .price = j.value(fields::kPrice, 0.0),
+        .size = j.value(fields::kSize, 0.0),
+        .timestamp = parse_timestamp(j.value(fields::kTime, ""))
     };
 }
 

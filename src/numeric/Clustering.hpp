@@ -2,11 +2,14 @@
 
 #include <vector>
 #include <algorithm>
+#include <cmath>
+#include <numeric>
 
 namespace trade_bot {
 
 /**
  * 1D DBSCAN for price clustering.
+ * Optimized for O(N log N) using sorting and sliding window for neighbor search.
  */
 class Dbscan1D {
 public:
@@ -20,11 +23,12 @@ public:
                                                    size_t min_pts) {
         if (values.empty()) return {};
         
-        std::vector<Point> points;
-        points.reserve(values.size());
-        for (double v : values) points.push_back({v});
+        std::vector<Point> points(values.size());
+        std::transform(values.begin(), values.end(), points.begin(), [](double v) {
+            return Point{v, -1};
+        });
         
-        // Sort to make neighbor search O(1) or O(log N)
+        // Sort for optimized neighbor search
         std::sort(points.begin(), points.end(), [](const Point& a, const Point& b){
             return a.value < b.value;
         });
@@ -33,41 +37,35 @@ public:
         for (size_t i = 0; i < points.size(); ++i) {
             if (points[i].cluster_id != -1) continue;
 
-            // Find neighbors
-            std::vector<size_t> neighbors;
-            for (size_t j = 0; j < points.size(); ++j) {
-                if (std::abs(points[i].value - points[j].value) <= eps) {
-                    neighbors.push_back(j);
-                }
-            }
-
-            if (neighbors.size() < min_pts) {
-                // Noise for now
+            // Find neighbors using sliding window (since sorted)
+            auto range = find_range_(points, points[i].value, eps);
+            if (static_cast<size_t>(std::distance(range.first, range.second)) < min_pts) {
                 continue;
             }
 
-            // Start a new cluster
             int cur_cluster_id = next_cluster_id++;
             points[i].cluster_id = cur_cluster_id;
 
-            // Expand cluster
-            std::vector<size_t> queue = neighbors;
+            // Expand cluster (using indices for the queue to avoid iterator invalidation)
+            std::vector<size_t> queue;
+            for (auto it = range.first; it != range.second; ++it) {
+                size_t idx = static_cast<size_t>(std::distance(points.begin(), it));
+                if (idx != i) queue.push_back(idx);
+            }
+
             for (size_t k = 0; k < queue.size(); ++k) {
                 size_t q_idx = queue[k];
                 if (points[q_idx].cluster_id == -1) {
                     points[q_idx].cluster_id = cur_cluster_id;
                     
-                    // Find neighbors of neighbor
-                    std::vector<size_t> q_neighbors;
-                    for (size_t j = 0; j < points.size(); ++j) {
-                        if (std::abs(points[q_idx].value - points[j].value) <= eps) {
-                            q_neighbors.push_back(j);
-                        }
-                    }
-                    if (q_neighbors.size() >= min_pts) {
-                        for (size_t n : q_neighbors) {
-                            if (std::find(queue.begin(), queue.end(), n) == queue.end()) {
-                                queue.push_back(n);
+                    auto q_range = find_range_(points, points[q_idx].value, eps);
+                    if (static_cast<size_t>(std::distance(q_range.first, q_range.second)) >= min_pts) {
+                        for (auto it = q_range.first; it != q_range.second; ++it) {
+                            size_t n_idx = static_cast<size_t>(std::distance(points.begin(), it));
+                            if (points[n_idx].cluster_id == -1) {
+                                if (std::find(queue.begin(), queue.end(), n_idx) == queue.end()) {
+                                    queue.push_back(n_idx);
+                                }
                             }
                         }
                     }
@@ -75,8 +73,8 @@ public:
             }
         }
 
-        // Group points by cluster_id
         std::vector<std::vector<double>> result;
+        result.reserve(next_cluster_id);
         for (int id = 0; id < next_cluster_id; ++id) {
             std::vector<double> group;
             for (const auto& p : points) {
@@ -85,6 +83,19 @@ public:
             result.push_back(std::move(group));
         }
         return result;
+    }
+
+private:
+    using PointIter = std::vector<Point>::const_iterator;
+    
+    static std::pair<PointIter, PointIter> find_range_(const std::vector<Point>& points, double val, double eps) {
+        auto lo = std::lower_bound(points.begin(), points.end(), val - eps, [](const Point& p, double v) {
+            return p.value < v;
+        });
+        auto hi = std::upper_bound(lo, points.end(), val + eps, [](double v, const Point& p) {
+            return v < p.value;
+        });
+        return {lo, hi};
     }
 };
 

@@ -22,8 +22,8 @@ public:
         std::chrono::seconds entry_timeout{10};
     };
 
-    BounceFromDensity(Ticker ticker, Config cfg);
-    BounceFromDensity(Ticker ticker);
+    BounceFromDensity(Ticker ticker, const Config& cfg);
+    explicit BounceFromDensity(Ticker ticker);
 
     const std::string& name() const override { return name_; }
     const Ticker& ticker() const override { return ticker_; }

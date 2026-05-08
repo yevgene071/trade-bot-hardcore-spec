@@ -4,7 +4,7 @@ namespace trade_bot {
 
 KalmanLagEstimator::KalmanLagEstimator() : KalmanLagEstimator(Config{}) {}
 
-KalmanLagEstimator::KalmanLagEstimator(Config cfg) : cfg_(cfg) {
+KalmanLagEstimator::KalmanLagEstimator(const Config& cfg) : cfg_(cfg) {
     reset();
 }
 

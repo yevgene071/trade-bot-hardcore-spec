@@ -25,8 +25,8 @@ void LeaderTracker::update(double leader_price, double follower_price) {
 
     // Feed the Kalman filter with the latest cross-corr argmax observation.
     if (w_leader_.size() >= 2 * cfg_.xcorr_max_lag_steps + 4) {
-        const double lag_ms = recompute_lag_observation_();
-        kalman_.update(cfg_.dt_sec, lag_ms);
+        const double obs_lag_ms = recompute_lag_observation_();
+        kalman_.update(cfg_.dt_sec, obs_lag_ms);
     }
 
     // CUSUM on correlation: alarm when (baseline - corr) accumulates above h.

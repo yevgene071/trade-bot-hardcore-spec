@@ -23,7 +23,10 @@ std::vector<SignalLevel> SignalLevelGateway::get_all(const Ticker& ticker) {
         auto j = nlohmann::json::parse(resp.body);
         std::vector<SignalLevel> out;
         if (j.is_array()) {
-            for (const auto& item : j) out.push_back(MetaScalpCodec::parse_signal_level(item));
+            out.resize(j.size());
+            std::transform(j.begin(), j.end(), out.begin(), [](const auto& item) {
+                return MetaScalpCodec::parse_signal_level(item);
+            });
         }
         return out;
     } catch (const std::exception& ex) {

@@ -7,15 +7,11 @@
 namespace trade_bot {
 
 IcebergDetector::IcebergDetector(Ticker ticker,
-                               SignalBus& bus,
-                               const OrderBook& book,
-                               const TickerUniverse& universe,
-                               Config cfg)
-    : ticker_(std::move(ticker))
-    , bus_(bus)
-    , book_(book)
-    , universe_(universe)
-    , cfg_(cfg) {}
+                                 SignalBus& bus,
+                                 const OrderBook& book,
+                                 const TickerUniverse& universe,
+                                 const Config& cfg)
+    : ticker_(std::move(ticker)), bus_(bus), book_(book), universe_(universe), cfg_(cfg) {}
 
 IcebergDetector::IcebergDetector(Ticker ticker,
                                SignalBus& bus,
@@ -67,20 +63,18 @@ void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
         
         // Find matching trades for this price and side
         // Trade side is Buy -> matched against Sell level
-        double matched_trade_vol = 0.0;
-        for (auto& t : trade_history_) {
+        double matched_trade_vol = std::accumulate(trade_history_.begin(), trade_history_.end(), 0.0, [&](double sum, const auto& t) {
             // Check ±100ms window
             auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - t.ts);
             if (std::abs(delta.count()) <= cfg_.event_join_window.count()) {
-                // Side matching: if it's a Buy trade, it hits Sell levels.
-                // level.side is the side of the book level.
                 if (std::abs(t.price - level.price) < price_inc * 0.5 && 
                     ((t.side == Side::Buy && level.side == Side::Sell) ||
                      (t.side == Side::Sell && level.side == Side::Buy))) {
-                    matched_trade_vol += t.size;
+                    return sum + t.size;
                 }
             }
-        }
+            return sum;
+        });
 
         if (matched_trade_vol > 0.0) {
             process_refill_(level.price, level.side, matched_trade_vol, size_before, size_after, now);

@@ -29,7 +29,7 @@ public:
     using OnSnapshot = std::function<void(const ClusterSnapshot&)>;
 
     ClusterSnapshotManager(ClusterSnapshotClient& client, Config cfg);
-    ClusterSnapshotManager(ClusterSnapshotClient& client);
+    explicit ClusterSnapshotManager(ClusterSnapshotClient& client);
     virtual ~ClusterSnapshotManager();
 
     void start();

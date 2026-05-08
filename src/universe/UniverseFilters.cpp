@@ -15,14 +15,16 @@ bool UniverseFilters::accepts(const Ticker& ticker) const {
     if (manual_deny_.count(ticker))  return false;
     if (manual_allow_.count(ticker)) return true;
 
-    for (const auto& p : cfg_.deny_patterns) {
-        if (glob_match(p, ticker)) return false;
-    }
+    auto deny_it = std::any_of(cfg_.deny_patterns.begin(), cfg_.deny_patterns.end(), [&](const auto& p) {
+        return glob_match(p, ticker);
+    });
+    if (deny_it) return false;
+
     if (cfg_.allow_patterns.empty()) return true;
-    for (const auto& p : cfg_.allow_patterns) {
-        if (glob_match(p, ticker)) return true;
-    }
-    return false;
+
+    return std::any_of(cfg_.allow_patterns.begin(), cfg_.allow_patterns.end(), [&](const auto& p) {
+        return glob_match(p, ticker);
+    });
 }
 
 // Iterative segment-by-segment glob matcher. O(n*m) worst case, plenty fast

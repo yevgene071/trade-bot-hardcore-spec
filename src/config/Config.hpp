@@ -53,7 +53,7 @@ public:
     }
 
     template <typename T>
-    static T get_or(std::string_view dotted_path, T default_value) {
+    static T get_or(std::string_view dotted_path, const T& default_value) {
         if (!has(dotted_path)) {
             return default_value;
         }

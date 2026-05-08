@@ -4,7 +4,7 @@
 
 namespace trade_bot {
 
-LeaderLag::LeaderLag(Ticker ticker, Config cfg)
+LeaderLag::LeaderLag(Ticker ticker, const Config& cfg)
     : ticker_(std::move(ticker))
     , name_("LeaderLag")
     , cfg_(cfg) {}

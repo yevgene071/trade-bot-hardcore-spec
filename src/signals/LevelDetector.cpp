@@ -8,15 +8,11 @@
 namespace trade_bot {
 
 LevelDetector::LevelDetector(Ticker ticker,
-                           SignalBus& bus,
-                           const OrderBook& book,
-                           const ClusterSnapshotManager& cluster_mgr,
-                           Config cfg)
-    : ticker_(std::move(ticker))
-    , bus_(bus)
-    , book_(book)
-    , cluster_mgr_(cluster_mgr)
-    , cfg_(cfg) {}
+                             SignalBus& bus,
+                             const OrderBook& book,
+                             const ClusterSnapshotManager& cluster_mgr,
+                             const Config& cfg)
+    : ticker_(std::move(ticker)), bus_(bus), book_(book), cluster_mgr_(cluster_mgr), cfg_(cfg) {}
 
 LevelDetector::LevelDetector(Ticker ticker,
                            SignalBus& bus,
@@ -88,14 +84,14 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
         return;
     }
 
-    std::vector<double> prices;
-    for (const auto& e : extremes_) prices.push_back(e.price);
+    std::vector<double> prices(extremes_.size());
+    std::transform(extremes_.begin(), extremes_.end(), prices.begin(), [](const auto& e) { return e.price; });
 
     double mid = book_.mid().value_or(0.0);
     if (mid == 0.0 && !mid_history_.empty()) mid = mid_history_.back().second;
     if (mid == 0.0) return;
     
-    double eps = mid * (cfg_.cluster_tolerance_bps / 10000.0);
+    double eps = mid * (cfg_.cluster_tolerance_bps / kBpsBase);
 
     auto clusters = Dbscan1D::cluster(prices, eps, cfg_.touches_min);
     
@@ -104,9 +100,10 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
     std::vector<Kde::Point> kde_points;
     auto m15 = cluster_mgr_.get(ticker_, "M15");
     if (m15) {
-        for (const auto& item : m15->items) {
-            kde_points.push_back({item.price, item.ask_size + item.bid_size});
-        }
+        kde_points.resize(m15->items.size());
+        std::transform(m15->items.begin(), m15->items.end(), kde_points.begin(), [](const auto& item) {
+            return Kde::Point{item.price, item.ask_size + item.bid_size};
+        });
     }
 
     double h = Kde::silverman_bandwidth(kde_points) * cfg_.kde_smoothness;
@@ -128,9 +125,7 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
     double max_kde = 0.0;
 
     for (const auto& c : clusters) {
-        double sum = 0;
-        for (double p : c) sum += p;
-        double centroid = sum / c.size();
+        double centroid = std::accumulate(c.begin(), c.end(), 0.0) / static_cast<double>(c.size());
 
         double kde_val = 0.0;
         if (!kde_points.empty()) {

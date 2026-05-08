@@ -30,13 +30,10 @@ double FeatureExtractor::price_change_pct_(std::chrono::system_clock::time_point
                                            std::chrono::seconds horizon) const {
     if (mid_history_.empty()) return 0.0;
     const auto cutoff = now - horizon;
-    double ref_mid = mid_history_.front().mid;
-    for (const auto& s : mid_history_) {
-        if (s.t >= cutoff) {
-            ref_mid = s.mid;
-            break;
-        }
-    }
+    auto it = std::find_if(mid_history_.begin(), mid_history_.end(), [&](const auto& s) {
+        return s.t >= cutoff;
+    });
+    double ref_mid = (it != mid_history_.end()) ? it->mid : mid_history_.front().mid;
     const double current = mid_history_.back().mid;
     if (ref_mid == 0.0) return 0.0;
     return (current - ref_mid) / ref_mid * 100.0;
@@ -47,29 +44,21 @@ double FeatureExtractor::volatility_1min_log_returns_() const {
     const auto cutoff = mid_history_.back().t - std::chrono::seconds{60};
 
     // First sample inside the window (skip pre-roll).
-    auto first = mid_history_.begin();
-    while (first != mid_history_.end() && first->t < cutoff) ++first;
-    if (std::distance(first, mid_history_.end()) < 2) return 0.0;
+    auto first = std::find_if(mid_history_.begin(), mid_history_.end(), [&](const auto& s) {
+        return s.t >= cutoff;
+    });
+    if (first == mid_history_.end() || std::distance(first, mid_history_.end()) < 2) return 0.0;
 
     // Log-returns + Welford in one pass; we need stdev only.
-    double mean = 0.0;
-    double m2   = 0.0;
-    std::size_t n = 0;
+    WelfordAccumulator<double> acc;
     auto prev = first;
-    for (auto it = std::next(first); it != mid_history_.end(); ++it) {
-        if (prev->mid <= 0.0 || it->mid <= 0.0) {
-            prev = it;
-            continue;
+    std::for_each(std::next(first), mid_history_.end(), [&](const auto& s) {
+        if (prev->mid > 0.0 && s.mid > 0.0) {
+            acc.update(std::log(s.mid / prev->mid));
         }
-        const double r = std::log(it->mid / prev->mid);
-        ++n;
-        const double delta  = r - mean;
-        mean += delta / static_cast<double>(n);
-        m2   += delta * (r - mean);
-        prev  = it;
-    }
-    if (n < 2) return 0.0;
-    return std::sqrt(m2 / static_cast<double>(n - 1));
+        prev = std::next(prev); // Manual advance for prev logic
+    });
+    return acc.stdev();
 }
 
 FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now) {

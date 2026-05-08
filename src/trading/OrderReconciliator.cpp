@@ -9,7 +9,7 @@ namespace trade_bot {
 
 OrderReconciliator::OrderReconciliator() : OrderReconciliator(Config{}) {}
 
-OrderReconciliator::OrderReconciliator(Config cfg) : cfg_(cfg) {}
+OrderReconciliator::OrderReconciliator(const Config& cfg) : cfg_(cfg) {}
 
 void OrderReconciliator::set_fetch_open_orders(FetchOpenOrders fn) {
     std::lock_guard<std::mutex> lk(mtx_);
@@ -86,11 +86,9 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(const Ticker& 
     // Filter to those whose next_poll_at <= now.
     std::vector<PendingIntent> due;
     due.reserve(snapshot.size());
-    for (const auto& p : snapshot) {
-        if (p.next_poll_at <= now) {
-            due.push_back(p);
-        }
-    }
+    std::copy_if(snapshot.begin(), snapshot.end(), std::back_inserter(due), [&](const auto& p) {
+        return p.next_poll_at <= now;
+    });
     if (due.empty()) {
         return out;
     }
@@ -142,13 +140,10 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(const Ticker& 
         }
 
         // Try to find a matching server order.
-        std::optional<int64_t> matched;
-        for (const auto& server : server_orders) {
-            if (matches_intent_(p.intent, server)) {
-                matched = server.id;
-                break;
-            }
-        }
+        auto sit = std::find_if(server_orders.begin(), server_orders.end(), [&](const auto& server) {
+            return matches_intent_(p.intent, server);
+        });
+        std::optional<int64_t> matched = (sit != server_orders.end()) ? std::optional<int64_t>{sit->id} : std::nullopt;
 
         if (matched) {
             out.push_back(ReconcileResult{
