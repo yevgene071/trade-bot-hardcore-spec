@@ -66,6 +66,7 @@ add_executable(trade_bot
     src/transport/BeastWsClient.cpp
     src/transport/MetaScalpCodec.cpp
     src/transport/MarketDataFeed.cpp
+    src/transport/DumpRecorder.cpp
     src/transport/OrderGateway.cpp
     src/transport/ReplayFeed.cpp
     src/transport/FinresHandler.cpp

@@ -2,6 +2,7 @@
 #include "MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
 #include <algorithm>
+#include <chrono>
 
 namespace trade_bot {
 
@@ -10,6 +11,12 @@ MarketDataFeed::MarketDataFeed(std::shared_ptr<IWsClient> ws_client, int connect
     , m_connection_id(connection_id) {
     
     m_ws_client->set_on_message([this](const nlohmann::json& j) {
+        if (m_record_tap) {
+            using namespace std::chrono;
+            auto ts_ns = duration_cast<nanoseconds>(
+                system_clock::now().time_since_epoch()).count();
+            m_record_tap(j, ts_ns);
+        }
         handle_message(j);
     });
 
@@ -205,6 +212,10 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
     } catch (const std::exception& e) {
         LOG_ERROR("Error handling WS message {}: {}", type, e.what());
     }
+}
+
+void MarketDataFeed::set_record_tap(RawTap tap) {
+    m_record_tap = std::move(tap);
 }
 
 } // namespace trade_bot

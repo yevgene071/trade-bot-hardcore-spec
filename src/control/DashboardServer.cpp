@@ -4,6 +4,7 @@
 #include <boost/beast/version.hpp>
 #include <boost/asio/strand.hpp>
 
+#include <cctype>
 #include <deque>
 
 namespace trade_bot {
@@ -71,6 +72,26 @@ static const char* kDashboardHtml = R"html(
             <thead><tr><th>Ticker</th><th>Strategy</th><th>Size</th><th>PnL ($)</th><th>Exit</th></tr></thead>
             <tbody></tbody>
         </table>
+    </div>
+
+    <div class="card" style="margin-top: 20px; border-left-color: #ff9800;">
+        <h2 style="color:#ff9800;">Dump Recorder</h2>
+        <div class="stat">
+            <span>Status:</span>
+            <span id="rec-status" class="val">idle</span>
+        </div>
+        <div class="stat" id="rec-path-row" style="display:none;">
+            <span>File:</span>
+            <span id="rec-path" class="val" style="font-size:0.85em;word-break:break-all;"></span>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input id="rec-filename" type="text" placeholder="btcusdt_session1"
+                   style="background:#2a2a2a;color:#e0e0e0;border:1px solid #555;border-radius:4px;padding:6px 10px;flex:1;min-width:160px;">
+            <button id="rec-btn" onclick="toggleRecord()"
+                    style="background:#ff9800;color:#000;border:none;border-radius:4px;padding:7px 18px;cursor:pointer;font-weight:bold;">
+                Start Recording
+            </button>
+        </div>
     </div>
 
     <div id="last-update" style="margin-top:20px;font-size:0.8em;color:#666;">
@@ -143,6 +164,31 @@ static const char* kDashboardHtml = R"html(
 
             $('last-update').textContent =
                 'Last update: ' + new Date().toISOString();
+
+            // Recorder status
+            const rec = s.dump_recorder || {};
+            const isRec = !!rec.active;
+            $('rec-status').textContent = isRec ? '● RECORDING' : 'idle';
+            $('rec-status').style.color = isRec ? '#f44336' : '#aaa';
+            $('rec-path-row').style.display = isRec ? '' : 'none';
+            if (isRec) $('rec-path').textContent = rec.path || '';
+            $('rec-btn').textContent = isRec ? 'Stop Recording' : 'Start Recording';
+            $('rec-btn').style.background = isRec ? '#f44336' : '#ff9800';
+        }
+
+        let _recording = false;
+        function toggleRecord() {
+            if (_recording) {
+                fetch('/api/dump/stop', {method:'POST'}).catch(console.error);
+            } else {
+                const name = $('rec-filename').value.trim() || 'dump';
+                fetch('/api/dump/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({filename: name})
+                }).catch(console.error);
+            }
+            _recording = !_recording;
         }
 
         // WS reconnect with exponential backoff (#124). Replaces the previous
@@ -279,6 +325,22 @@ bool DashboardServer::authorize(std::string_view header_value) const noexcept {
     return diff == 0;
 }
 
+void DashboardServer::set_recorder(DumpRecorder* recorder) {
+    recorder_ = recorder;
+}
+
+bool DashboardServer::recorder_start(const std::string& path) {
+    return recorder_ && recorder_->start(path);
+}
+
+void DashboardServer::recorder_stop() {
+    if (recorder_) recorder_->stop();
+}
+
+bool DashboardServer::recorder_active() const noexcept {
+    return recorder_ && recorder_->is_active();
+}
+
 void DashboardServer::start() {
     do_accept();
 }
@@ -342,6 +404,10 @@ std::string DashboardServer::serialize_state_locked_() const {
             {"cause_of_exit", e.cause_of_exit}
         });
     }
+    j["dump_recorder"] = {
+        {"active", recorder_ && recorder_->is_active()},
+        {"path",   recorder_ ? recorder_->path() : ""}
+    };
     return j.dump();
 }
 
@@ -387,6 +453,47 @@ void HttpSession::handle_request() {
 
     if (websocket::is_upgrade(*req)) {
         parent.start_ws_session(stream.release_socket());
+        return;
+    }
+
+    // Dump recorder API
+    auto send_json = [&](http::status status, const std::string& body) {
+        auto r = std::make_shared<http::response<http::string_body>>(status, req->version());
+        r->set(http::field::server,        BOOST_BEAST_VERSION_STRING);
+        r->set(http::field::content_type,  "application/json");
+        r->set(http::field::access_control_allow_origin, "*");
+        r->keep_alive(false);
+        r->body() = body;
+        r->prepare_payload();
+        http::async_write(stream, *r,
+            [self = shared_from_this(), r](beast::error_code ec, std::size_t) {
+                self->stream.socket().shutdown(tcp::socket::shutdown_send, ec);
+            });
+    };
+
+    if (req->method() == http::verb::post && req->target() == "/api/dump/start") {
+        std::string filename = "dump";
+        try {
+            auto body = nlohmann::json::parse(req->body());
+            filename = body.value("filename", filename);
+        } catch (...) {}
+        // Sanitize: keep only alnum, dash, underscore, dot
+        std::string safe;
+        for (char c : filename) {
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.')
+                safe += c;
+        }
+        if (safe.empty()) safe = "dump";
+        std::string path = "replay/dumps/" + safe + ".ndjson";
+        bool ok = parent.recorder_start(path);
+        send_json(ok ? http::status::ok : http::status::internal_server_error,
+                  ok ? R"({"ok":true})" : R"({"error":"could not open file"})");
+        return;
+    }
+
+    if (req->method() == http::verb::post && req->target() == "/api/dump/stop") {
+        parent.recorder_stop();
+        send_json(http::status::ok, R"({"ok":true})");
         return;
     }
 

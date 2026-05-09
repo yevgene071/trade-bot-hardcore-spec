@@ -6,6 +6,7 @@
 #include "control/SntpClient.hpp"
 #include "control/TickerController.hpp"
 #include "transport/MarketDataFeed.hpp"
+#include "transport/DumpRecorder.hpp"
 #include "transport/MetaScalpCodec.hpp"
 #include "transport/MetaScalpDiscovery.hpp"
 #include "transport/OrderGateway.hpp"
@@ -123,6 +124,10 @@ private:
         if (!port) throw std::runtime_error("MetaScalp not found");
 
         feed_ = std::make_unique<MarketDataFeed>(ws, 1);
+        feed_->set_record_tap([this](const nlohmann::json& msg, int64_t ts_ns) {
+            dump_recorder_.record(msg, ts_ns);
+        });
+        dashboard_->set_recorder(&dump_recorder_);
         cluster_client_ = std::make_unique<ClusterSnapshotClient>(*http, "http://localhost:" + std::to_string(*port), 1);
         cluster_mgr_ = std::make_unique<ClusterSnapshotManager>(*cluster_client_);
         cluster_mgr_->start();
@@ -231,6 +236,7 @@ private:
     std::string last_reset_day_;
     std::chrono::system_clock::time_point last_persist_;
 
+    DumpRecorder dump_recorder_;
     KillSwitch* kill_switch_;
     std::unique_ptr<ClockDriftMonitor> clock_monitor_;
     std::shared_ptr<BinanceFundingClient> funding_client_;

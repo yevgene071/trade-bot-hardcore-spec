@@ -2,6 +2,7 @@
 
 #include "domain/Types.hpp"
 #include "IWsClient.hpp"
+#include <functional>
 #include <memory>
 #include <vector>
 #include <string>
@@ -43,6 +44,11 @@ public:
     virtual void start();
     virtual void stop();
 
+    // Optional tap invoked for every raw WS message before dispatch.
+    // Callback receives (parsed_json, recv_ts_ns).  Used by DumpRecorder.
+    using RawTap = std::function<void(const nlohmann::json&, int64_t)>;
+    void set_record_tap(RawTap tap);
+
 private:
     void handle_message(const nlohmann::json& j);
     void resubscribe_all();
@@ -59,8 +65,9 @@ private:
     // Cache for merged listeners (m_listeners + m_ticker_listeners[ticker])
     std::unordered_map<Ticker, std::vector<IMarketDataListener*>> m_merged_cache;
 
-    std::mutex m_mutex;    
+    std::mutex m_mutex;
     bool m_active = false;
+    RawTap m_record_tap;
 };
 
 } // namespace trade_bot

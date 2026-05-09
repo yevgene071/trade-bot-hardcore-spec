@@ -4,6 +4,7 @@
 #include "trading/ActiveTrade.hpp"
 #include "logger/TradeJournal.hpp"
 #include "signals/Signal.hpp"
+#include "transport/DumpRecorder.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -55,6 +56,12 @@ public:
     /// against a session's own serializer (#120).
     void update_state(const State& state);
 
+    // Wire a DumpRecorder so the dashboard can start/stop it via HTTP.
+    void set_recorder(DumpRecorder* recorder);
+    bool recorder_start(const std::string& path);
+    void recorder_stop();
+    bool recorder_active() const noexcept;
+
     void start();
 
     // Internal usage
@@ -81,6 +88,7 @@ private:
 
     mutable std::mutex mutex_;
     State current_state_;
+    DumpRecorder* recorder_{nullptr};
 
     // We'll store active WebSocket sessions here
     struct Session;
