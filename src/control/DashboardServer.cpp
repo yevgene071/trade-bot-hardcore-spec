@@ -1,6 +1,7 @@
 #include "DashboardServer.hpp"
 #include "logger/Logger.hpp"
 #include <nlohmann/json.hpp>
+#include <sstream>
 #include <boost/beast/version.hpp>
 #include <boost/asio/strand.hpp>
 
@@ -72,6 +73,14 @@ static const char* kDashboardHtml = R"html(
             <thead><tr><th>Ticker</th><th>Strategy</th><th>Size</th><th>PnL ($)</th><th>Exit</th></tr></thead>
             <tbody></tbody>
         </table>
+    </div>
+
+    <div class="card" style="margin-top: 20px; border-left-color: #9c27b0;">
+        <h2 style="color:#9c27b0;">Live Log <small id="log-count" style="font-size:0.7em;color:#666;"></small></h2>
+        <div id="log-panel" style="font-family:monospace;font-size:0.8em;max-height:300px;overflow-y:auto;
+             background:#0d0d0d;padding:8px;border-radius:4px;white-space:pre-wrap;word-break:break-all;">
+            Connecting…
+        </div>
     </div>
 
     <div class="card" style="margin-top: 20px; border-left-color: #ff9800;">
@@ -206,6 +215,40 @@ static const char* kDashboardHtml = R"html(
             ws.onerror   = () => ws.close();
         }
         connect();
+
+        // Log panel polling
+        const LOG_COLORS = {
+            'error':    '#f44336',
+            'critical': '#ff1744',
+            'warning':  '#ff9800',
+            'warn':     '#ff9800',
+            'info':     '#80cbc4',
+            'debug':    '#888',
+            'trace':    '#555',
+        };
+        let _logScrollLock = false;
+        const logPanel = $('log-panel');
+        logPanel.addEventListener('scroll', () => {
+            _logScrollLock = logPanel.scrollTop < logPanel.scrollHeight - logPanel.clientHeight - 20;
+        });
+
+        function fetchLogs() {
+            fetch('/api/logs?n=80').then(r => r.json()).then(lines => {
+                logPanel.replaceChildren();
+                for (const line of lines) {
+                    const span = document.createElement('span');
+                    const lvlMatch = line.match(/\[(error|critical|warning|warn|info|debug|trace)\]/i);
+                    span.style.color = lvlMatch ? (LOG_COLORS[lvlMatch[1].toLowerCase()] || '#e0e0e0') : '#e0e0e0';
+                    span.textContent = line + '\n';
+                    logPanel.appendChild(span);
+                }
+                $('log-count').textContent = lines.length + ' lines';
+                if (!_logScrollLock)
+                    logPanel.scrollTop = logPanel.scrollHeight;
+            }).catch(() => {});
+        }
+        fetchLogs();
+        setInterval(fetchLogs, 2000);
     </script>
 </body>
 </html>
@@ -470,6 +513,26 @@ void HttpSession::handle_request() {
                 self->stream.socket().shutdown(tcp::socket::shutdown_send, ec);
             });
     };
+
+    // /api/logs?n=<count>
+    if (req->method() == http::verb::get &&
+        std::string(req->target()).starts_with("/api/logs")) {
+        std::size_t n = 80;
+        auto target = std::string(req->target());
+        auto pos = target.find("n=");
+        if (pos != std::string::npos) {
+            try { n = std::stoul(target.substr(pos + 2)); } catch (...) {}
+        }
+        n = std::min(n, std::size_t{200});
+        auto ring = trade_bot::Logger::ring();
+        nlohmann::json arr = nlohmann::json::array();
+        if (ring) {
+            for (const auto& line : ring->recent(n))
+                arr.push_back(line);
+        }
+        send_json(http::status::ok, arr.dump());
+        return;
+    }
 
     if (req->method() == http::verb::post && req->target() == "/api/dump/start") {
         std::string filename = "dump";

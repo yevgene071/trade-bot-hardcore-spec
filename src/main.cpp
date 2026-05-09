@@ -115,6 +115,10 @@ private:
             account_state_.equity_usd = 10000.0;
             last_reset_day_ = TradingDay::current_date_utc();
         }
+        // In paper mode there are no exchange balance updates, so seed free_balance
+        // from equity so the dashboard shows a non-zero figure.
+        if (account_state_.free_balance_usd == 0.0 && account_state_.equity_usd > 0.0)
+            account_state_.free_balance_usd = account_state_.equity_usd;
 
         auto http = std::make_shared<CurlHttpClient>();
         auto ws = std::make_shared<BeastWsClient>(ioc_);
