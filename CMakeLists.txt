@@ -127,6 +127,53 @@ target_link_libraries(trade_bot PRIVATE
     absl::hash
 )
 
+# T2-LABELING: offline signal labeler tool
+add_executable(labeler
+    tool/labeler/main.cpp
+    src/logger/Logger.cpp
+    src/config/Config.cpp
+    src/transport/CurlHttpClient.cpp
+    src/transport/MetaScalpCodec.cpp
+    src/transport/ClusterSnapshotClient.cpp
+    src/marketdata/OrderBook.cpp
+    src/marketdata/ClusterSnapshot.cpp
+    src/marketdata/TradeStream.cpp
+    src/marketdata/KalmanLagEstimator.cpp
+    src/marketdata/LeaderTracker.cpp
+    src/features/FeatureExtractor.cpp
+    src/signals/SignalBus.cpp
+    src/signals/DensityDetector.cpp
+    src/signals/IcebergDetector.cpp
+    src/signals/TapeAnalyzer.cpp
+    src/signals/LevelDetector.cpp
+    src/signals/ApproachAnalyzer.cpp
+    src/universe/TickerUniverse.cpp
+    src/universe/UniverseFilters.cpp
+    src/universe/ConnectionSelector.cpp
+    src/universe/OrderbookSettingsLoader.cpp
+    src/perf/TimestampMonitor.cpp
+    src/perf/SimdOps.cpp
+    src/perf/CpuPinning.cpp
+    src/metrics/MetricsRegistry.cpp
+)
+target_include_directories(labeler PRIVATE src)
+target_link_libraries(labeler PRIVATE
+    spdlog::spdlog
+    xsimd
+    hdr_histogram::hdr_histogram_static
+    boost::boost
+    concurrentqueue::concurrentqueue
+    tomlplusplus::tomlplusplus
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    nlohmann_json_schema_validator
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    absl::btree
+    absl::flat_hash_map
+    absl::hash
+)
+
 # Tests
 if(BUILD_TESTS)
     enable_testing()

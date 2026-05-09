@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trade-bot/replay/labels/schema.json",
+  "title": "LabelEntry",
+  "type": "object",
+  "required": ["timestamp_ns", "signal_kind", "is_true_positive"],
+  "properties": {
+    "timestamp_ns": {
+      "type": "integer",
+      "description": "Signal timestamp (nanoseconds since UNIX epoch)"
+    },
+    "recv_ts_ns": {
+      "type": "integer",
+      "description": "Wall-clock receive timestamp from the replay dump"
+    },
+    "signal_kind": {
+      "type": "string",
+      "enum": [
+        "DensityDetected", "DensityRemoved", "DensityEating",
+        "IcebergSuspected",
+        "TapeBurst", "TapeFade", "TapeFlush", "TapeDistribution",
+        "LevelFormed", "LevelApproach", "LevelRejection", "LevelBreak",
+        "LeaderMove"
+      ]
+    },
+    "is_true_positive": {
+      "type": "boolean"
+    },
+    "manually_added": {
+      "type": "boolean",
+      "description": "true = operator added this as a missed positive not fired by the detector"
+    },
+    "evidence_notes": {
+      "type": "string",
+      "description": "Free-text operator notes explaining the labeling decision"
+    }
+  },
+  "additionalProperties": false
+}
