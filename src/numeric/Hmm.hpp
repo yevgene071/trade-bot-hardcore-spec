@@ -6,7 +6,8 @@
 
 namespace trade_bot {
 
-inline constexpr double kSqrt2Pi = 2.5066282746310002;
+inline constexpr double kSqrt2Pi    = 2.5066282746310002;
+inline constexpr double kInvSqrt2Pi = 0.3989422804014327; // 1 / sqrt(2π)
 
 /**
  * 3-state HMM implementation for approach classification.

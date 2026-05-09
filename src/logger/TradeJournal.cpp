@@ -1,4 +1,5 @@
 #include "TradeJournal.hpp"
+#include "logger/Logger.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
@@ -44,11 +45,16 @@ void TradeJournal::log_entry(const Entry& entry) {
     
     std::lock_guard<std::mutex> lk(mtx_);
     std::ofstream out(filename, std::ios::app);
-    out << j.dump() << std::endl;
+    out << j.dump() << "\n";
+    out.flush();
+    if (!out.good()) {
+        LOG_ERROR("TradeJournal: write failed to {}", filename);
+        return;
+    }
 
     cache_.push_back(entry);
     if (cache_.size() > 100) {
-        cache_.pop_front(); // O(1) for deque
+        cache_.pop_front();
     }
 }
 

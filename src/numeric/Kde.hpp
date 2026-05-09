@@ -23,8 +23,7 @@ public:
     };
 
     static double gaussian_kernel(double x) {
-        static const double inv_sqrt_2pi = 0.3989422804014327;
-        return inv_sqrt_2pi * std::exp(-0.5 * x * x);
+        return kInvSqrt2Pi * std::exp(-0.5 * x * x);
     }
 
     /**

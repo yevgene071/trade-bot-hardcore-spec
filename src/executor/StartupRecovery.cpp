@@ -53,6 +53,16 @@ StartupRecovery::Result StartupRecovery::run() {
             if (ptit != persisted.active_trades.end()) {
                 trade = *ptit;
                 res.log_entries.push_back("Recovering active trade for " + ticker);
+                // Check for size mismatch drift (only if persisted size was recorded)
+                double server_sz = std::abs(pit->size);
+                double persisted_sz = ptit->plan.size_coin;
+                if (persisted_sz > 0.0 &&
+                    std::abs(server_sz - persisted_sz) > cfg_.position_drift_coin) {
+                    drift_detected = true;
+                    res.log_entries.push_back("Size drift for " + ticker +
+                        ": server=" + std::to_string(server_sz) +
+                        " persisted=" + std::to_string(persisted_sz));
+                }
             } else {
                 res.log_entries.push_back("Found orphan position for " + ticker + ", creating emergency trade");
                 trade.plan.ticker = ticker;
@@ -106,10 +116,14 @@ StartupRecovery::Result StartupRecovery::run() {
         // Handle orphan orders
         const auto& orders = open_orders[ticker];
         for (const auto& o : orders) {
-            bool is_used = std::any_of(res.recovered_trades.begin(), res.recovered_trades.end(), [&](const ActiveTrade& t) {
-                return t.plan.ticker == ticker;
-            });
-            
+            // Order is "used" only if its ID matches a known order ID in a recovered trade
+            bool is_used = std::any_of(res.recovered_trades.begin(), res.recovered_trades.end(),
+                [&](const ActiveTrade& t) {
+                    return o.id == t.entry_order_id ||
+                           o.id == t.stop_order_id  ||
+                           o.id == t.tp1_order_id   ||
+                           o.id == t.tp2_order_id;
+                });
             if (!is_used && cfg_.orphan_cancel_policy == "cancel") {
                 res.log_entries.push_back("Cancelling orphan order " + std::to_string(o.id) + " for " + ticker);
                 gateway_.cancel_order(connection_id_, o.id);

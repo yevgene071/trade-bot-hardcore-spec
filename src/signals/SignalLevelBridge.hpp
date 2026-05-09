@@ -28,7 +28,8 @@ public:
                      SignalBus& bus);
 
     /// Called by LevelDetector when a new level is formed.
-    void on_level_formed(const Ticker& ticker, double price);
+    /// current_mid is used for distance-based eviction.
+    void on_level_formed(const Ticker& ticker, double price, double current_mid = 0.0);
     
     /// Called when WS notification signal_level_triggered is received.
     void on_server_trigger(int level_id, const Ticker& ticker, double price);
@@ -43,6 +44,7 @@ private:
         Ticker ticker;
         double price;
         std::chrono::system_clock::time_point created_at;
+        bool triggered{false};
     };
 
     std::map<int, LevelInfo> active_levels_;

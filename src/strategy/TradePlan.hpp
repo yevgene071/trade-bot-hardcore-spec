@@ -15,20 +15,20 @@ namespace trade_bot {
  */
 struct TradePlan {
     Ticker ticker;
-    Side side;                   // Buy / Sell
-    OrderType entry_type;        // Limit / Market
-    double entry_price;          // for Limit/StopLimit
-    double stop_price;           // mandatory
-    double tp1_price;            // mandatory: first target (>= 1R)
-    std::optional<double> tp2_price;  // optional: far target
-    double tp1_size_ratio;       // how much to close at TP1 (0.5-0.7)
-    double size_coin;            // position size in coin
-    double risk_usd;              // expected loss in $ if stop hits
+    Side side{Side::None};
+    OrderType entry_type{OrderType::Limit};
+    double entry_price{0.0};
+    double stop_price{0.0};
+    double tp1_price{0.0};
+    std::optional<double> tp2_price;
+    double tp1_size_ratio{0.0};
+    double size_coin{0.0};
+    double risk_usd{0.0};
     std::string strategy_name;
-    std::string reason;           // human-readable "why we entered"
-    std::vector<Signal> evidence; // signals that justified the entry
-    std::chrono::system_clock::time_point valid_until;  // TTL
-    
+    std::string reason;
+    std::vector<Signal> evidence;
+    std::chrono::system_clock::time_point valid_until;
+
     bool operator==(const TradePlan&) const = default;
 };
 

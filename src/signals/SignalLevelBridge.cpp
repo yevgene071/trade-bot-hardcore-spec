@@ -1,5 +1,6 @@
 #include "SignalLevelBridge.hpp"
 #include "logger/Logger.hpp"
+#include <cmath>
 
 namespace trade_bot {
 
@@ -14,16 +15,43 @@ SignalLevelBridge::SignalLevelBridge(SignalLevelGateway& gateway,
                                    SignalBus& bus)
     : SignalLevelBridge(gateway, bus, Config{}) {}
 
-void SignalLevelBridge::on_level_formed(const Ticker& ticker, double price) {
+void SignalLevelBridge::on_level_formed(const Ticker& ticker, double price, double current_mid) {
     if (!cfg_.enabled) return;
 
-    // LRU-eviction simplified: if too many, remove first one
     {
         std::lock_guard<std::mutex> lk(mtx_);
         if (active_levels_.size() >= static_cast<size_t>(cfg_.max_server_levels)) {
-            auto it = active_levels_.begin();
-            gateway_.remove(it->first);
-            active_levels_.erase(it);
+            // Eviction priority: triggered > farthest from mid > oldest
+            auto victim = active_levels_.end();
+
+            // 1. Prefer any triggered level
+            for (auto it = active_levels_.begin(); it != active_levels_.end(); ++it) {
+                if (it->second.triggered) { victim = it; break; }
+            }
+
+            // 2. Else: farthest from current_mid (if mid available)
+            if (victim == active_levels_.end() && current_mid > 0.0) {
+                double max_dist = -1.0;
+                for (auto it = active_levels_.begin(); it != active_levels_.end(); ++it) {
+                    double d = std::abs(it->second.price - current_mid) / current_mid;
+                    if (d > max_dist) { max_dist = d; victim = it; }
+                }
+            }
+
+            // 3. Else: oldest by created_at
+            if (victim == active_levels_.end()) {
+                for (auto it = active_levels_.begin(); it != active_levels_.end(); ++it) {
+                    if (victim == active_levels_.end() ||
+                        it->second.created_at < victim->second.created_at) {
+                        victim = it;
+                    }
+                }
+            }
+
+            if (victim != active_levels_.end()) {
+                gateway_.remove(victim->first);
+                active_levels_.erase(victim);
+            }
         }
     }
 
@@ -38,7 +66,8 @@ void SignalLevelBridge::on_level_formed(const Ticker& ticker, double price) {
 void SignalLevelBridge::on_server_trigger(int id, const Ticker& ticker, double price) {
     {
         std::lock_guard<std::mutex> lk(mtx_);
-        active_levels_.erase(id);
+        auto it = active_levels_.find(id);
+        if (it != active_levels_.end()) it->second.triggered = true;
     }
 
     Signal s {
