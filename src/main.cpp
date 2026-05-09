@@ -49,9 +49,9 @@ public:
     explicit BotApp(boost::asio::io_context& ioc)
         : ioc_(ioc)
         , timer_(ioc)
-        , kill_switch_(&KillSwitch::instance())
         , last_reset_day_(TradingDay::current_date_utc())
-        , last_persist_(std::chrono::system_clock::now()) {}
+        , last_persist_(std::chrono::system_clock::now())
+        , kill_switch_(&KillSwitch::instance()) {}
     void run() {
         init_components();
         schedule_tick();

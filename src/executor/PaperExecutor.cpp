@@ -129,17 +129,17 @@ void PaperExecutor::tick(std::chrono::system_clock::time_point now) {
         }
 
         // Take Profit check (TP1 only for simplified PaperExecutor)
-        if (!exit && pos.plan.tp1_price) {
+        if (!exit && pos.plan.tp1_price > 0.0) {
             if (pos.plan.side == Side::Buy) {
-                if (ask >= *pos.plan.tp1_price) {
+                if (ask >= pos.plan.tp1_price) {
                     exit = true;
-                    exit_price = *pos.plan.tp1_price;
+                    exit_price = pos.plan.tp1_price;
                     reason = "Take Profit";
                 }
             } else {
-                if (bid <= *pos.plan.tp1_price) {
+                if (bid <= pos.plan.tp1_price) {
                     exit = true;
-                    exit_price = *pos.plan.tp1_price;
+                    exit_price = pos.plan.tp1_price;
                     reason = "Take Profit";
                 }
             }

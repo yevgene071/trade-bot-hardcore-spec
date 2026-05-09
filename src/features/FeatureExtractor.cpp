@@ -93,7 +93,7 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
         const auto t30 = now - std::chrono::seconds{30};
         const auto t60 = now - std::chrono::seconds{60};
 
-        double mid1 = 0, mid5 = 0, mid30 = 0, mid60 = 0;
+        double mid1 = 0, mid5 = 0, mid30 = 0;
         WelfordAccumulator<double> vol_acc;
         
         // Scan backwards in circular buffer
@@ -109,7 +109,6 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
                 if (sample.t >= t5) mid5 = sample.mid;
                 if (sample.t >= t30) mid30 = sample.mid;
                 if (sample.t >= t60) {
-                    mid60 = sample.mid;
                     if (sample.mid > 0 && last_mid > 0) {
                         vol_acc.update(std::log(last_mid / sample.mid));
                     }

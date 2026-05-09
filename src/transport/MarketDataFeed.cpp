@@ -154,10 +154,15 @@ std::vector<IMarketDataListener*> MarketDataFeed::get_target_listeners(const Tic
 }
 
 void MarketDataFeed::handle_message(const nlohmann::json& j) {
-    if (!j.contains("Type")) return;
+    auto type_it = j.find("Type");
+    if (type_it == j.end()) return;
 
-    std::string type = j["Type"];
-    nlohmann::json data = j.value("Data", nlohmann::json::object());
+    // Avoid std::string copy — borrow reference directly from the parsed JSON
+    const std::string& type = type_it->get_ref<const std::string&>();
+
+    static const nlohmann::json kEmptyData = nlohmann::json::object();
+    auto data_it = j.find("Data");
+    const nlohmann::json& data = (data_it != j.end()) ? *data_it : kEmptyData;
 
     try {
         if (type == "trade_update") {

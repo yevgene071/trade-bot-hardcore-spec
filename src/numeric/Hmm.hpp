@@ -6,6 +6,8 @@
 
 namespace trade_bot {
 
+inline constexpr double kSqrt2Pi = 2.5066282746310002;
+
 /**
  * 3-state HMM implementation for approach classification.
  * States: 0=Impulse, 1=Slow, 2=Consolidation
@@ -27,7 +29,16 @@ public:
         std::array<Emission, kStates> emissions;
     };
 
-    explicit ApproachHmm(Params params) : params_(std::move(params)) {}
+    explicit ApproachHmm(Params params) : params_(std::move(params)) {
+        // Precompute 1/(σ·√(2π)) and 1/σ² per state per dimension
+        for (size_t s = 0; s < kStates; ++s) {
+            for (size_t i = 0; i < 3; ++i) {
+                double sigma = std::max(params_.emissions[s].stds[i], 1e-9);
+                inv_norm_[s][i] = 1.0 / (sigma * kSqrt2Pi);
+                inv_var_[s][i]  = 1.0 / std::max(sigma * sigma, 1e-6);
+            }
+        }
+    }
 
     /**
      * Forward algorithm to compute state probabilities.
@@ -76,13 +87,14 @@ private:
         double p = 1.0;
         for (size_t i = 0; i < 3; ++i) {
             double diff = obs[i] - e.means[i];
-            double var = std::max(e.stds[i] * e.stds[i], 1e-6);
-            p *= (1.0 / (e.stds[i] * 2.5066)) * std::exp(-0.5 * diff * diff / var);
+            p *= inv_norm_[state][i] * std::exp(-0.5 * diff * diff * inv_var_[state][i]);
         }
         return std::max(p, 1e-10);
     }
 
     Params params_;
+    std::array<std::array<double, 3>, kStates> inv_norm_{};
+    std::array<std::array<double, 3>, kStates> inv_var_{};
 };
 
 } // namespace trade_bot

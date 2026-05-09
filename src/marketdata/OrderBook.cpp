@@ -86,11 +86,12 @@ void OrderBook::apply_change_(Side side, double price, double size) {
     const auto tick = PriceTick::from_price_inv(price, inv_price_increment_);
     const auto sizefix = SizeFix::from_double_inv(size, inv_size_increment_);
 
-    auto& map = (side == Side::Buy) ? bids_ : asks_;
     if (size > 0.0) [[likely]] {
-        map.insert_or_assign(tick, sizefix);
+        if (side == Side::Buy) bids_.insert_or_assign(tick, sizefix);
+        else                   asks_.insert_or_assign(tick, sizefix);
     } else {
-        map.erase(tick);
+        if (side == Side::Buy) bids_.erase(tick);
+        else                   asks_.erase(tick);
     }
     top_dirty_ = true;
 }

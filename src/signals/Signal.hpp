@@ -3,6 +3,7 @@
 #include "domain/Types.hpp"
 #include <nlohmann/json.hpp>
 #include <chrono>
+#include <functional>
 #include <string>
 
 namespace trade_bot {
@@ -35,3 +36,10 @@ struct Signal {
 };
 
 } // namespace trade_bot
+
+template <>
+struct std::hash<trade_bot::SignalKind> {
+    size_t operator()(trade_bot::SignalKind k) const noexcept {
+        return std::hash<int>{}(static_cast<int>(k));
+    }
+};

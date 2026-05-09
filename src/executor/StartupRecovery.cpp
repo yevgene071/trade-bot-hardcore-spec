@@ -72,11 +72,11 @@ StartupRecovery::Result StartupRecovery::run() {
                 req.price = trade.plan.stop_price;
                 req.size = trade.plan.size_coin;
                 
-                auto resp = gateway_.place_order(connection_id_, req);
-                if (resp.success) {
+                try {
+                    gateway_.place_order(connection_id_, req);
                     res.log_entries.push_back("Placed emergency stop for " + ticker + " at " + std::to_string(trade.plan.stop_price));
-                } else {
-                    res.log_entries.push_back("ERROR: Failed to place emergency stop for " + ticker + ": " + resp.error_msg);
+                } catch (const std::exception& e) {
+                    res.log_entries.push_back("ERROR: Failed to place emergency stop for " + ticker + ": " + e.what());
                 }
                 
                 drift_detected = true;

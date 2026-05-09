@@ -51,7 +51,7 @@ TEST(CodecTest, OrderUpdateParsing) {
 TEST(CodecTest, PositionUpdateAvgPrice) {
     nlohmann::json j = {
         {"ConnectionId", 1},
-        {"PositionId", 789},
+        {"Id", 789},
         {"Ticker", "ETHUSDT"},
         {"Side", "Sell"},
         {"Size", 2.0},

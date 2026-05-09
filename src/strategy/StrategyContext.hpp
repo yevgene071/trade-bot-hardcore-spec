@@ -3,8 +3,7 @@
 #include "features/FeatureFrame.hpp"
 #include "signals/Signal.hpp"
 
-#include <deque>
-#include <map>
+#include <unordered_map>
 #include <vector>
 
 namespace trade_bot {
@@ -14,38 +13,44 @@ namespace trade_bot {
  */
 struct StrategyContext {
     FeatureFrame last_frame;
-    
-    // Recent signals: signal kind -> last signal
-    std::map<SignalKind, Signal> recent_signals;
-    
-    // Full signal history for the last N seconds (default 60)
-    std::deque<Signal> signal_history;
-    
+
+    // Recent signals: signal kind -> last signal (unordered for O(1) avg vs O(log N) map)
+    std::unordered_map<SignalKind, Signal> recent_signals;
+
+    // Full signal history for the last N seconds (vector: contiguous memory, better cache)
+    std::vector<Signal> signal_history;
+
     void update(const FeatureFrame& frame) {
         last_frame = frame;
     }
-    
+
     void update(const Signal& signal) {
         recent_signals[signal.kind] = signal;
         signal_history.push_back(signal);
-        
-        // Prune older signals (e.g., older than 60s)
-        auto now = signal.timestamp;
-        while (!signal_history.empty() && 
-               (now - signal_history.front().timestamp) > std::chrono::seconds(60)) {
-            signal_history.pop_front();
+
+        const auto cutoff = signal.timestamp - std::chrono::seconds(60);
+        // Advance logical head without touching memory
+        while (history_head_offset_ < signal_history.size() &&
+               signal_history[history_head_offset_].timestamp <= cutoff) {
+            ++history_head_offset_;
+        }
+        // Physical compaction: amortized O(1) — only when head consumes >50% and >32 slots
+        if (history_head_offset_ > 32 && history_head_offset_ > signal_history.size() / 2) {
+            signal_history.erase(signal_history.begin(),
+                                 signal_history.begin() + static_cast<std::ptrdiff_t>(history_head_offset_));
+            history_head_offset_ = 0;
         }
     }
-    
+
     bool has_recent_signal(SignalKind kind, std::chrono::seconds max_age) const {
         auto it = recent_signals.find(kind);
         if (it == recent_signals.end()) return false;
-        
-        auto last_ts = signal_history.empty() ? std::chrono::system_clock::time_point{} 
-                                             : signal_history.back().timestamp;
-        
-        return (last_ts - it->second.timestamp) <= max_age;
+        const auto now = std::chrono::system_clock::now();
+        return (now - it->second.timestamp) <= max_age;
     }
+
+private:
+    size_t history_head_offset_ = 0;
 };
 
 } // namespace trade_bot

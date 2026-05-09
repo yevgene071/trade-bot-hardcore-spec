@@ -1,5 +1,7 @@
 #include "AlertWebhook.hpp"
+#include "transport/external/ExternalIoContext.hpp"
 #include "logger/Logger.hpp"
+#include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
 
 namespace trade_bot {

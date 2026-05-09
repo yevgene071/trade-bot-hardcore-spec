@@ -1,4 +1,5 @@
 #include "FinresHandler.hpp"
+#include <numeric>
 
 namespace trade_bot {
 

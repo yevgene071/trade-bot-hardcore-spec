@@ -68,6 +68,7 @@ namespace api::fields {
     inline constexpr auto kZoomIndex = "ZoomIndex";
     inline constexpr auto kAskSize = "AskSize";
     inline constexpr auto kBidSize = "BidSize";
+    inline constexpr auto kKind = "Kind";
     inline constexpr auto kExchangeId = "ExchangeId";
     inline constexpr auto kMarketType = "MarketType";
     inline constexpr auto kDate = "Date";

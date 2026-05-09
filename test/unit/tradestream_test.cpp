@@ -44,13 +44,14 @@ TEST_F(TradeStreamTest, HawkesIntensityDecays) {
 
 TEST_F(TradeStreamTest, VolumesAreCorrectByWindow) {
     auto now = std::chrono::system_clock::now();
-    
-    // Trade 0.5s ago (1.0 size Buy)
-    ts.on_trade({100.0, 1.0, Side::Buy, now - std::chrono::milliseconds(500)});
-    // Trade 3s ago (2.0 size Sell)
-    ts.on_trade({100.0, 2.0, Side::Sell, now - std::chrono::seconds(3)});
+
+    // Add in chronological order (oldest first) — ring buffer eviction requires sorted order
     // Trade 10s ago (4.0 size Buy)
     ts.on_trade({100.0, 4.0, Side::Buy, now - std::chrono::seconds(10)});
+    // Trade 3s ago (2.0 size Sell)
+    ts.on_trade({100.0, 2.0, Side::Sell, now - std::chrono::seconds(3)});
+    // Trade 0.5s ago (1.0 size Buy)
+    ts.on_trade({100.0, 1.0, Side::Buy, now - std::chrono::milliseconds(500)});
     
     ts.update(now);
     auto s = ts.get_stats();

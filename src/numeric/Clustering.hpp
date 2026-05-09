@@ -33,6 +33,11 @@ public:
             return a.value < b.value;
         });
 
+        // Hoist per-cluster temporaries outside the loop to eliminate per-iteration heap allocs
+        std::vector<size_t> queue;
+        std::vector<bool> in_queue(points.size(), false);
+        queue.reserve(points.size());
+
         int next_cluster_id = 0;
         for (size_t i = 0; i < points.size(); ++i) {
             if (points[i].cluster_id != -1) continue;
@@ -47,11 +52,11 @@ public:
             points[i].cluster_id = cur_cluster_id;
 
             // Expand cluster (using indices for the queue to avoid iterator invalidation)
-            std::vector<size_t> queue;
-            std::vector<bool> in_queue(points.size(), false);
-            
+            queue.clear();
+            std::fill(in_queue.begin(), in_queue.end(), false);
+
             for (auto it = range.first; it != range.second; ++it) {
-                size_t idx = static_cast<size_t>(std::distance(points.begin(), it));
+                size_t idx = static_cast<size_t>(it - points.begin());
                 if (idx != i) {
                     queue.push_back(idx);
                     in_queue[idx] = true;
@@ -62,11 +67,11 @@ public:
                 size_t q_idx = queue[k];
                 if (points[q_idx].cluster_id == -1) {
                     points[q_idx].cluster_id = cur_cluster_id;
-                    
+
                     auto q_range = find_range_(points, points[q_idx].value, eps);
                     if (static_cast<size_t>(std::distance(q_range.first, q_range.second)) >= min_pts) {
                         for (auto it = q_range.first; it != q_range.second; ++it) {
-                            size_t n_idx = static_cast<size_t>(std::distance(points.begin(), it));
+                            size_t n_idx = static_cast<size_t>(it - points.begin());
                             if (points[n_idx].cluster_id == -1 && !in_queue[n_idx]) {
                                 queue.push_back(n_idx);
                                 in_queue[n_idx] = true;
@@ -77,14 +82,12 @@ public:
             }
         }
 
-        std::vector<std::vector<double>> result;
-        result.reserve(next_cluster_id);
-        for (int id = 0; id < next_cluster_id; ++id) {
-            std::vector<double> group;
-            for (const auto& p : points) {
-                if (p.cluster_id == id) group.push_back(p.value);
+        // Single O(N) pass instead of O(N*K) nested loop
+        std::vector<std::vector<double>> result(static_cast<size_t>(next_cluster_id));
+        for (const auto& p : points) {
+            if (p.cluster_id >= 0) {
+                result[static_cast<size_t>(p.cluster_id)].push_back(p.value);
             }
-            result.push_back(std::move(group));
         }
         return result;
     }

@@ -3,6 +3,7 @@
 #include "transport/external/IExternalFeed.hpp"
 #include "transport/IHttpClient.hpp"
 #include <map>
+#include <set>
 #include <memory>
 #include <shared_mutex>
 #include <chrono>

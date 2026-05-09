@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <xsimd/xsimd.hpp>
+#include "Hmm.hpp"
 #include "Welford.hpp"
 #include <numeric>
 
@@ -67,7 +68,7 @@ public:
                 sum += data.weights[j] * std::exp(-0.5 * diff * diff);
             }
 
-            densities[i] = sum / (data.total_weight * bandwidth * 2.506628);
+            densities[i] = sum / (data.total_weight * bandwidth * kSqrt2Pi);
         }
 
         return densities;
@@ -75,12 +76,12 @@ public:
 
     static double silverman_bandwidth(const DataSet& data) {
         if (data.values.size() < 2) return 1.0;
-        
+
         WeightedWelfordAccumulator<double> acc;
-        for (size_t i = 0; i < data.values.size(); ++i) {
-            acc.update(data.values[i], data.weights[i]);
-        }
-        
+        size_t idx = 0;
+        std::for_each(data.values.begin(), data.values.end(),
+                      [&](double v) { acc.update(v, data.weights[idx++]); });
+
         double sigma = acc.stdev();
         if (sigma <= 0) sigma = 1e-6;
         
