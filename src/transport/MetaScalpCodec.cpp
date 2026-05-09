@@ -320,4 +320,26 @@ Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
     };
 }
 
+ClusterSnapshot MetaScalpCodec::parse_cluster_snapshot(const nlohmann::json& j) {
+    std::vector<ClusterItem> items;
+    if (j.contains(fields::kItems) && j[fields::kItems].is_array()) {
+        const auto& ja = j[fields::kItems];
+        items.reserve(ja.size());
+        std::transform(ja.begin(), ja.end(), std::back_inserter(items), [](const auto& item) {
+            return ClusterItem {
+                .price    = item.value(fields::kPrice,   0.0),
+                .ask_size = item.value(fields::kAskSize, 0.0),
+                .bid_size = item.value(fields::kBidSize, 0.0)
+            };
+        });
+    }
+    return ClusterSnapshot {
+        .ticker     = j.value(fields::kTicker,    ""),
+        .timeframe  = j.value(fields::kTimeFrame, ""),
+        .zoom_index = j.value(fields::kZoomIndex, 0),
+        .items      = std::move(items),
+        .ts         = std::chrono::system_clock::now()
+    };
+}
+
 } // namespace trade_bot
