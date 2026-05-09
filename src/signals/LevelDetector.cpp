@@ -51,25 +51,38 @@ void LevelDetector::update_extremes_(const FeatureFrame& frame) {
         mid_history_.pop_front();
     }
 
-    if (mid_history_.size() < 11) return;
+    // Multi-scale extremes: short ~1s (hw=5), medium ~5s (hw=25), long ~15s (hw=75) at 10 Hz.
+    // Each scale checks a different lag point — no same-point overlap within one call.
+    // Duplicates across calls (medium/long revisiting a point short already caught) are
+    // rejected by binary-searching the chronologically-ordered extremes_ deque.
+    static constexpr struct { size_t hw; } kScales[] = {{5}, {25}, {75}};
 
-    size_t i = mid_history_.size() - 6; 
+    for (const auto& [hw] : kScales) {
+        const size_t need = 2 * hw + 1;
+        if (mid_history_.size() < need) continue;
+        const size_t i = mid_history_.size() - (hw + 1);
 
-    double cur = mid_history_[i].second;
-    bool is_max = true, is_min = true;
-    for (size_t j = i - 5; j <= i + 5; ++j) {
-        if (j == i) continue;
-        if (mid_history_[j].second >= cur) is_max = false;
-        if (mid_history_[j].second <= cur) is_min = false;
-    }
+        double cur = mid_history_[i].second;
+        bool is_max = true, is_min = true;
+        for (size_t j = i - hw; j <= i + hw; ++j) {
+            if (j == i) continue;
+            if (mid_history_[j].second >= cur) is_max = false;
+            if (mid_history_[j].second <= cur) is_min = false;
+        }
 
-    if (is_max || is_min) {
-        double start = mid_history_[i-5].second;
-        double end = mid_history_[i+5].second;
-        double magnitude_bps = std::max(std::abs(cur - start), std::abs(cur - end)) / cur * 10000.0;
-        
-        if (magnitude_bps >= cfg_.min_reversal_bps) {
-            extremes_.push_back({cur, mid_history_[i].first, is_max});
+        if (is_max || is_min) {
+            double start = mid_history_[i - hw].second;
+            double end   = mid_history_[i + hw].second;
+            double magnitude_bps = std::max(std::abs(cur - start), std::abs(cur - end)) / cur * 10000.0;
+
+            if (magnitude_bps >= cfg_.min_reversal_bps) {
+                auto ts = mid_history_[i].first;
+                auto it = std::lower_bound(extremes_.begin(), extremes_.end(), ts,
+                    [](const Extreme& e, const auto& t) { return e.ts < t; });
+                if (it == extremes_.end() || it->ts != ts) {
+                    extremes_.insert(it, {cur, ts, is_max});
+                }
+            }
         }
     }
 
