@@ -316,7 +316,7 @@ Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
         .ticker = j.value(fields::kTicker, ""),
         .price = j.value(fields::kPrice, 0.0),
         .size = j.value(fields::kSize, 0.0),
-        .timestamp = parse_timestamp(j.value(fields::kTime, ""))
+        .timestamp = parse_timestamp(j.value(fields::kDate, ""))
     };
 }
 

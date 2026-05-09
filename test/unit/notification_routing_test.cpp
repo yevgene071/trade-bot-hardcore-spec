@@ -46,11 +46,11 @@ TEST_F(NotificationRoutingTest, RoutesBigTickToUniverse) {
     std::stringstream ss;
     ss << std::put_time(std::gmtime(&in_time_t), "%Y-%m-%dT%H:%M:%S.000");
 
-    // Simulate BigTick notification
+    // Simulate BigTick notification (Kind=4 matches NotificationKind::BigTick)
     nlohmann::json msg = {
         {"Type", "notification_update"},
         {"Data", {
-            {"Type", "BigTick"},
+            {"Kind", 4},
             {"ExchangeId", 2},
             {"MarketType", 2},
             {"Ticker", "BTCUSDT"},
@@ -86,7 +86,7 @@ TEST_F(NotificationRoutingTest, DropsWrongConnection) {
     nlohmann::json msg = {
         {"Type", "notification_update"},
         {"Data", {
-            {"Type", "BigTick"},
+            {"Kind", 4},
             {"ExchangeId", 3}, // Different
             {"MarketType", 2},
             {"Ticker", "ETHUSDT"},
