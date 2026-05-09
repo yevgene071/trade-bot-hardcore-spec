@@ -8,10 +8,9 @@
 #include "numeric/Kde.hpp"
 #include "numeric/Dema.hpp"
 
+#include <absl/container/flat_hash_map.h>
+
 #include <deque>
-#include <map>
-#include <mutex>
-#include <set>
 #include <vector>
 
 namespace trade_bot {
@@ -63,7 +62,7 @@ public:
 
     void rebuild();
 
-    const std::vector<Level>& levels() const { return active_levels_; }
+    [[nodiscard]] const std::vector<Level>& levels() const { return active_levels_; }
 
 private:
     struct Extreme {
@@ -84,6 +83,7 @@ private:
 
     std::deque<std::pair<std::chrono::system_clock::time_point, double>> mid_history_;
     std::deque<Extreme> extremes_;
+    std::chrono::system_clock::time_point last_rebuild_{};
     
     std::vector<Level> active_levels_;
     
@@ -92,7 +92,7 @@ private:
         double level_price;
         std::chrono::system_clock::time_point start_ts;
     };
-    std::map<double, ApproachState> current_approaches_;
+    absl::flat_hash_map<double, ApproachState> current_approaches_;
 };
 
 } // namespace trade_bot

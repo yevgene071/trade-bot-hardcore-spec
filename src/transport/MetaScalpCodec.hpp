@@ -3,6 +3,7 @@
 #include "domain/Types.hpp"
 #include <nlohmann/json.hpp>
 #include <stdexcept>
+#include <string_view>
 
 namespace trade_bot {
 
@@ -104,7 +105,7 @@ public:
     static std::chrono::system_clock::time_point parse_timestamp(const std::string& ts_str);
 
 private:
-    static void check_required(const nlohmann::json& j, const std::string& field);
+    static void check_required(const nlohmann::json& j, std::string_view field);
 };
 
 } // namespace trade_bot

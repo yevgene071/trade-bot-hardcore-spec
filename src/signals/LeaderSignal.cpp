@@ -58,7 +58,7 @@ void LeaderSignal::check_signal_(std::chrono::system_clock::time_point now) {
     double our_move = get_move(our_history_, now);
 
     if (std::abs(leader_move) >= cfg_.move_min_pct && 
-        (std::signbit(leader_move) == std::signbit(corr) || corr == 0)) {
+        std::signbit(leader_move) == std::signbit(corr)) {
         
         double expected_move = leader_move * corr;
         double lag_diff = expected_move - our_move;

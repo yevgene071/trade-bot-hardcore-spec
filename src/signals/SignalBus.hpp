@@ -3,14 +3,12 @@
 #include "Signal.hpp"
 #include <functional>
 #include <vector>
-#include <mutex>
 
 namespace trade_bot {
 
 /**
  * Single-threaded sync signal bus.
- * Although it's intended to be called from a single thread (FeatureExtractor cadence),
- * we add a mutex for safety if some detectors are async.
+ * Reentrancy guard prevents deadlock if a subscriber calls publish().
  */
 class SignalBus {
 public:
@@ -21,7 +19,7 @@ public:
 
 private:
     std::vector<Subscriber> subscribers_;
-    std::mutex              mtx_;
+    bool                    in_publish_{false};
 };
 
 } // namespace trade_bot

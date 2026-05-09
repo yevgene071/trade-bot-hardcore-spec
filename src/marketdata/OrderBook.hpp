@@ -5,6 +5,7 @@
 
 #include <absl/container/btree_map.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -40,33 +41,33 @@ public:
     /// Apply a heterogeneous batch of changes.
     void apply_update_batch(const std::vector<PriceLevel>& changes);
 
-    std::optional<double> best_bid() const noexcept;
-    std::optional<double> best_ask() const noexcept;
-    std::optional<double> spread()   const noexcept;
-    std::optional<double> mid()      const noexcept;
+    [[nodiscard]] std::optional<double> best_bid() const noexcept;
+    [[nodiscard]] std::optional<double> best_ask() const noexcept;
+    [[nodiscard]] std::optional<double> spread()   const noexcept;
+    [[nodiscard]] std::optional<double> mid()      const noexcept;
 
-    /// Sum of sizes for the top `n_levels` of each side (uses SimdOps::sum).
-    double bid_depth(int n_levels) const noexcept;
-    double ask_depth(int n_levels) const noexcept;
+    /// Sum of sizes for the top `n_levels` of each side.
+    [[nodiscard]] double bid_depth(int n_levels) const noexcept;
+    [[nodiscard]] double ask_depth(int n_levels) const noexcept;
 
     /// Sum of sizes whose price falls in the inclusive range [lo, hi].
-    double volume_at_range(double lo, double hi) const noexcept;
+    [[nodiscard]] double volume_at_range(double lo, double hi) const noexcept;
 
-    std::size_t bid_levels() const noexcept;
-    std::size_t ask_levels() const noexcept;
+    [[nodiscard]] std::size_t bid_levels() const noexcept;
+    [[nodiscard]] std::size_t ask_levels() const noexcept;
 
-    const Ticker& ticker() const noexcept { return ticker_; }
-    int64_t update_count() const noexcept { return update_count_; }
-    double  price_increment() const noexcept { return price_increment_; }
-    double  size_increment() const noexcept { return size_increment_; }
-    double  inv_price_increment() const noexcept { return inv_price_increment_; }
-    double  inv_size_increment() const noexcept { return inv_size_increment_; }
+    [[nodiscard]] const Ticker& ticker() const noexcept { return ticker_; }
+    [[nodiscard]] int64_t update_count() const noexcept { return update_count_; }
+    [[nodiscard]] double  price_increment() const noexcept { return price_increment_; }
+    [[nodiscard]] double  size_increment() const noexcept { return size_increment_; }
+    [[nodiscard]] double  inv_price_increment() const noexcept { return inv_price_increment_; }
+    [[nodiscard]] double  inv_size_increment() const noexcept { return inv_size_increment_; }
 
     /**
      * Slices the top N levels of each side and compares with a snapshot.
      * Returns true if the number of differing levels (price or size) is <= max_diff.
      */
-    bool is_consistent(const OrderBookSnapshot& snap, int max_diff = 3) const noexcept;
+    [[nodiscard]] bool is_consistent(const OrderBookSnapshot& snap, int max_diff = 3) const noexcept;
 
 private:
     using BidMap = absl::btree_map<PriceTick, SizeFix, std::greater<PriceTick>>;
@@ -84,8 +85,8 @@ private:
     AskMap      asks_;
     std::optional<PriceTick> best_bid_tick_;
     std::optional<PriceTick> best_ask_tick_;
-    int64_t     update_count_{0};
-    bool        top_dirty_{false};
+    int64_t             update_count_{0};
+    std::atomic<bool>   top_dirty_{false};
 };
 
 }  // namespace trade_bot

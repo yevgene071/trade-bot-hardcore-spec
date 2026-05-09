@@ -67,7 +67,7 @@ HttpResponse CurlHttpClient::perform_request(const std::string& url, const std::
         
         if (!body.empty()) {
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body.size());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
         }
 
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -87,7 +87,7 @@ HttpResponse CurlHttpClient::perform_request(const std::string& url, const std::
         } else {
             long http_code = 0;
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-            response.status = (int)http_code;
+            response.status = static_cast<int>(http_code);
         }
 
         curl_easy_cleanup(curl);

@@ -8,9 +8,9 @@ namespace trade_bot {
 
 using namespace api;
 
-void MetaScalpCodec::check_required(const nlohmann::json& j, const std::string& field) {
+void MetaScalpCodec::check_required(const nlohmann::json& j, std::string_view field) {
     if (!j.contains(field)) {
-        throw CodecError("Missing required field: " + field);
+        throw CodecError("Missing required field: " + std::string(field));
     }
 }
 

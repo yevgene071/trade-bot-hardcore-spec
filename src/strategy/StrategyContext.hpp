@@ -24,6 +24,8 @@ struct StrategyContext {
         last_frame = frame;
     }
 
+    static constexpr std::size_t kMaxHistorySize = 1024;
+
     void update(const Signal& signal) {
         recent_signals[signal.kind] = signal;
         signal_history.push_back(signal);
@@ -38,6 +40,13 @@ struct StrategyContext {
         if (history_head_offset_ > 32 && history_head_offset_ > signal_history.size() / 2) {
             signal_history.erase(signal_history.begin(),
                                  signal_history.begin() + static_cast<std::ptrdiff_t>(history_head_offset_));
+            history_head_offset_ = 0;
+        }
+        // Hard cap: protect against runaway growth if compaction never triggers
+        if (signal_history.size() > kMaxHistorySize) {
+            const auto trim = signal_history.size() - kMaxHistorySize / 2;
+            signal_history.erase(signal_history.begin(),
+                                 signal_history.begin() + static_cast<std::ptrdiff_t>(trim));
             history_head_offset_ = 0;
         }
     }

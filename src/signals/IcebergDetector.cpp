@@ -1,8 +1,11 @@
 #include "IcebergDetector.hpp"
 #include "logger/Logger.hpp"
 
+#include <absl/container/flat_hash_map.h>
+
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace trade_bot {
 
@@ -41,16 +44,24 @@ void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
     auto now = update.ts;
     const auto price_inc = book_.price_increment();
 
+    // Precompute per-tick trade volumes to avoid O(N×M) inner accumulate
+    absl::flat_hash_map<PriceTick, double> buy_vol_by_tick, sell_vol_by_tick;
+    for (const auto& t : trade_history_) {
+        auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - t.ts);
+        if (std::abs(delta.count()) > cfg_.event_join_window.count()) continue;
+        const auto ttick = PriceTick::from_price(t.price, price_inc);
+        if (t.side == Side::Buy) buy_vol_by_tick[ttick] += t.size;
+        else                      sell_vol_by_tick[ttick] += t.size;
+    }
+
     for (const auto& level : update.changes) {
         const auto tick = PriceTick::from_price(level.price, price_inc);
-        
+
         double size_before = 0.0;
         auto it_last = last_sizes_.find(tick);
         if (it_last != last_sizes_.end()) {
             size_before = it_last->second;
         } else {
-            // First time we see this level, or it was 0
-            // Can't reliably detect iceberg on first see
             last_sizes_[tick] = level.size;
             continue;
         }
@@ -58,23 +69,15 @@ void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
         double size_after = level.size;
         last_sizes_[tick] = size_after;
 
-        // Only interested if size decreased or stayed same while trades happened
-        // Or if size increased while trades happened (refill > trade)
-        
-        // Find matching trades for this price and side
-        // Trade side is Buy -> matched against Sell level
-        double matched_trade_vol = std::accumulate(trade_history_.begin(), trade_history_.end(), 0.0, [&](double sum, const auto& t) {
-            // Check ±100ms window
-            auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - t.ts);
-            if (std::abs(delta.count()) <= cfg_.event_join_window.count()) {
-                if (std::abs(t.price - level.price) < price_inc * 0.5 && 
-                    ((t.side == Side::Buy && level.side == Side::Sell) ||
-                     (t.side == Side::Sell && level.side == Side::Buy))) {
-                    return sum + t.size;
-                }
-            }
-            return sum;
-        });
+        // O(1) lookup: trades matched against this level
+        double matched_trade_vol = 0.0;
+        if (level.side == Side::Sell) {
+            auto it = buy_vol_by_tick.find(tick);
+            if (it != buy_vol_by_tick.end()) matched_trade_vol = it->second;
+        } else {
+            auto it = sell_vol_by_tick.find(tick);
+            if (it != sell_vol_by_tick.end()) matched_trade_vol = it->second;
+        }
 
         if (matched_trade_vol > 0.0) {
             process_refill_(level.price, level.side, matched_trade_vol, size_before, size_after, now);

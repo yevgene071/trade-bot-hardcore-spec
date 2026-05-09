@@ -195,11 +195,9 @@ private:
         for (auto& [ticker, ctrl] : controllers_) {
             auto funding = funding_client_->get_funding(ticker);
             if (funding) {
-                // Fix for #153: Only update risk manager if next_funding_time actually changed
-                static std::map<Ticker, std::chrono::system_clock::time_point> last_funding_times;
-                if (last_funding_times[ticker] != funding->next_funding_time) {
+                if (last_funding_times_[ticker] != funding->next_funding_time) {
                     risk_manager_->update_funding_time(ticker, funding->next_funding_time);
-                    last_funding_times[ticker] = funding->next_funding_time;
+                    last_funding_times_[ticker] = funding->next_funding_time;
                 }
             }
             
@@ -249,6 +247,7 @@ private:
 
     std::map<Ticker, std::unique_ptr<TickerController>> controllers_;
     std::map<Ticker, const OrderBook*> books_for_executor_;
+    std::map<Ticker, std::chrono::system_clock::time_point> last_funding_times_;
 };
 
 int main() {

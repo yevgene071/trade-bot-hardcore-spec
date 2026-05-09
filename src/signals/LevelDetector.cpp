@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <utility>
 
 namespace trade_bot {
 
@@ -26,10 +27,9 @@ void LevelDetector::on_frame(const FeatureFrame& frame) {
     update_extremes_(frame);
     
     // Rebuild levels every minute
-    static auto last_rebuild = std::chrono::system_clock::time_point{};
-    if (frame.timestamp - last_rebuild >= std::chrono::minutes(1)) {
+    if (frame.timestamp - last_rebuild_ >= std::chrono::minutes(1)) {
         rebuild_levels_(frame.timestamp);
-        last_rebuild = frame.timestamp;
+        last_rebuild_ = frame.timestamp;
     }
 
     check_approaches_(frame);
@@ -123,6 +123,13 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
         double                                kde_val;
         std::chrono::system_clock::time_point last_ts;
     };
+    // Precompute sorted (price, ts) for O(logE) range queries inside the cluster loop
+    std::vector<std::pair<double, std::chrono::system_clock::time_point>> sorted_extremes;
+    sorted_extremes.reserve(extremes_.size());
+    for (const auto& e : extremes_) sorted_extremes.emplace_back(e.price, e.ts);
+    std::sort(sorted_extremes.begin(), sorted_extremes.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
     std::vector<Pending> pending;
     pending.reserve(clusters.size());
     double max_kde = 0.0;
@@ -136,11 +143,16 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
             kde_val = dens[0];
         }
 
+        // O(logE) range query for extremes near centroid
+        auto lo = std::lower_bound(sorted_extremes.begin(), sorted_extremes.end(),
+                                   std::make_pair(centroid - eps, std::chrono::system_clock::time_point{}),
+                                   [](const auto& a, const auto& b) { return a.first < b.first; });
+        auto hi = std::upper_bound(lo, sorted_extremes.end(),
+                                   std::make_pair(centroid + eps, std::chrono::system_clock::time_point::max()),
+                                   [](const auto& a, const auto& b) { return a.first < b.first; });
         auto last_ts = std::chrono::system_clock::time_point{};
-        for (const auto& e : extremes_) {
-            if (std::abs(e.price - centroid) <= eps) {
-                if (e.ts > last_ts) last_ts = e.ts;
-            }
+        for (auto it = lo; it != hi; ++it) {
+            if (it->second > last_ts) last_ts = it->second;
         }
 
         if (kde_val > max_kde) max_kde = kde_val;
