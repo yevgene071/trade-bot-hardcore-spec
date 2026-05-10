@@ -186,12 +186,15 @@ void BeastWsClient::on_handshake(beast::error_code ec) {
     schedule_ping();
     do_read();
     
-    // Send any queued messages
+    // Flush pre-connection queue — release lock before calling do_write()
+    // to avoid deadlock (do_write also acquires m_write_mutex).
+    bool has_queued = false;
     {
         std::lock_guard<std::mutex> lock(m_write_mutex);
-        if (!m_write_queue.empty()) {
-            do_write();
-        }
+        has_queued = !m_write_queue.empty();
+    }
+    if (has_queued) {
+        do_write();
     }
 }
 

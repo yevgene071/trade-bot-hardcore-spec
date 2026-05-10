@@ -93,18 +93,17 @@ void MarketDataFeed::subscribe_ticker(const Ticker& ticker) {
 
     if (m_ws_client->is_connected()) {
         const std::string ms_ticker = to_ms(ticker);
-        LOG_INFO("Subscribing to {} ({})", ticker, ms_ticker);
-        nlohmann::json trade_sub = {
-            {"Type", "trade_subscribe"},
-            {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}}}
+        LOG_INFO("Subscribing to {}", ticker);
+        auto send_sub = [&](const char* type) {
+            m_ws_client->send(nlohmann::json{
+                {"Type", type},
+                {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}}}
+            }.dump());
         };
-        m_ws_client->send(trade_sub.dump());
-
-        nlohmann::json ob_sub = {
-            {"Type", "orderbook_subscribe"},
-            {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}}}
-        };
-        m_ws_client->send(ob_sub.dump());
+        send_sub("trade_subscribe");
+        send_sub("orderbook_subscribe");
+        send_sub("funding_subscribe");
+        send_sub("mark_price_subscribe");
     }
 }
 
@@ -113,6 +112,33 @@ void MarketDataFeed::unsubscribe_ticker(const Ticker& ticker) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_subscribed_tickers.erase(ticker);
     }
+
+    if (m_ws_client->is_connected()) {
+        const std::string ms_ticker = to_ms(ticker);
+        auto send_unsub = [&](const char* type) {
+            m_ws_client->send(nlohmann::json{
+                {"Type", type},
+                {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}}}
+            }.dump());
+        };
+        send_unsub("trade_unsubscribe");
+        send_unsub("orderbook_unsubscribe");
+        send_unsub("funding_unsubscribe");
+        send_unsub("mark_price_unsubscribe");
+    }
+}
+
+std::optional<FundingData> MarketDataFeed::get_funding(const Ticker& ticker) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_funding_cache.find(ticker);
+    if (it == m_funding_cache.end()) return std::nullopt;
+    return it->second;
+}
+
+double MarketDataFeed::get_mark_price(const Ticker& ticker) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_mark_price_cache.find(ticker);
+    return it != m_mark_price_cache.end() ? it->second : 0.0;
 }
 
 void MarketDataFeed::start() {
@@ -144,17 +170,16 @@ void MarketDataFeed::resubscribe_all() {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (const auto& ticker : m_subscribed_tickers) {
         const std::string ms_ticker = to_ms(ticker);
-        nlohmann::json trade_sub = {
-            {"Type", "trade_subscribe"},
-            {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}}}
+        auto send_sub = [&](const char* type) {
+            m_ws_client->send(nlohmann::json{
+                {"Type", type},
+                {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}}}
+            }.dump());
         };
-        m_ws_client->send(trade_sub.dump());
-
-        nlohmann::json ob_sub = {
-            {"Type", "orderbook_subscribe"},
-            {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}}}
-        };
-        m_ws_client->send(ob_sub.dump());
+        send_sub("trade_subscribe");
+        send_sub("orderbook_subscribe");
+        send_sub("funding_subscribe");
+        send_sub("mark_price_subscribe");
     }
 }
 
@@ -231,6 +256,27 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
             auto upd = MetaScalpCodec::parse_finres_update(data);
             auto targets = get_target_listeners("");
             for (auto* l : targets) l->on_finres_update(upd);
+        } else if (type == "funding_update") {
+            // PascalCase fields per MetaScalp API
+            Ticker ticker = from_ms(MetaScalpCodec::get_val<std::string>(data, "Ticker", ""));
+            if (!ticker.empty()) {
+                FundingData fd;
+                fd.rate = MetaScalpCodec::get_val<double>(data, "FundingRate", 0.0);
+                fd.next_funding_time = MetaScalpCodec::parse_iso8601(
+                    MetaScalpCodec::get_val<std::string>(data, "FundingTime", ""));
+                fd.updated_at = std::chrono::system_clock::now();
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_funding_cache[ticker] = fd;
+                LOG_DEBUG("Funding update {}: rate={:.6f}", ticker, fd.rate);
+            }
+        } else if (type == "mark_price_update") {
+            // lowercase fields per MetaScalp API (observed in testing)
+            Ticker ticker = from_ms(data.value("ticker", ""));
+            double mp = data.value("markPrice", 0.0);
+            if (!ticker.empty() && mp > 0.0) {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_mark_price_cache[ticker] = mp;
+            }
         } else if (type == "error") {
             std::string msg = MetaScalpCodec::get_val<std::string>(data, "Message", "Unknown error");
             LOG_ERROR("WS API error: {}", msg);

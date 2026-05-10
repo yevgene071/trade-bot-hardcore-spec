@@ -104,6 +104,7 @@ public:
     static OrderStatus parse_order_status(const nlohmann::json& v);
     static PositionStatus parse_position_status(const nlohmann::json& v);
     static std::chrono::system_clock::time_point parse_timestamp(const std::string& ts_str);
+    static std::chrono::system_clock::time_point parse_iso8601(const std::string& s) { return parse_timestamp(s); }
 
     template<typename T>
     static T get_val(const nlohmann::json& j, const std::string& key, T default_val = T()) {

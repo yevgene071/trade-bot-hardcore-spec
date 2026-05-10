@@ -15,7 +15,6 @@
 #include "transport/CurlHttpClient.hpp"
 #include "transport/FinresHandler.hpp"
 #include "transport/ClusterSnapshotClient.hpp"
-#include "transport/external/BinanceFundingClient.hpp"
 #include "transport/external/ExternalIoContext.hpp"
 #include "transport/external/FeedStalenessMonitor.hpp"
 #include "marketdata/ClusterSnapshot.hpp"
@@ -88,11 +87,8 @@ private:
         });
         clock_monitor_->start();
 
-        auto& ext_ioc = ExternalIoContext::instance();
-        funding_client_ = std::make_shared<BinanceFundingClient>(std::make_shared<CurlHttpClient>());
-        funding_client_->start_polling(ext_ioc.context(), std::chrono::seconds(60));
-        ExternalFeedRegistry::instance().register_feed(FeedKind::Funding, funding_client_);
-        ext_ioc.start();
+        // ExternalIoContext still used by ClusterSnapshot and AlertWebhook.
+        ExternalIoContext::instance().start();
 
         const auto dashboard_addr = Config::get_or<std::string>("dashboard.bind_address", "127.0.0.1");
         const auto dashboard_port = static_cast<uint16_t>(Config::get_or<int64_t>("dashboard.port", 8080));
@@ -189,8 +185,7 @@ private:
                     controllers_[ticker] = std::make_unique<TickerController>(ticker, *signal_bus_, universe_, *cluster_mgr_);
                     books_for_executor_[ticker] = controllers_[ticker]->book.get();
                     feed_->add_listener(ticker, controllers_[ticker].get());
-                    feed_->subscribe_ticker(ticker);
-                    funding_client_->add_ticker(ticker);
+                    feed_->subscribe_ticker(ticker);  // also sends funding_subscribe + mark_price_subscribe
                 }
                 if (strategy == "bounce") strategy_engine_->add_strategy(std::make_unique<BounceFromDensity>(ticker));
                 else if (strategy == "breakout") strategy_engine_->add_strategy(std::make_unique<BreakoutEatThrough>(ticker));
@@ -297,12 +292,10 @@ private:
         }
 
         for (auto& [ticker, ctrl] : controllers_) {
-            auto funding = funding_client_->get_funding(ticker);
-            if (funding) {
-                if (last_funding_times_[ticker] != funding->next_funding_time) {
-                    risk_manager_->update_funding_time(ticker, funding->next_funding_time);
-                    last_funding_times_[ticker] = funding->next_funding_time;
-                }
+            auto funding = feed_->get_funding(ticker);
+            if (funding && last_funding_times_[ticker] != funding->next_funding_time) {
+                risk_manager_->update_funding_time(ticker, funding->next_funding_time);
+                last_funding_times_[ticker] = funding->next_funding_time;
             }
             
             auto frame = ctrl->tick(now);
@@ -350,7 +343,6 @@ private:
     DumpRecorder dump_recorder_;
     KillSwitch* kill_switch_;
     std::unique_ptr<ClockDriftMonitor> clock_monitor_;
-    std::shared_ptr<BinanceFundingClient> funding_client_;
     std::unique_ptr<DashboardServer> dashboard_;
     std::unique_ptr<MetricsExporter> metrics_exporter_;
     std::unique_ptr<SignalBus> signal_bus_;

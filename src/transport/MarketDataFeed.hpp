@@ -8,9 +8,17 @@
 #include <string>
 #include <set>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
+#include <chrono>
 
 namespace trade_bot {
+
+struct FundingData {
+    double rate{0.0};
+    std::chrono::system_clock::time_point next_funding_time{};
+    std::chrono::system_clock::time_point updated_at{};
+};
 
 class IMarketDataListener {
 public:
@@ -32,7 +40,7 @@ class MarketDataFeed {
 public:
     MarketDataFeed(std::shared_ptr<IWsClient> ws_client, int connection_id);
     virtual ~MarketDataFeed() = default;
-    
+
     virtual void add_listener(IMarketDataListener* listener);
     virtual void add_listener(const Ticker& ticker, IMarketDataListener* listener);
     virtual void remove_listener(IMarketDataListener* listener);
@@ -40,9 +48,15 @@ public:
 
     virtual void subscribe_ticker(const Ticker& ticker);
     virtual void unsubscribe_ticker(const Ticker& ticker);
-    
+
     virtual void start();
     virtual void stop();
+
+    /// Returns the latest funding data for the ticker, or nullopt if not yet received.
+    std::optional<FundingData> get_funding(const Ticker& ticker) const;
+
+    /// Returns the latest mark price, or 0.0 if not yet received.
+    double get_mark_price(const Ticker& ticker) const;
 
     // Optional tap invoked for every raw WS message before dispatch.
     // Callback receives (parsed_json, recv_ts_ns).  Used by DumpRecorder.
@@ -65,9 +79,13 @@ private:
     // Cache for merged listeners (m_listeners + m_ticker_listeners[ticker])
     std::unordered_map<Ticker, std::vector<IMarketDataListener*>> m_merged_cache;
 
-    std::mutex m_mutex;
+    mutable std::mutex m_mutex;
     bool m_active = false;
     RawTap m_record_tap;
+
+    // Funding and mark price caches (updated from WS)
+    std::unordered_map<Ticker, FundingData> m_funding_cache;
+    std::unordered_map<Ticker, double>      m_mark_price_cache;
 };
 
 } // namespace trade_bot
