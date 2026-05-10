@@ -107,7 +107,16 @@ std::chrono::system_clock::time_point MetaScalpCodec::parse_timestamp(const std:
         return {};
     }
     
-    auto tp = std::chrono::system_clock::from_time_t(timegm(&tm));
+    // T4-PORTABILITY: Cross-platform UTC to time_t conversion (#135)
+    auto time_utc = [](std::tm* tm_ptr) {
+#if defined(_WIN32)
+        return _mkgmtime(tm_ptr);
+#else
+        return timegm(tm_ptr);
+#endif
+    };
+    
+    auto tp = std::chrono::system_clock::from_time_t(time_utc(&tm));
     
     if (ts_str.size() > 20 && ts_str[19] == '.') {
         int ms = 0;
@@ -277,11 +286,15 @@ OrderBookSnapshot MetaScalpCodec::parse_orderbook_snapshot(const nlohmann::json&
     parse_levels(fields::kAsks, asks, Side::Sell);
     parse_levels(fields::kBids, bids, Side::Buy);
 
+    // T4-LATENCY: Use server timestamp if available, fallback to now()
+    std::string ts_str = get_val<std::string>(j, fields::kTime, "");
+    auto ts = ts_str.empty() ? std::chrono::system_clock::now() : parse_timestamp(ts_str);
+
     return OrderBookSnapshot {
         .ticker = ticker,
         .asks = asks,
         .bids = bids,
-        .ts = std::chrono::system_clock::now()
+        .ts = ts
     };
 }
 

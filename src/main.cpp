@@ -58,6 +58,8 @@ public:
         , timer_(ioc)
         , last_reset_day_(TradingDay::current_date_utc())
         , last_persist_(std::chrono::system_clock::now())
+        , last_dash_update_(std::chrono::system_clock::now())
+        , last_slow_dash_update_(std::chrono::system_clock::time_point{})  // force first slow tick
         , kill_switch_(&KillSwitch::instance()) {}
     void run() {
         init_components();
@@ -154,13 +156,17 @@ private:
             account_state_.starting_equity_usd = 10000.0;
             last_reset_day_ = TradingDay::current_date_utc();
         }
-        // Guard against persisted state saved before starting_equity was set.
-        if (account_state_.starting_equity_usd <= 0.0)
-            account_state_.starting_equity_usd = account_state_.equity_usd;
-        // In paper mode there are no exchange balance updates, so seed free_balance
-        // from equity so the dashboard shows a non-zero figure.
-        if (account_state_.free_balance_usd == 0.0 && account_state_.equity_usd > 0.0)
-            account_state_.free_balance_usd = account_state_.equity_usd;
+        account_state_.trading_day_start = std::chrono::system_clock::now();
+
+        // T4-RISK: Load news calendar for blackout protection
+        if (std::filesystem::exists("config/news.json")) {
+            try {
+                news_.load("config/news.json");
+                news_.start_watching();
+            } catch (const std::exception& e) {
+                LOG_WARN("Failed to load news calendar: {}", e.what());
+            }
+        }
 
         auto http = std::make_shared<CurlHttpClient>();
         auto ws = std::make_shared<BeastWsClient>(ioc_);
@@ -195,13 +201,41 @@ private:
         cluster_mgr_ = std::make_unique<ClusterSnapshotManager>(*cluster_client_);
         cluster_mgr_->start();
 
-        executor_ = std::make_unique<PaperExecutor>(books_for_executor_);
+        // T4-EXECUTOR: Respect mode config (paper vs live)
+        const std::string mode = Config::get_or<std::string>("executor.mode", "paper");
+        if (mode == "live") {
+            executor_ = std::make_unique<LiveExecutor>(connection_id, *gateway, *feed_);
+        } else {
+            executor_ = std::make_unique<PaperExecutor>(books_for_executor_);
+        }
+        feed_->add_listener(executor_.get());
+
+        // T4-RECOVERY: Run startup recovery and inject trades
+        StartupRecovery recovery(connection_id, *gateway, *persister_);
+        auto recovery_res = recovery.run();
+        for (const auto& entry : recovery_res.log_entries) LOG_INFO("[Recovery] {}", entry);
+        executor_->inject_recovered_trades(recovery_res.recovered_trades);
 
         strategy_engine_->set_on_plan([&](const TradePlan& plan) {
             auto decision = risk_manager_->evaluate(plan, account_state_);
             if (decision.accepted) {
                 TradePlan accepted_plan = plan;
                 accepted_plan.size_coin = decision.adjusted_size_coin;
+                
+                // T4-RISK: Normalize prices for exchange compatibility
+                auto meta = universe_.meta(plan.ticker).value_or(TickerMeta{0.01, 1e-6, 0.0, 0.0});
+                if (meta.price_increment > 0.0) {
+                    auto round_p = [&](double p) {
+                        return std::round(p / meta.price_increment) * meta.price_increment;
+                    };
+                    accepted_plan.entry_price = round_p(accepted_plan.entry_price);
+                    accepted_plan.stop_price  = round_p(accepted_plan.stop_price);
+                    accepted_plan.tp1_price   = round_p(accepted_plan.tp1_price);
+                    if (accepted_plan.tp2_price) {
+                        accepted_plan.tp2_price = round_p(*accepted_plan.tp2_price);
+                    }
+                }
+
                 executor_->submit(accepted_plan);
             }
         });
@@ -210,10 +244,25 @@ private:
             LOG_INFO("[Universe] {} {} for {}", enabled ? "ENABLED" : "DISABLED", strategy, ticker);
             if (enabled) {
                 if (!controllers_.contains(ticker)) {
-                    controllers_[ticker] = std::make_unique<TickerController>(ticker, *signal_bus_, universe_, *cluster_mgr_);
+                    // T4-LEADER: Pass configured leader ticker to controller (#162)
+                    std::string leader_name = Config::get_or<std::string>("universe.affinity.leaderlag.require_leader", "BTC_USDT");
+                    // Normalize (BTCUSDT -> BTC_USDT)
+                    if (leader_name.find('_') == std::string::npos && leader_name.size() > 4) {
+                        leader_name = leader_name.substr(0, leader_name.size() - 4) + "_" + leader_name.substr(leader_name.size() - 4);
+                    }
+                    
+                    controllers_[ticker] = std::make_unique<TickerController>(ticker, *signal_bus_, universe_, *cluster_mgr_, leader_name);
                     books_for_executor_[ticker] = controllers_[ticker]->book.get();
                     feed_->add_listener(ticker, controllers_[ticker].get());
                     feed_->subscribe_ticker(ticker);  // also sends funding_subscribe + mark_price_subscribe
+
+                    // Ensure leader is also subscribed if it's not the current ticker
+                    if (leader_name != ticker && !controllers_.contains(leader_name)) {
+                        controllers_[leader_name] = std::make_unique<TickerController>(leader_name, *signal_bus_, universe_, *cluster_mgr_);
+                        books_for_executor_[leader_name] = controllers_[leader_name]->book.get();
+                        feed_->add_listener(leader_name, controllers_[leader_name].get());
+                        feed_->subscribe_ticker(leader_name);
+                    }
                 }
                 if (strategy == "bounce") strategy_engine_->add_strategy(std::make_unique<BounceFromDensity>(ticker));
                 else if (strategy == "breakout") strategy_engine_->add_strategy(std::make_unique<BreakoutEatThrough>(ticker));
@@ -224,6 +273,25 @@ private:
                 else if (strategy == "breakout") cls = "BreakoutEatThrough";
                 else if (strategy == "leaderlag") cls = "LeaderLag";
                 if (!cls.empty()) strategy_engine_->remove_strategy(ticker, cls);
+                
+                // T4-LIFECYCLE: Cleanup controller if no strategies left for this ticker
+                // and no active positions in PaperExecutor.
+                if (universe_.enabled_strategies(ticker).empty()) {
+                    bool has_position = false;
+                    for (const auto& t : executor_->get_active_trades()) {
+                        if (t.plan.ticker == ticker && t.state != TradeState::Closed) {
+                            has_position = true;
+                            break;
+                        }
+                    }
+                    if (!has_position) {
+                        LOG_INFO("[Universe] Removing controller for {} (idle)", ticker);
+                        feed_->remove_listener(ticker, controllers_[ticker].get());
+                        feed_->unsubscribe_ticker(ticker);
+                        books_for_executor_.erase(ticker);
+                        controllers_.erase(ticker);
+                    }
+                }
             }
         });
 
@@ -319,13 +387,36 @@ private:
             last_reset_day_ = TradingDay::current_date_utc();
         }
 
+        // T4-LEADER: Multi-pass tick for leader-follower coordination (#162)
+        std::string leader_ticker = Config::get_or<std::string>("universe.affinity.leaderlag.require_leader", "BTC_USDT");
+        if (leader_ticker.find('_') == std::string::npos && leader_ticker.size() > 4) {
+            leader_ticker = leader_ticker.substr(0, leader_ticker.size() - 4) + "_" + leader_ticker.substr(leader_ticker.size() - 4);
+        }
+
+        std::optional<FeatureFrame> leader_frame;
+        if (auto it = controllers_.find(leader_ticker); it != controllers_.end()) {
+            auto funding = feed_->get_funding(leader_ticker);
+            if (funding && last_funding_times_[leader_ticker] != funding->next_funding_time) {
+                risk_manager_->update_funding_time(leader_ticker, funding->next_funding_time);
+                last_funding_times_[leader_ticker] = funding->next_funding_time;
+            }
+            leader_frame = it->second->tick(now);
+            strategy_engine_->on_frame(*leader_frame);
+        }
+
         for (auto& [ticker, ctrl] : controllers_) {
+            if (ticker == leader_ticker) continue; // already processed
+
             auto funding = feed_->get_funding(ticker);
             if (funding && last_funding_times_[ticker] != funding->next_funding_time) {
                 risk_manager_->update_funding_time(ticker, funding->next_funding_time);
                 last_funding_times_[ticker] = funding->next_funding_time;
             }
             
+            if (leader_frame) {
+                ctrl->on_leader_frame(*leader_frame);
+            }
+
             auto frame = ctrl->tick(now);
             strategy_engine_->on_frame(frame);
         }
@@ -334,10 +425,16 @@ private:
         executor_->tick(now);
 
         // Apply closed trades → update equity and write journal
+        bool events_occurred = false;
         for (const auto& ct : executor_->pop_closed_trades()) {
+            events_occurred = true;
             account_state_.realized_pnl_today_usd += ct.pnl_usd;
             account_state_.equity_usd             += ct.pnl_usd;
             account_state_.free_balance_usd       += ct.pnl_usd;
+            
+            // T4-RISK: Notify risk manager of trade completion for streak tracking
+            risk_manager_->record_trade_end(ct.pnl_usd < 0, now);
+
             TradeJournal::Entry je;
             je.plan          = ct.plan;
             je.pnl_usd       = ct.pnl_usd;
@@ -345,30 +442,84 @@ private:
             je.cause_of_exit = ct.reason;
             journal_.log_entry(je);
         }
-        account_state_.unrealized_pnl_usd = executor_->unrealized_pnl();
+        
+        const auto& active = executor_->get_active_trades();
+        
+        // T4-RISK: Synchronize AccountState with current execution state
+        account_state_.active_positions = 0;
+        account_state_.active_tickers.clear();
+        for (const auto& t : active) {
+            if (t.state == TradeState::Open || t.state == TradeState::Exiting) {
+                account_state_.active_positions++;
+                account_state_.active_tickers.push_back(t.plan.ticker);
+            }
+        }
+        account_state_.kill_switch_triggered = kill_switch_->is_triggered();
+
+        // Trigger dashboard update if position count changed (trade opened/closed)
+        static size_t last_active_count = 0;
+        if (active.size() != last_active_count) {
+            events_occurred = true;
+            last_active_count = active.size();
+        }
+
+        // Unrealized PnL is already computed inside get_active_trades() for each
+        // position; sum it here to avoid a redundant second pass through the
+        // order books (was: executor_->unrealized_pnl() which re-reads bid/ask).
+        // Inject mark prices so PnL uses exchange mark (consistent with dashboard).
+        const auto all_marks = feed_->get_all_mark_prices();  // one lock per tick
+        executor_->set_mark_prices(all_marks);
+        double upnl_sum = 0.0;
+        for (const auto& t : active) upnl_sum += t.unrealized_pnl;
+        account_state_.unrealized_pnl_usd = upnl_sum;
 
         if (now - last_persist_ > std::chrono::seconds(10)) {
             persister_->save({account_state_, {}, last_reset_day_, false, ""});
             last_persist_ = now;
         }
 
-        DashboardServer::State dash_state;
-        dash_state.account = account_state_;
-        dash_state.recent_journal = journal_.get_recent_entries(20);
-        dash_state.open_trades = executor_->get_active_trades();
-        dash_state.kill_switch_active = kill_switch_->is_triggered();
-        dash_state.version = Config::get<std::string>("app.version");
-        dash_state.signal_counts = signal_counts_;
-        for (const auto& ticker : universe_.active()) {
-            DashboardServer::State::UniverseRow row;
-            row.ticker     = ticker;
-            row.strategies = universe_.enabled_strategies(ticker);
-            row.boosted    = universe_.is_boosted(ticker, now);
-            row.mark_price = feed_->get_mark_price(ticker);
-            dash_state.universe_rows.push_back(std::move(row));
+        if (events_occurred || (now - last_dash_update_ > std::chrono::milliseconds(100))) {
+            // T4-PERF: Skip expensive state building if no one is watching (#161)
+            if (dashboard_->session_count() > 0) {
+                // Slow-changing data: journal, signals, universe strategies/boosted.
+                // Rebuilding these every 100ms is wasteful — cache and refresh every 1s
+                // or when a trade event happens (journal changes).
+                const bool slow_tick = events_occurred ||
+                    (now - last_slow_dash_update_ > std::chrono::seconds(1));
+                if (slow_tick) {
+                    cached_journal_  = journal_.get_recent_entries(20);
+                    cached_signals_.assign(recent_signals_.begin(), recent_signals_.end());
+                    cached_sig_counts_ = signal_counts_;
+                    cached_universe_.clear();
+                    for (const auto& ticker : universe_.active()) {
+                        DashboardServer::State::UniverseRow row;
+                        row.ticker     = ticker;
+                        row.strategies = universe_.enabled_strategies(ticker);
+                        row.boosted    = universe_.is_boosted(ticker, now);
+                        cached_universe_.push_back(std::move(row));
+                    }
+                    cached_version_ = Config::get<std::string>("app.version");
+                    last_slow_dash_update_ = now;
+                }
+                // Fast path: only update prices, equity, positions (cheap)
+                DashboardServer::State dash_state;
+                dash_state.account = account_state_;
+                dash_state.open_trades = active;
+                dash_state.kill_switch_active = kill_switch_->is_triggered();
+                dash_state.version = cached_version_;
+                dash_state.signal_counts = cached_sig_counts_;
+                dash_state.recent_journal = cached_journal_;
+                dash_state.recent_signals = cached_signals_;
+                // Reuse all_marks from above — no second lock
+                dash_state.universe_rows = cached_universe_;
+                for (auto& row : dash_state.universe_rows) {
+                    auto mit = all_marks.find(row.ticker);
+                    if (mit != all_marks.end()) row.mark_price = mit->second;
+                }
+                dashboard_->update_state(dash_state);
+            }
+            last_dash_update_ = now;
         }
-        dash_state.recent_signals.assign(recent_signals_.begin(), recent_signals_.end());
-        dashboard_->update_state(dash_state);
     }
 
 private:
@@ -384,6 +535,15 @@ private:
     AccountState account_state_;
     std::string last_reset_day_;
     std::chrono::system_clock::time_point last_persist_;
+    std::chrono::system_clock::time_point last_dash_update_;
+    std::chrono::system_clock::time_point last_slow_dash_update_;
+
+    // Cached slow-changing dashboard data (rebuilt every 1s, not every 100ms)
+    std::vector<TradeJournal::Entry> cached_journal_;
+    std::vector<DashboardServer::State::SignalEvent> cached_signals_;
+    std::vector<DashboardServer::State::UniverseRow> cached_universe_;
+    std::map<std::string, int> cached_sig_counts_;
+    std::string cached_version_;
 
     DumpRecorder dump_recorder_;
     KillSwitch* kill_switch_;
@@ -397,7 +557,7 @@ private:
     std::unique_ptr<NotificationFeed> notif_feed_;
     std::unique_ptr<ClusterSnapshotClient> cluster_client_;
     std::unique_ptr<ClusterSnapshotManager> cluster_mgr_;
-    std::unique_ptr<PaperExecutor> executor_;
+    std::unique_ptr<IExecutor> executor_;
     std::unique_ptr<AccountStatePersister> persister_;
 
     std::map<Ticker, std::unique_ptr<TickerController>> controllers_;

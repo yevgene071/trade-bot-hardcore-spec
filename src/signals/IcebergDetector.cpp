@@ -30,6 +30,23 @@ void IcebergDetector::on_frame(const FeatureFrame& frame) {
     while (!trade_history_.empty() && (now - trade_history_.front().ts) > cfg_.event_join_window) {
         trade_history_.pop_front();
     }
+
+    // T4-LIFECYCLE: Prune stale level stats to prevent memory bloat (#142)
+    if (now - last_prune_ > std::chrono::minutes(1)) {
+        for (auto it = levels_.begin(); it != levels_.end(); ) {
+            if (now - it->second.last_refill > std::chrono::minutes(5)) {
+                it = levels_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        
+        // Also prune last_sizes
+        if (last_sizes_.size() > 1000) {
+            last_sizes_.clear(); // aggressive reset
+        }
+        last_prune_ = now;
+    }
 }
 
 void IcebergDetector::on_trade(const Trade& trade) {
@@ -44,14 +61,16 @@ void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
     auto now = update.ts;
     const auto price_inc = book_.price_increment();
 
-    // Precompute per-tick trade volumes to avoid O(N×M) inner accumulate
-    absl::flat_hash_map<PriceTick, double> buy_vol_by_tick, sell_vol_by_tick;
+    // T4-PERF: Reuse member maps to avoid allocations (#159)
+    buy_vol_by_tick_.clear();
+    sell_vol_by_tick_.clear();
+
     for (const auto& t : trade_history_) {
         auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - t.ts);
         if (std::abs(delta.count()) > cfg_.event_join_window.count()) continue;
         const auto ttick = PriceTick::from_price(t.price, price_inc);
-        if (t.side == Side::Buy) buy_vol_by_tick[ttick] += t.size;
-        else                      sell_vol_by_tick[ttick] += t.size;
+        if (t.side == Side::Buy) buy_vol_by_tick_[ttick] += t.size;
+        else                      sell_vol_by_tick_[ttick] += t.size;
     }
 
     for (const auto& level : update.changes) {
@@ -72,11 +91,11 @@ void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
         // O(1) lookup: trades matched against this level
         double matched_trade_vol = 0.0;
         if (level.side == Side::Sell) {
-            auto it = buy_vol_by_tick.find(tick);
-            if (it != buy_vol_by_tick.end()) matched_trade_vol = it->second;
+            auto it = buy_vol_by_tick_.find(tick);
+            if (it != buy_vol_by_tick_.end()) matched_trade_vol = it->second;
         } else {
-            auto it = sell_vol_by_tick.find(tick);
-            if (it != sell_vol_by_tick.end()) matched_trade_vol = it->second;
+            auto it = sell_vol_by_tick_.find(tick);
+            if (it != sell_vol_by_tick_.end()) matched_trade_vol = it->second;
         }
 
         if (matched_trade_vol > 0.0) {
@@ -142,7 +161,14 @@ void IcebergDetector::update_bayesian_(LevelStats& stats, bool is_refill) {
     double L0 = is_refill ? cfg_.likelihood_not_iceberg : (1.0 - cfg_.likelihood_not_iceberg);
     
     double p = stats.posterior;
-    stats.posterior = (p * L1) / (p * L1 + (1.0 - p) * L0);
+    double denom = (p * L1 + (1.0 - p) * L0);
+    
+    // T4-MATH: Prevent division by zero and probability leakage (#141)
+    if (denom < 1e-12) {
+        stats.posterior = is_refill ? 0.99 : 0.01;
+    } else {
+        stats.posterior = std::clamp((p * L1) / denom, 0.0001, 0.9999);
+    }
 }
 
 } // namespace trade_bot

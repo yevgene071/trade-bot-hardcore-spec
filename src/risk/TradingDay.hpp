@@ -21,15 +21,25 @@ public:
     static std::chrono::system_clock::time_point start_of_day_utc() {
         auto now = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
-        auto* tm = std::gmtime(&in_time_t);
-        tm->tm_hour = 0;
-        tm->tm_min = 0;
-        tm->tm_sec = 0;
-#if defined(__linux__)
-        return std::chrono::system_clock::from_time_t(timegm(tm));
+        std::tm tm_buf;
+#if defined(_WIN32)
+        gmtime_s(&tm_buf, &in_time_t);
 #else
-        return std::chrono::system_clock::from_time_t(mktime(tm)); // Not UTC-safe on non-Linux
+        gmtime_r(&in_time_t, &tm_buf);
 #endif
+        tm_buf.tm_hour = 0;
+        tm_buf.tm_min = 0;
+        tm_buf.tm_sec = 0;
+        
+        auto time_utc = [](std::tm* tm_ptr) {
+#if defined(_WIN32)
+            return _mkgmtime(tm_ptr);
+#else
+            return timegm(tm_ptr);
+#endif
+        };
+        
+        return std::chrono::system_clock::from_time_t(time_utc(&tm_buf));
     }
     
     static bool is_new_day(const std::string& last_reset_day_utc) {

@@ -25,6 +25,12 @@ void LiveExecutor::submit(const TradePlan& plan) {
     trade.plan = plan;
     trade.state = TradeState::PendingEntry;
     
+    // T4-RISK: Reserve balance for the pending order
+    double reservation = plan.size_coin * plan.entry_price;
+    reserved_balance_usd_ += reservation;
+    LOG_DEBUG("LiveExecutor: reserved ${} for {}, total reserved: ${}", 
+              reservation, plan.ticker, reserved_balance_usd_);
+
     PlaceOrderRequest req;
     req.ticker = plan.ticker;
     req.side = plan.side;
@@ -67,10 +73,58 @@ void LiveExecutor::cancel_all(const Ticker& ticker) {
     if (auto it = trades_.find(ticker); it != trades_.end()) {
         for (auto& t : it->second) {
             if (t.state != TradeState::Closed) {
+                // If it was pending, release reservation (optimistic)
+                if (t.state == TradeState::PendingEntry) {
+                    double reservation = t.plan.size_coin * t.plan.entry_price;
+                    reserved_balance_usd_ = std::max(0.0, reserved_balance_usd_ - reservation);
+                }
                 t.state = TradeState::Cancelling;
             }
         }
     }
+}
+
+void LiveExecutor::inject_recovered_trades(const std::vector<ActiveTrade>& trades) {
+    std::lock_guard lock(mutex_);
+    for (const auto& t : trades) {
+        trades_[t.plan.ticker].push_back(t);
+        LOG_INFO("LiveExecutor: injected recovered trade for {} (state={})", 
+                 t.plan.ticker, static_cast<int>(t.state));
+    }
+}
+
+std::vector<ActiveTrade> LiveExecutor::get_active_trades() const {
+    std::lock_guard lock(mutex_);
+    std::vector<ActiveTrade> out;
+    for (const auto& [ticker, list] : trades_) {
+        for (const auto& t : list) {
+            // T4-RISK: Compute unrealized PnL for dashboard/metrics
+            ActiveTrade copy = t;
+            auto mit = mark_prices_.find(ticker);
+            if (mit != mark_prices_.end() && t.state == TradeState::Open) {
+                double mark = mit->second;
+                if (t.plan.side == Side::Buy) {
+                    copy.unrealized_pnl = (mark - t.avg_entry_price) * t.executed_size;
+                } else {
+                    copy.unrealized_pnl = (t.avg_entry_price - mark) * t.executed_size;
+                }
+            }
+            out.push_back(copy);
+        }
+    }
+    return out;
+}
+
+std::vector<IExecutor::ClosedTrade> LiveExecutor::pop_closed_trades() {
+    std::lock_guard lock(mutex_);
+    std::vector<ClosedTrade> out;
+    out.swap(closed_trades_);
+    return out;
+}
+
+void LiveExecutor::set_mark_prices(const std::unordered_map<Ticker, double>& marks) {
+    std::lock_guard lock(mutex_);
+    mark_prices_ = marks;
 }
 
 void LiveExecutor::on_order_update(const OrderUpdate& upd) {
@@ -124,12 +178,21 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
             continue;       // unrelated event for this trade
         }
 
+        // FOUND THE MATCHING TRADE — Process it and stop searching (#129)
         if (upd.status == OrderStatus::Open) {
-            // Order was acknowledged — id captured above; nothing else to do.
-            continue;
+            return; // acknowledged, id captured above
         }
+        
+        // T4-RISK: Release reservation when order is either filled or cancelled
+        if (is_entry && (upd.status == OrderStatus::Closed || upd.filled_size > 0)) {
+            // If we already filled some, we release the WHOLE reservation and
+            // let the actual balance update from exchange take over.
+            double reservation = trade.plan.size_coin * trade.plan.entry_price;
+            reserved_balance_usd_ = std::max(0.0, reserved_balance_usd_ - reservation);
+        }
+
         if (upd.status != OrderStatus::Closed) {
-            continue;
+            return;
         }
 
         if (upd.filled_size <= 0) {
@@ -140,7 +203,7 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
             } else {
                 trade.state = TradeState::Closed;
             }
-            continue;
+            return;
         }
 
         if (is_entry) {
@@ -189,8 +252,24 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
             trade.state = TradeState::Closed;
             LOG_INFO("LiveExecutor: exit FILLED for {} @ {} (id={})",
                      upd.ticker, upd.filled_price, upd.order_id);
+            
+            // T4-EXECUTOR: Record closed trade for journal/equity updates
+            ClosedTrade ct;
+            ct.plan = trade.plan;
+            ct.entry_price = trade.avg_entry_price;
+            ct.exit_price = upd.filled_price;
+            ct.size_filled = upd.filled_size;
+            if (trade.plan.side == Side::Buy) {
+                ct.pnl_usd = (ct.exit_price - ct.entry_price) * ct.size_filled;
+            } else {
+                ct.pnl_usd = (ct.entry_price - ct.exit_price) * ct.size_filled;
+            }
+            ct.reason = is_stop ? "StopLoss" : (is_tp2 ? "TP2" : "TP1");
+            closed_trades_.push_back(ct);
         }
+        return; // Done with this update
     }
+}
 }
 
 void LiveExecutor::on_position_update(const PositionUpdate& upd) {
@@ -243,7 +322,22 @@ void LiveExecutor::tick(std::chrono::system_clock::time_point now) {
     // SubmitUnknown stays there forever — the entire point of
     // T0-ORDER-RECONCILIATION. Issue #129.
     for (const auto& ticker : tickers_snap) {
-        if (!reconciliator_.has_pending(ticker)) continue;
+        if (!reconciliator_.has_pending(ticker)) {
+            // T4-RECOVERY: For recovered trades that are Open but missing stops, re-arm them.
+            std::lock_guard lock(mutex_);
+            auto it = trades_.find(ticker);
+            if (it != trades_.end()) {
+                for (auto& trade : it->second) {
+                    if (trade.state == TradeState::Open && 
+                        trade.stop_order_id == 0 && 
+                        (now - trade.opened_at) > std::chrono::seconds(5)) {
+                        LOG_WARN("LiveExecutor: recovered trade for {} is Open but missing SL, re-arming", ticker);
+                        place_stops_(trade);
+                    }
+                }
+            }
+            continue;
+        }
         const auto results = reconciliator_.poll_open_orders(ticker);
         for (const auto& res : results) {
             handle_reconciled_(res);
@@ -294,8 +388,9 @@ void LiveExecutor::place_stops_(ActiveTrade& trade) {
     sl.reduce_only = true;
     
     try {
-        gateway_.place_order(connection_id_, sl);
-        LOG_INFO("LiveExecutor: placed StopLoss for {} @ {}", sl.ticker, sl.price);
+        auto res = gateway_.place_order(connection_id_, sl);
+        trade.stop_order_id = res.order_id;
+        LOG_INFO("LiveExecutor: placed StopLoss for {} @ {} (id={})", sl.ticker, sl.price, trade.stop_order_id);
     } catch (const std::exception& e) {
         LOG_ERROR("LiveExecutor: failed to place SL for {}: {}", sl.ticker, e.what());
     }
@@ -312,8 +407,9 @@ void LiveExecutor::place_stops_(ActiveTrade& trade) {
         
         if (tp.size > 0) {
             try {
-                gateway_.place_order(connection_id_, tp);
-                LOG_INFO("LiveExecutor: placed TP1 for {} @ {}", tp.ticker, tp.price);
+                auto res = gateway_.place_order(connection_id_, tp);
+                trade.tp1_order_id = res.order_id;
+                LOG_INFO("LiveExecutor: placed TP1 for {} @ {} (id={})", tp.ticker, tp.price, trade.tp1_order_id);
             } catch (const std::exception& e) {
                  LOG_ERROR("LiveExecutor: failed to place TP1 for {}: {}", tp.ticker, e.what());
             }

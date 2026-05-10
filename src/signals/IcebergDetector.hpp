@@ -100,6 +100,11 @@ private:
     std::deque<TradeEvent> trade_history_;
     std::deque<BookEvent>  book_history_;
     static constexpr size_t kMaxHistory = 100;
+    std::chrono::system_clock::time_point last_prune_;
+
+    // T4-PERF: Persistent maps for temporary volume calculation to avoid allocations (#159)
+    absl::flat_hash_map<PriceTick, double> buy_vol_by_tick_;
+    absl::flat_hash_map<PriceTick, double> sell_vol_by_tick_;
 };
 
 } // namespace trade_bot

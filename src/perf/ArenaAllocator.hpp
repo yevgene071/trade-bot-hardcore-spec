@@ -15,6 +15,12 @@ public:
         : buffer_(initial_size_bytes)
         , resource_(buffer_.data(), buffer_.size()) {}
 
+    // T4-PERF: PMR resources hold raw pointers to buffers; moving them is unsafe (#156)
+    ArenaAllocator(const ArenaAllocator&) = delete;
+    ArenaAllocator& operator=(const ArenaAllocator&) = delete;
+    ArenaAllocator(ArenaAllocator&&) = delete;
+    ArenaAllocator& operator=(ArenaAllocator&&) = delete;
+
     std::pmr::memory_resource* resource() { return &resource_; }
 
     void reset() {

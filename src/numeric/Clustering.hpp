@@ -33,16 +33,14 @@ public:
             return a.value < b.value;
         });
 
-        // Hoist per-cluster temporaries outside the loop to eliminate per-iteration heap allocs
-        std::vector<size_t> queue;
-        std::vector<bool> in_queue(points.size(), false);
-        queue.reserve(points.size());
+        // Use a generation counter instead of O(N) fill to track queue membership
+        std::vector<int> visited_gen(points.size(), 0);
+        int current_gen = 0;
 
         int next_cluster_id = 0;
         for (size_t i = 0; i < points.size(); ++i) {
             if (points[i].cluster_id != -1) continue;
 
-            // Find neighbors using sliding window (since sorted)
             auto range = find_range_(points, points[i].value, eps);
             if (static_cast<size_t>(std::distance(range.first, range.second)) < min_pts) {
                 continue;
@@ -51,15 +49,14 @@ public:
             int cur_cluster_id = next_cluster_id++;
             points[i].cluster_id = cur_cluster_id;
 
-            // Expand cluster (using indices for the queue to avoid iterator invalidation)
             queue.clear();
-            std::fill(in_queue.begin(), in_queue.end(), false);
+            current_gen++; // New generation for this cluster expansion
 
             for (auto it = range.first; it != range.second; ++it) {
                 size_t idx = static_cast<size_t>(it - points.begin());
                 if (idx != i) {
                     queue.push_back(idx);
-                    in_queue[idx] = true;
+                    visited_gen[idx] = current_gen;
                 }
             }
 
@@ -72,9 +69,9 @@ public:
                     if (static_cast<size_t>(std::distance(q_range.first, q_range.second)) >= min_pts) {
                         for (auto it = q_range.first; it != q_range.second; ++it) {
                             size_t n_idx = static_cast<size_t>(it - points.begin());
-                            if (points[n_idx].cluster_id == -1 && !in_queue[n_idx]) {
+                            if (points[n_idx].cluster_id == -1 && visited_gen[n_idx] != current_gen) {
                                 queue.push_back(n_idx);
-                                in_queue[n_idx] = true;
+                                visited_gen[n_idx] = current_gen;
                             }
                         }
                     }

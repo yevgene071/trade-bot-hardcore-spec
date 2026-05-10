@@ -1,0 +1,704 @@
+src/config/Config.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/control/ClockDriftMonitor.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/control/DashboardServer.hpp:3:2: information: Include file: "risk/AccountState.hpp" not found. [missingInclude]
+#include "risk/AccountState.hpp"
+ ^
+src/control/DashboardServer.hpp:4:2: information: Include file: "trading/ActiveTrade.hpp" not found. [missingInclude]
+#include "trading/ActiveTrade.hpp"
+ ^
+src/control/DashboardServer.hpp:5:2: information: Include file: "logger/TradeJournal.hpp" not found. [missingInclude]
+#include "logger/TradeJournal.hpp"
+ ^
+src/control/DashboardServer.hpp:6:2: information: Include file: "signals/Signal.hpp" not found. [missingInclude]
+#include "signals/Signal.hpp"
+ ^
+src/control/DashboardServer.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/control/KillSwitch.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/control/SntpClient.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/executor/IExecutor.hpp:3:2: information: Include file: "strategy/TradePlan.hpp" not found. [missingInclude]
+#include "strategy/TradePlan.hpp"
+ ^
+src/executor/LiveExecutor.hpp:4:2: information: Include file: "transport/IOrderGateway.hpp" not found. [missingInclude]
+#include "transport/IOrderGateway.hpp"
+ ^
+src/executor/LiveExecutor.hpp:5:2: information: Include file: "transport/MarketDataFeed.hpp" not found. [missingInclude]
+#include "transport/MarketDataFeed.hpp"
+ ^
+src/executor/LiveExecutor.hpp:6:2: information: Include file: "trading/ActiveTrade.hpp" not found. [missingInclude]
+#include "trading/ActiveTrade.hpp"
+ ^
+src/executor/LiveExecutor.hpp:7:2: information: Include file: "trading/OrderReconciliator.hpp" not found. [missingInclude]
+#include "trading/OrderReconciliator.hpp"
+ ^
+src/executor/LiveExecutor.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/executor/LiveExecutor.cpp:3:2: information: Include file: "metrics/MetricsRegistry.hpp" not found. [missingInclude]
+#include "metrics/MetricsRegistry.hpp"
+ ^
+src/executor/LiveExecutor.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/executor/PaperExecutor.hpp:4:2: information: Include file: "marketdata/OrderBook.hpp" not found. [missingInclude]
+#include "marketdata/OrderBook.hpp"
+ ^
+src/executor/PaperExecutor.hpp:5:2: information: Include file: "trading/ActiveTrade.hpp" not found. [missingInclude]
+#include "trading/ActiveTrade.hpp"
+ ^
+src/executor/PaperExecutor.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/executor/PaperExecutor.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/executor/StartupRecovery.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/executor/StartupRecovery.hpp:4:2: information: Include file: "transport/IOrderGateway.hpp" not found. [missingInclude]
+#include "transport/IOrderGateway.hpp"
+ ^
+src/executor/StartupRecovery.hpp:5:2: information: Include file: "risk/AccountStatePersister.hpp" not found. [missingInclude]
+#include "risk/AccountStatePersister.hpp"
+ ^
+src/executor/StartupRecovery.hpp:6:2: information: Include file: "trading/ActiveTrade.hpp" not found. [missingInclude]
+#include "trading/ActiveTrade.hpp"
+ ^
+src/executor/StartupRecovery.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/executor/StartupRecovery.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/features/FeatureFrame.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/features/FeatureExtractor.hpp:4:2: information: Include file: "marketdata/LeaderTracker.hpp" not found. [missingInclude]
+#include "marketdata/LeaderTracker.hpp"
+ ^
+src/features/FeatureExtractor.hpp:5:2: information: Include file: "marketdata/OrderBook.hpp" not found. [missingInclude]
+#include "marketdata/OrderBook.hpp"
+ ^
+src/features/FeatureExtractor.hpp:6:2: information: Include file: "marketdata/TradeStream.hpp" not found. [missingInclude]
+#include "marketdata/TradeStream.hpp"
+ ^
+src/features/FeatureExtractor.hpp:7:2: information: Include file: "numeric/HdrHistogramWrapper.hpp" not found. [missingInclude]
+#include "numeric/HdrHistogramWrapper.hpp"
+ ^
+src/features/FeatureExtractor.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/logger/TradeJournal.hpp:3:2: information: Include file: "strategy/TradePlan.hpp" not found. [missingInclude]
+#include "strategy/TradePlan.hpp"
+ ^
+src/logger/TradeJournal.hpp:4:2: information: Include file: "features/FeatureFrame.hpp" not found. [missingInclude]
+#include "features/FeatureFrame.hpp"
+ ^
+src/control/TickerController.hpp:3:2: information: Include file: "marketdata/OrderBook.hpp" not found. [missingInclude]
+#include "marketdata/OrderBook.hpp"
+ ^
+src/control/TickerController.hpp:4:2: information: Include file: "marketdata/TradeStream.hpp" not found. [missingInclude]
+#include "marketdata/TradeStream.hpp"
+ ^
+src/control/TickerController.hpp:5:2: information: Include file: "features/FeatureExtractor.hpp" not found. [missingInclude]
+#include "features/FeatureExtractor.hpp"
+ ^
+src/control/TickerController.hpp:6:2: information: Include file: "signals/DensityDetector.hpp" not found. [missingInclude]
+#include "signals/DensityDetector.hpp"
+ ^
+src/control/TickerController.hpp:7:2: information: Include file: "signals/IcebergDetector.hpp" not found. [missingInclude]
+#include "signals/IcebergDetector.hpp"
+ ^
+src/control/TickerController.hpp:8:2: information: Include file: "signals/TapeAnalyzer.hpp" not found. [missingInclude]
+#include "signals/TapeAnalyzer.hpp"
+ ^
+src/control/TickerController.hpp:9:2: information: Include file: "signals/LevelDetector.hpp" not found. [missingInclude]
+#include "signals/LevelDetector.hpp"
+ ^
+src/control/TickerController.hpp:10:2: information: Include file: "signals/ApproachAnalyzer.hpp" not found. [missingInclude]
+#include "signals/ApproachAnalyzer.hpp"
+ ^
+src/control/TickerController.hpp:11:2: information: Include file: "signals/LeaderSignal.hpp" not found. [missingInclude]
+#include "signals/LeaderSignal.hpp"
+ ^
+src/transport/MarketDataFeed.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/transport/MetaScalpCodec.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/transport/IOrderGateway.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/transport/FinresHandler.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/transport/ClusterSnapshotClient.hpp:4:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/transport/external/BinanceFundingClient.hpp:3:2: information: Include file: "transport/external/IExternalFeed.hpp" not found. [missingInclude]
+#include "transport/external/IExternalFeed.hpp"
+ ^
+src/transport/external/BinanceFundingClient.hpp:4:2: information: Include file: "transport/IHttpClient.hpp" not found. [missingInclude]
+#include "transport/IHttpClient.hpp"
+ ^
+src/transport/external/ExternalFeedRegistry.hpp:3:2: information: Include file: "transport/external/IExternalFeed.hpp" not found. [missingInclude]
+#include "transport/external/IExternalFeed.hpp"
+ ^
+src/transport/external/FeedStalenessMonitor.hpp:4:2: information: Include file: "control/KillSwitch.hpp" not found. [missingInclude]
+#include "control/KillSwitch.hpp"
+ ^
+src/transport/external/FeedStalenessMonitor.hpp:5:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/marketdata/ClusterSnapshot.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/marketdata/ClusterSnapshot.hpp:4:2: information: Include file: "transport/ClusterSnapshotClient.hpp" not found. [missingInclude]
+#include "transport/ClusterSnapshotClient.hpp"
+ ^
+src/universe/UniverseFilters.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/universe/TickerUniverse.hpp:4:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/strategy/IStrategy.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/strategy/IStrategy.hpp:4:2: information: Include file: "features/FeatureFrame.hpp" not found. [missingInclude]
+#include "features/FeatureFrame.hpp"
+ ^
+src/strategy/IStrategy.hpp:5:2: information: Include file: "signals/Signal.hpp" not found. [missingInclude]
+#include "signals/Signal.hpp"
+ ^
+src/strategy/TradePlan.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/strategy/TradePlan.hpp:4:2: information: Include file: "signals/Signal.hpp" not found. [missingInclude]
+#include "signals/Signal.hpp"
+ ^
+src/strategy/StrategyEngine.hpp:4:2: information: Include file: "signals/SignalBus.hpp" not found. [missingInclude]
+#include "signals/SignalBus.hpp"
+ ^
+src/strategy/StrategyContext.hpp:3:2: information: Include file: "features/FeatureFrame.hpp" not found. [missingInclude]
+#include "features/FeatureFrame.hpp"
+ ^
+src/strategy/StrategyContext.hpp:4:2: information: Include file: "signals/Signal.hpp" not found. [missingInclude]
+#include "signals/Signal.hpp"
+ ^
+src/risk/AccountState.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/risk/RiskManager.hpp:4:2: information: Include file: "strategy/TradePlan.hpp" not found. [missingInclude]
+#include "strategy/TradePlan.hpp"
+ ^
+src/risk/RiskManager.hpp:5:2: information: Include file: "risk/NewsCalendar.hpp" not found. [missingInclude]
+#include "risk/NewsCalendar.hpp"
+ ^
+src/risk/RiskManager.hpp:6:2: information: Include file: "universe/TickerUniverse.hpp" not found. [missingInclude]
+#include "universe/TickerUniverse.hpp"
+ ^
+src/risk/AccountStatePersister.hpp:4:2: information: Include file: "trading/ActiveTrade.hpp" not found. [missingInclude]
+#include "trading/ActiveTrade.hpp"
+ ^
+src/metrics/AlertWebhook.hpp:3:2: information: Include file: "transport/IHttpClient.hpp" not found. [missingInclude]
+#include "transport/IHttpClient.hpp"
+ ^
+src/marketdata/ClusterSnapshot.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/marketdata/ClusterSnapshot.cpp:3:2: information: Include file: "transport/external/ExternalIoContext.hpp" not found. [missingInclude]
+#include "transport/external/ExternalIoContext.hpp"
+ ^
+src/marketdata/LeaderTracker.hpp:4:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/marketdata/LeaderTracker.hpp:5:2: information: Include file: "numeric/WelfordCorrelation.hpp" not found. [missingInclude]
+#include "numeric/WelfordCorrelation.hpp"
+ ^
+src/marketdata/LeaderTracker.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/marketdata/OrderBook.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/marketdata/OrderBook.hpp:4:2: information: Include file: "numeric/FixedPoint.hpp" not found. [missingInclude]
+#include "numeric/FixedPoint.hpp"
+ ^
+src/marketdata/OrderBook.cpp:3:2: information: Include file: "perf/SimdOps.hpp" not found. [missingInclude]
+#include "perf/SimdOps.hpp"
+ ^
+src/marketdata/TradeStream.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/marketdata/TradeStream.hpp:4:2: information: Include file: "numeric/Welford.hpp" not found. [missingInclude]
+#include "numeric/Welford.hpp"
+ ^
+src/marketdata/TradeStream.hpp:5:2: information: Include file: "numeric/Kahan.hpp" not found. [missingInclude]
+#include "numeric/Kahan.hpp"
+ ^
+src/marketdata/TradeStream.hpp:6:2: information: Include file: "numeric/TDigest.hpp" not found. [missingInclude]
+#include "numeric/TDigest.hpp"
+ ^
+src/metrics/AlertWebhook.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/metrics/MetricsExporter.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/perf/CpuPinning.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/perf/TimestampMonitor.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/perf/TimestampMonitor.hpp:4:2: information: Include file: "numeric/HdrHistogramWrapper.hpp" not found. [missingInclude]
+#include "numeric/HdrHistogramWrapper.hpp"
+ ^
+src/perf/TimestampMonitor.hpp:5:2: information: Include file: "transport/MarketDataFeed.hpp" not found. [missingInclude]
+#include "transport/MarketDataFeed.hpp"
+ ^
+src/perf/TimestampMonitor.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/risk/AccountStatePersister.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/risk/NewsCalendar.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/risk/NewsCalendar.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/risk/NewsCalendar.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/risk/RiskManager.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/risk/RiskManager.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/signals/IDetector.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/signals/IDetector.hpp:4:2: information: Include file: "features/FeatureFrame.hpp" not found. [missingInclude]
+#include "features/FeatureFrame.hpp"
+ ^
+src/signals/Signal.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/signals/ApproachAnalyzer.hpp:5:2: information: Include file: "marketdata/OrderBook.hpp" not found. [missingInclude]
+#include "marketdata/OrderBook.hpp"
+ ^
+src/signals/ApproachAnalyzer.hpp:6:2: information: Include file: "signals/LevelDetector.hpp" not found. [missingInclude]
+#include "signals/LevelDetector.hpp"
+ ^
+src/signals/ApproachAnalyzer.hpp:7:2: information: Include file: "numeric/Hmm.hpp" not found. [missingInclude]
+#include "numeric/Hmm.hpp"
+ ^
+src/signals/ApproachAnalyzer.hpp:8:2: information: Include file: "numeric/ZigZag.hpp" not found. [missingInclude]
+#include "numeric/ZigZag.hpp"
+ ^
+src/signals/DensityDetector.hpp:5:2: information: Include file: "marketdata/OrderBook.hpp" not found. [missingInclude]
+#include "marketdata/OrderBook.hpp"
+ ^
+src/signals/DensityDetector.hpp:6:2: information: Include file: "numeric/Dema.hpp" not found. [missingInclude]
+#include "numeric/Dema.hpp"
+ ^
+src/signals/DensityDetector.hpp:7:2: information: Include file: "universe/TickerUniverse.hpp" not found. [missingInclude]
+#include "universe/TickerUniverse.hpp"
+ ^
+src/signals/DensityDetector.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/signals/DensityDetector.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/signals/IcebergDetector.hpp:5:2: information: Include file: "marketdata/OrderBook.hpp" not found. [missingInclude]
+#include "marketdata/OrderBook.hpp"
+ ^
+src/signals/IcebergDetector.hpp:6:2: information: Include file: "universe/TickerUniverse.hpp" not found. [missingInclude]
+#include "universe/TickerUniverse.hpp"
+ ^
+src/signals/IcebergDetector.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/signals/IcebergDetector.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/signals/LeaderSignal.hpp:5:2: information: Include file: "marketdata/LeaderTracker.hpp" not found. [missingInclude]
+#include "marketdata/LeaderTracker.hpp"
+ ^
+src/signals/LevelDetector.hpp:5:2: information: Include file: "marketdata/OrderBook.hpp" not found. [missingInclude]
+#include "marketdata/OrderBook.hpp"
+ ^
+src/signals/LevelDetector.hpp:6:2: information: Include file: "marketdata/ClusterSnapshot.hpp" not found. [missingInclude]
+#include "marketdata/ClusterSnapshot.hpp"
+ ^
+src/signals/LevelDetector.hpp:7:2: information: Include file: "numeric/Clustering.hpp" not found. [missingInclude]
+#include "numeric/Clustering.hpp"
+ ^
+src/signals/LevelDetector.hpp:8:2: information: Include file: "numeric/Kde.hpp" not found. [missingInclude]
+#include "numeric/Kde.hpp"
+ ^
+src/signals/LevelDetector.hpp:9:2: information: Include file: "numeric/Dema.hpp" not found. [missingInclude]
+#include "numeric/Dema.hpp"
+ ^
+src/signals/LevelDetector.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/signals/LevelDetector.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/signals/SignalLevelBridge.hpp:3:2: information: Include file: "transport/SignalLevelGateway.hpp" not found. [missingInclude]
+#include "transport/SignalLevelGateway.hpp"
+ ^
+src/signals/SignalLevelBridge.hpp:4:2: information: Include file: "signals/SignalBus.hpp" not found. [missingInclude]
+#include "signals/SignalBus.hpp"
+ ^
+src/signals/SignalLevelBridge.hpp:5:2: information: Include file: "signals/LevelDetector.hpp" not found. [missingInclude]
+#include "signals/LevelDetector.hpp"
+ ^
+src/signals/SignalLevelBridge.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/signals/TapeAnalyzer.hpp:5:2: information: Include file: "marketdata/OrderBook.hpp" not found. [missingInclude]
+#include "marketdata/OrderBook.hpp"
+ ^
+src/signals/TapeAnalyzer.hpp:6:2: information: Include file: "marketdata/TradeStream.hpp" not found. [missingInclude]
+#include "marketdata/TradeStream.hpp"
+ ^
+src/signals/TapeAnalyzer.hpp:7:2: information: Include file: "numeric/Cusum.hpp" not found. [missingInclude]
+#include "numeric/Cusum.hpp"
+ ^
+src/signals/TapeAnalyzer.hpp:8:2: information: Include file: "numeric/Ema.hpp" not found. [missingInclude]
+#include "numeric/Ema.hpp"
+ ^
+src/signals/TapeAnalyzer.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/strategy/BounceFromDensity.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/strategy/BreakoutEatThrough.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/trading/OrderReconciliator.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/trading/OrderReconciliator.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/trading/OrderReconciliator.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/transport/BeastWsClient.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/BeastWsClient.cpp:3:2: information: Include file: "metrics/MetricsRegistry.hpp" not found. [missingInclude]
+#include "metrics/MetricsRegistry.hpp"
+ ^
+src/transport/ClusterSnapshotClient.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/CurlHttpClient.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/MarketDataFeed.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/MetaScalpCodec.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/MetaScalpCodec.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/transport/MetaScalpDiscovery.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/NotificationFeed.hpp:4:2: information: Include file: "universe/TickerUniverse.hpp" not found. [missingInclude]
+#include "universe/TickerUniverse.hpp"
+ ^
+src/transport/NotificationFeed.hpp:5:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/transport/NotificationFeed.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/NotificationFeed.cpp:4:2: information: Include file: "metrics/MetricsRegistry.hpp" not found. [missingInclude]
+#include "metrics/MetricsRegistry.hpp"
+ ^
+src/transport/OrderGateway.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/ReplayFeed.cpp:4:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/ReplayFeed.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/transport/SignalLevelGateway.hpp:4:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/transport/SignalLevelGateway.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/external/BinanceFundingClient.cpp:2:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/transport/external/BinanceFundingClient.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/universe/ConnectionSelector.hpp:3:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/universe/OrderbookSettingsLoader.hpp:3:2: information: Include file: "transport/IHttpClient.hpp" not found. [missingInclude]
+#include "transport/IHttpClient.hpp"
+ ^
+src/universe/OrderbookSettingsLoader.hpp:4:2: information: Include file: "domain/Types.hpp" not found. [missingInclude]
+#include "domain/Types.hpp"
+ ^
+src/universe/OrderbookSettingsLoader.cpp:2:2: information: Include file: "transport/MetaScalpCodec.hpp" not found. [missingInclude]
+#include "transport/MetaScalpCodec.hpp"
+ ^
+src/universe/OrderbookSettingsLoader.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/universe/TickerUniverse.cpp:3:2: information: Include file: "logger/Logger.hpp" not found. [missingInclude]
+#include "logger/Logger.hpp"
+ ^
+src/universe/TickerUniverse.cpp:0:0: information: Limiting analysis of branches. Use --check-level=exhaustive to analyze all branches. [normalCheckLevelMaxBranches]
+
+^
+src/control/ClockDriftMonitor.cpp:22:25: style: The function 'set_kill_switch' is never used. [unusedFunction]
+void ClockDriftMonitor::set_kill_switch(KillSwitchCallback cb) {
+                        ^
+src/control/ClockDriftMonitor.cpp:119:28: style: The function 'drift_ms' is never used. [unusedFunction]
+int64_t ClockDriftMonitor::drift_ms() const {
+                           ^
+src/control/DashboardServer.cpp:306:30: style: The function 'serialize_state' is never used. [unusedFunction]
+std::string DashboardServer::serialize_state() const {
+                             ^
+src/control/DashboardServer.cpp:311:30: style: The function 'session_count' is never used. [unusedFunction]
+std::size_t DashboardServer::session_count() const {
+                             ^
+src/control/KillSwitch.cpp:69:18: style: The function 'reset_for_test' is never used. [unusedFunction]
+void KillSwitch::reset_for_test() {
+                 ^
+src/executor/LiveExecutor.hpp:46:10: style: The function 'set_alert_callback' is never used. [unusedFunction]
+    void set_alert_callback(std::function<void(const std::string&)> cb) { alert_cb_ = cb; }
+         ^
+src/executor/LiveExecutor.hpp:48:55: style: The function 'active_trades' is never used. [unusedFunction]
+    const std::map<Ticker, std::vector<ActiveTrade>>& active_trades() const { return trades_; }
+                                                      ^
+src/executor/PaperExecutor.hpp:38:39: style: The function 'positions' is never used. [unusedFunction]
+    const std::map<Ticker, Position>& positions() const { return positions_; }
+                                      ^
+src/features/FeatureExtractor.hpp:44:25: style: The function 'book_to_feature_hist' is never used. [unusedFunction]
+    const HdrHistogram& book_to_feature_hist() const noexcept { return hist_book_; }
+                        ^
+src/features/FeatureExtractor.hpp:45:25: style: The function 'feature_total_hist' is never used. [unusedFunction]
+    const HdrHistogram& feature_total_hist()   const noexcept { return hist_total_; }
+                        ^
+src/features/FeatureExtractor.hpp:47:17: style: The function 'history_size' is never used. [unusedFunction]
+    std::size_t history_size() const noexcept { return mid_history_.size(); }
+                ^
+src/logger/TradeJournal.cpp:30:20: style: The function 'log_entry' is never used. [unusedFunction]
+void TradeJournal::log_entry(const Entry& entry) {
+                   ^
+src/logger/TradeJournal.cpp:55:48: style: The function 'get_recent_entries' is never used. [unusedFunction]
+std::vector<TradeJournal::Entry> TradeJournal::get_recent_entries(size_t count) {
+                                               ^
+src/marketdata/ClusterSnapshot.cpp:38:30: style: The function 'set_on_snapshot' is never used. [unusedFunction]
+void ClusterSnapshotManager::set_on_snapshot(OnSnapshot cb) {
+                             ^
+src/marketdata/ClusterSnapshot.cpp:42:30: style: The function 'refresh' is never used. [unusedFunction]
+void ClusterSnapshotManager::refresh(const std::vector<Ticker>& active_tickers) {
+                             ^
+src/marketdata/KalmanLagEstimator.hpp:43:12: style: The function 'drift_ms_per_s' is never used. [unusedFunction]
+    double drift_ms_per_s() const noexcept { return x_[1]; }
+           ^
+src/marketdata/KalmanLagEstimator.hpp:44:12: style: The function 'variance_lag' is never used. [unusedFunction]
+    double variance_lag()  const noexcept { return p_[0][0]; }
+           ^
+src/marketdata/LeaderTracker.cpp:57:21: style: The function 'reset_cusum' is never used. [unusedFunction]
+void LeaderTracker::reset_cusum() noexcept {
+                    ^
+src/marketdata/LeaderTracker.hpp:63:17: style: The function 'sample_count' is never used. [unusedFunction]
+    std::size_t sample_count() const noexcept { return n_; }
+                ^
+src/marketdata/LeaderTracker.hpp:59:10: style: The function 'decorrelation_alarm' is never used. [unusedFunction]
+    bool decorrelation_alarm() const noexcept { return cusum_alarm_; }
+         ^
+src/marketdata/OrderBook.cpp:25:17: style: The function 'apply_snapshot' is never used. [unusedFunction]
+void OrderBook::apply_snapshot(const OrderBookSnapshot& snap) {
+                ^
+src/marketdata/OrderBook.cpp:52:17: style: The function 'apply_update_batch' is never used. [unusedFunction]
+void OrderBook::apply_update_batch(const std::vector<PriceLevel>& changes) {
+                ^
+src/marketdata/OrderBook.cpp:103:34: style: The function 'spread' is never used. [unusedFunction]
+std::optional<double> OrderBook::spread() const noexcept {
+                                 ^
+src/marketdata/OrderBook.cpp:141:19: style: The function 'volume_at_range' is never used. [unusedFunction]
+double OrderBook::volume_at_range(double lo, double hi) const noexcept {
+                  ^
+src/marketdata/OrderBook.cpp:163:24: style: The function 'bid_levels' is never used. [unusedFunction]
+std::size_t OrderBook::bid_levels() const noexcept { return bids_.size(); }
+                       ^
+src/marketdata/OrderBook.cpp:164:24: style: The function 'ask_levels' is never used. [unusedFunction]
+std::size_t OrderBook::ask_levels() const noexcept { return asks_.size(); }
+                       ^
+src/marketdata/OrderBook.cpp:166:17: style: The function 'is_consistent' is never used. [unusedFunction]
+bool OrderBook::is_consistent(const OrderBookSnapshot& snap, int max_diff) const noexcept {
+                ^
+src/marketdata/OrderBook.hpp:59:13: style: The function 'update_count' is never used. [unusedFunction]
+    int64_t update_count() const noexcept { return update_count_; }
+            ^
+src/marketdata/OrderBook.hpp:61:13: style: The function 'size_increment' is never used. [unusedFunction]
+    double  size_increment() const noexcept { return size_increment_; }
+            ^
+src/marketdata/OrderBook.hpp:62:13: style: The function 'inv_price_increment' is never used. [unusedFunction]
+    double  inv_price_increment() const noexcept { return inv_price_increment_; }
+            ^
+src/marketdata/OrderBook.hpp:63:13: style: The function 'inv_size_increment' is never used. [unusedFunction]
+    double  inv_size_increment() const noexcept { return inv_size_increment_; }
+            ^
+src/metrics/AlertWebhook.cpp:10:20: style: The function 'send_alert' is never used. [unusedFunction]
+void AlertWebhook::send_alert(const std::string& message) {
+                   ^
+src/metrics/MetricsRegistry.cpp:23:23: style: The function 'gauge_set' is never used. [unusedFunction]
+void MetricsRegistry::gauge_set(const std::string& name, double val, const std::map<std::string, std::string>& labels) {
+                      ^
+src/perf/CpuPinning.cpp:13:6: style: The function 'pin_thread_to_cpu' is never used. [unusedFunction]
+bool pin_thread_to_cpu(int cpu_id) {
+     ^
+src/perf/SimdOps.cpp:26:8: style: The function 'dot_product' is never used. [unusedFunction]
+double dot_product(const double* a, const double* b, size_t n) {
+       ^
+src/perf/SimdOps.cpp:45:6: style: The function 'prefix_sum' is never used. [unusedFunction]
+void prefix_sum(const double* data, double* out, size_t n) {
+     ^
+src/perf/TimestampMonitor.cpp:83:27: style: The function 'latency_p99_us' is never used. [unusedFunction]
+int64_t TimestampMonitor::latency_p99_us() const {
+                          ^
+src/perf/TimestampMonitor.cpp:88:27: style: The function 'latency_p50_us' is never used. [unusedFunction]
+int64_t TimestampMonitor::latency_p50_us() const {
+                          ^
+src/perf/TimestampMonitor.cpp:93:26: style: The function 'jitter_us' is never used. [unusedFunction]
+double TimestampMonitor::jitter_us() const {
+                         ^
+src/risk/AccountStatePersister.cpp:82:6: style: The function 'to_json' is never used. [unusedFunction]
+void to_json(nlohmann::json& j, const AccountState& s) {
+     ^
+src/risk/AccountStatePersister.cpp:96:6: style: The function 'from_json' is never used. [unusedFunction]
+void from_json(const nlohmann::json& j, AccountState& s) {
+     ^
+src/risk/NewsCalendar.cpp:201:20: style: The function 'start_watching' is never used. [unusedFunction]
+void NewsCalendar::start_watching() {
+                   ^
+src/risk/RiskManager.cpp:234:19: style: The function 'record_trade_end' is never used. [unusedFunction]
+void RiskManager::record_trade_end(bool is_loss,
+                  ^
+src/risk/TradingDay.hpp:21:50: style: The function 'start_of_day_utc' is never used. [unusedFunction]
+    static std::chrono::system_clock::time_point start_of_day_utc() {
+                                                 ^
+src/signals/ApproachAnalyzer.cpp:58:46: style: The function 'analyze' is never used. [unusedFunction]
+ApproachAnalyzer::Analysis ApproachAnalyzer::analyze(double level_price,
+                                             ^
+src/signals/LeaderSignal.cpp:29:20: style: The function 'on_leader_frame' is never used. [unusedFunction]
+void LeaderSignal::on_leader_frame(const FeatureFrame& frame) {
+                   ^
+src/signals/LevelDetector.cpp:38:21: style: The function 'rebuild' is never used. [unusedFunction]
+void LevelDetector::rebuild() {
+                    ^
+src/signals/LevelDetector.hpp:66:31: style: The function 'levels' is never used. [unusedFunction]
+    const std::vector<Level>& levels() const { return active_levels_; }
+                              ^
+src/signals/SignalLevelBridge.cpp:17:25: style: The function 'on_level_formed' is never used. [unusedFunction]
+void SignalLevelBridge::on_level_formed(const Ticker& ticker, double price) {
+                        ^
+src/signals/SignalLevelBridge.cpp:38:25: style: The function 'on_server_trigger' is never used. [unusedFunction]
+void SignalLevelBridge::on_server_trigger(int id, const Ticker& ticker, double price) {
+                        ^
+src/strategy/StrategyContext.hpp:40:10: style: The function 'has_recent_signal' is never used. [unusedFunction]
+    bool has_recent_signal(SignalKind kind, std::chrono::seconds max_age) const {
+         ^
+src/trading/OrderReconciliator.cpp:39:26: style: The function 'resolve_order' is never used. [unusedFunction]
+bool OrderReconciliator::resolve_order(int64_t local_order_id, int64_t server_order_id) {
+                         ^
+src/trading/OrderReconciliator.cpp:205:28: style: The function 'pending_count' is never used. [unusedFunction]
+size_t OrderReconciliator::pending_count() const {
+                           ^
+src/transport/BeastWsClient.hpp:40:10: style: The function 'is_ssl' is never used. [unusedFunction]
+    bool is_ssl() const { return m_use_ssl; }
+         ^
+src/transport/FinresHandler.cpp:5:21: style: The function 'handle_update' is never used. [unusedFunction]
+void FinresHandler::handle_update(const FinresUpdate& update) {
+                    ^
+src/transport/FinresHandler.cpp:20:21: style: The function 'reset_day_start' is never used. [unusedFunction]
+void FinresHandler::reset_day_start() {
+                    ^
+src/transport/FinresHandler.cpp:27:23: style: The function 'get_realized_pnl' is never used. [unusedFunction]
+double FinresHandler::get_realized_pnl(int connection_id) const {
+                      ^
+src/transport/FinresHandler.cpp:36:21: style: The function 'is_ready' is never used. [unusedFunction]
+bool FinresHandler::is_ready(int connection_id) const {
+                    ^
+src/transport/NotificationFeed.hpp:31:14: style: The function 'dropped_wrong_connection_total' is never used. [unusedFunction]
+    uint64_t dropped_wrong_connection_total() const noexcept {
+             ^
+src/transport/OrderGateway.hpp:26:10: style: The function 'set_port' is never used. [unusedFunction]
+    void set_port(int port) { m_port = port; }
+         ^
+src/transport/ReplayFeed.cpp:28:18: style: The function 'remove_listener' is never used. [unusedFunction]
+void ReplayFeed::remove_listener(IMarketDataListener* listener) {
+                 ^
+src/transport/ReplayFeed.hpp:50:12: style: The function 'running' is never used. [unusedFunction]
+    bool   running() const { return running_.load(); }
+           ^
+src/transport/external/BinanceFundingClient.cpp:45:28: style: The function 'remove_ticker' is never used. [unusedFunction]
+void BinanceFundingClient::remove_ticker(const std::string& ticker) {
+                           ^
+src/transport/external/ExternalFeedRegistry.hpp:27:24: style: The function 'get_feed' is never used. [unusedFunction]
+    std::shared_ptr<T> get_feed(FeedKind kind) const {
+                       ^
+src/transport/external/FeedStalenessMonitor.hpp:18:17: style: The function 'check_all' is never used. [unusedFunction]
+    static void check_all(const std::map<std::string, Config>& configs) {
+                ^
+src/universe/ConnectionSelector.cpp:12:40: style: The function 'select' is never used. [unusedFunction]
+std::optional<int> ConnectionSelector::select(
+                                       ^
+src/universe/TickerUniverse.cpp:15:22: style: The function 'set_stats_lookup' is never used. [unusedFunction]
+void TickerUniverse::set_stats_lookup(StatsLookup fn) { stats_lookup_ = std::move(fn); }
+                     ^
+src/universe/TickerUniverse.cpp:100:44: style: The function 'active' is never used. [unusedFunction]
+const std::vector<Ticker>& TickerUniverse::active() const { return active_; }
+                                           ^
+src/universe/TickerUniverse.cpp:101:29: style: The function 'pool_size' is never used. [unusedFunction]
+std::size_t TickerUniverse::pool_size() const noexcept { return active_.size(); }
+                            ^
+src/universe/TickerUniverse.cpp:103:22: style: The function 'is_strategy_enabled' is never used. [unusedFunction]
+bool TickerUniverse::is_strategy_enabled(const Ticker& ticker,
+                     ^
+src/universe/TickerUniverse.cpp:111:42: style: The function 'enabled_strategies' is never used. [unusedFunction]
+std::vector<std::string> TickerUniverse::enabled_strategies(const Ticker& ticker) const {
+                                         ^
+src/universe/TickerUniverse.cpp:144:22: style: The function 'update_orderbook_settings' is never used. [unusedFunction]
+void TickerUniverse::update_orderbook_settings(const OrderbookSettings& settings) {
+                     ^
+src/universe/TickerUniverse.cpp:162:22: style: The function 'cache_meta' is never used. [unusedFunction]
+void TickerUniverse::cache_meta(const Ticker& ticker, const TickerMeta& meta) {
+                     ^
+nofile:0:0: information: Active checkers: 173/975 (use --checkers-report=<filename> to see details) [checkersReport]
+

@@ -18,6 +18,12 @@ void KalmanLagEstimator::reset() {
 }
 
 void KalmanLagEstimator::update(double dt, double z) {
+    // T4-MATH: Guard against extreme time jumps or negative dt (#140)
+    if (dt <= 0.0 || dt > 3600.0) {
+        if (dt > 3600.0) reset();
+        return;
+    }
+
     // ----- Predict -----
     // x = F x   with F = [[1, dt],[0,1]]
     x_[0] += dt * x_[1];
@@ -42,7 +48,10 @@ void KalmanLagEstimator::update(double dt, double z) {
     // H = [1, 0]; innovation y = z - H x ; S = H P H^T + R
     const double y_inno = z - x_[0];
     const double s      = p_[0][0] + cfg_.r_obs;
-    if (s <= 0.0) return;
+    
+    // T4-MATH: Check for singular S or extreme innovation (outlier)
+    if (s < 1e-9 || std::abs(y_inno) > 5000.0) return;
+
     // K = P H^T / S = [P00, P10]^T / S
     const double k0 = p_[0][0] / s;
     const double k1 = p_[1][0] / s;
@@ -55,10 +64,15 @@ void KalmanLagEstimator::update(double dt, double z) {
     const double new01 = (1.0 - k0) * p_[0][1];
     const double new10 = p_[1][0] - k1 * p_[0][0];
     const double new11 = p_[1][1] - k1 * p_[0][1];
-    p_[0][0] = new00;
-    p_[0][1] = new01;
-    p_[1][0] = new10;
-    p_[1][1] = new11;
+    
+    // T4-MATH: Force symmetry and enforce positive-definiteness
+    p_[0][0] = std::max(1e-6, new00);
+    p_[1][1] = std::max(1e-6, new11);
+    p_[0][1] = p_[1][0] = 0.5 * (new01 + new10);
+    
+    // T4-MATH: Clamp state to sane physical limits (ms and ms/sec)
+    x_[0] = std::clamp(x_[0], -1000.0, 10000.0);
+    x_[1] = std::clamp(x_[1], -100.0, 100.0);
 }
 
 double KalmanLagEstimator::confidence() const noexcept {

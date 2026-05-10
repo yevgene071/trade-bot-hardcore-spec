@@ -19,9 +19,9 @@ std::string TradeJournal::get_current_date_str_() {
     auto in_time_t = std::chrono::system_clock::to_time_t(now);
     std::tm buf;
 #ifdef _WIN32
-    localtime_s(&buf, &in_time_t);
+    gmtime_s(&buf, &in_time_t);
 #else
-    localtime_r(&in_time_t, &buf);
+    gmtime_r(&in_time_t, &buf);
 #endif
     std::stringstream ss;
     ss << std::put_time(&buf, "%Y-%m-%d");

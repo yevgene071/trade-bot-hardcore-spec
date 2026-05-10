@@ -1,6 +1,16 @@
 # CHANGELOG
 
-## [Unreleased]
+## [Unreleased] - 2026-05-10
+### Performance & Reliability (T4-PERF, T4-LEADER-FIX)
+- **Transport Layer:** Added `m_ws_mutex` to `BeastWsClient` for thread-safe WebSocket stream access. Fixed dereference bug in `MarketDataFeed` error handling.
+- **OrderBook Optimization:** Implemented pre-partitioned parallel batch updates for batches ≥ 64 levels. Optimized depth and range volume calculations by summing raw ticks before final scaling.
+- **IcebergDetector:** Optimized to reuse member maps for volume calculation, eliminating frequent heap allocations in the hot path.
+- **StrategyEngine:** Refactored routing to use ticker-based `unordered_map` instead of broadcast, reducing redundant calls by O(N).
+- **FeatureExtractor:** Optimized volatility calculation by caching `log_mid`, replacing expensive `std::log()` calls with subtraction in the loop.
+- **Leader-Follower Coordination:** Implemented multi-pass tick logic in `BotApp` to ensure leader data (BTC) is processed and broadcast to followers (alts) before they tick. Integrated `LeaderTracker` and `LeaderSignal` into `TickerController`.
+- **Dashboard Optimization:** Added `session_count()` check to skip expensive state serialization when no active monitoring sessions exist.
+- **TickerController:** Implemented lazy extraction logic based on dirty flags and stale timeouts.
+
 - T4-METRICS: Реализована система мониторинга (Prometheus exporter) и оповещений (Alert Webhook).
 - T4-DASHBOARD: Реализован встроенный Web-дашборд для мониторинга PnL, позиций и сигналов в реальном времени.
 - T4-RECOVERY: Реализована логика восстановления состояния при запуске (синхронизация позиций и ордеров с сервером).

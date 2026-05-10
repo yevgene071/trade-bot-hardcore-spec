@@ -48,8 +48,8 @@ public:
 
 private:
     Config cfg_;
-    double x_[2];      // state
-    double p_[2][2];   // covariance
+    double x_[2]{};      // state
+    double p_[2][2]{};   // covariance
 };
 
 }  // namespace trade_bot

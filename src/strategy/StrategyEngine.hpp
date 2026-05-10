@@ -34,7 +34,9 @@ public:
 
 private:
     SignalBus& bus_;
-    std::vector<std::unique_ptr<IStrategy>> strategies_;
+    // T4-PERF: Map strategies by ticker for efficient routing (#160)
+    std::unordered_map<Ticker, std::vector<std::unique_ptr<IStrategy>>> ticker_strategies_;
+    std::vector<std::unique_ptr<IStrategy>> global_strategies_;
     PlanCallback on_plan_;
 };
 

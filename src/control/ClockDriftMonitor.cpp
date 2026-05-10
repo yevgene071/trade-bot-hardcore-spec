@@ -77,9 +77,10 @@ std::optional<int64_t> ClockDriftMonitor::tick_once() {
 
     int64_t smoothed{};
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        // T4-CONCURRENCY: Use unique_lock to allow safe manual unlock/relock (#138)
+        std::unique_lock<std::mutex> lk(mtx_);
         smoothed = drift_ms_;
-        evaluate_thresholds_locked_();
+        evaluate_thresholds_locked_(lk);
     }
     return smoothed;
 }
@@ -96,17 +97,17 @@ void ClockDriftMonitor::update_average_(int64_t sample) {
     drift_ms_ = sum / static_cast<int64_t>(window_.size());
 }
 
-void ClockDriftMonitor::evaluate_thresholds_locked_() {
+void ClockDriftMonitor::evaluate_thresholds_locked_(std::unique_lock<std::mutex>& lk) {
     const int64_t abs_drift = std::abs(drift_ms_);
     if (abs_drift >= cfg_.max_clock_drift_ms) {
         if (!kill_triggered_ && kill_cb_) {
             kill_triggered_ = true;
             // run callback outside the lock to avoid reentrancy hazards
             auto cb = kill_cb_;
-            mtx_.unlock();
+            lk.unlock();
             cb("ClockDrift exceeds " + std::to_string(cfg_.max_clock_drift_ms) +
                " ms (smoothed=" + std::to_string(drift_ms_) + ")");
-            mtx_.lock();
+            lk.lock();
         }
         LOG_ERROR("ClockDriftMonitor: drift={} ms exceeds max {} ms — kill triggered",
                   drift_ms_, cfg_.max_clock_drift_ms);

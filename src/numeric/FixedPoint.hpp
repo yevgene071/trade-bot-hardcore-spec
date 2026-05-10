@@ -14,11 +14,16 @@ struct PriceTick {
     int64_t ticks;
 
     static PriceTick from_price(double price, double increment) {
-        return { static_cast<int64_t>(std::round(price / increment)) };
+        if (!std::isfinite(price) || price <= 0) return {0};
+        // T4-MATH: Prevent overflow on extreme prices (#144)
+        double t = std::round(price / increment);
+        return { static_cast<int64_t>(std::clamp(t, 0.0, 1e15)) };
     }
 
     static PriceTick from_price_inv(double price, double inv_increment) {
-        return { static_cast<int64_t>(std::round(price * inv_increment)) };
+        if (!std::isfinite(price) || price <= 0) return {0};
+        double t = std::round(price * inv_increment);
+        return { static_cast<int64_t>(std::clamp(t, 0.0, 1e15)) };
     }
 
     double to_price(double increment) const {
@@ -44,11 +49,16 @@ struct SizeFix {
     int64_t raw;
 
     static SizeFix from_double(double size, double increment = 1e-8) {
-        return { static_cast<int64_t>(std::round(size / increment)) };
+        if (!std::isfinite(size) || size <= 0) return {0};
+        // T4-MATH: Prevent overflow on extreme sizes (#144)
+        double t = std::round(size / increment);
+        return { static_cast<int64_t>(std::clamp(t, 0.0, 1e15)) };
     }
 
     static SizeFix from_double_inv(double size, double inv_increment) {
-        return { static_cast<int64_t>(std::round(size * inv_increment)) };
+        if (!std::isfinite(size) || size <= 0) return {0};
+        double t = std::round(size * inv_increment);
+        return { static_cast<int64_t>(std::clamp(t, 0.0, 1e15)) };
     }
 
     double to_double(double increment = 1e-8) const {

@@ -172,8 +172,23 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     d.adjusted_size_coin = size_coin;
     d.risk_usd = size_coin * plan.entry_price * stop_dist_bps / 10000.0;
 
+    // T4-RISK: Price and Size Normalization (#131)
+    auto meta = universe_.meta(plan.ticker).value_or(TickerMeta{0.01, 1e-6, 0.0, 0.0});
+    if (meta.price_increment > 0.0 && meta.size_increment > 0.0) {
+        // Round size down to be safe
+        int64_t size_ticks = static_cast<int64_t>(std::floor(d.adjusted_size_coin / meta.size_increment + 1e-9));
+        d.adjusted_size_coin = static_cast<double>(size_ticks) * meta.size_increment;
+
+        // Verify min size
+        if (d.adjusted_size_coin < meta.min_size) {
+            d.reason = RejectReason::SizeBelowMinimum;
+            d.details = "Size " + std::to_string(d.adjusted_size_coin) + " < min " + std::to_string(meta.min_size);
+            return d;
+        }
+    }
+
     // R9. Margin
-    double required_margin = (size_coin * plan.entry_price) / cfg_.max_leverage;
+    double required_margin = (d.adjusted_size_coin * plan.entry_price) / cfg_.max_leverage;
     if (required_margin > state.free_balance_usd * cfg_.margin_safety_ratio) {
         d.reason = RejectReason::InsufficientMargin;
         d.details = "Insufficient margin";

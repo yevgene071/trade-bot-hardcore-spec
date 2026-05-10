@@ -50,6 +50,7 @@ private:
     struct MidSample {
         std::chrono::system_clock::time_point t;
         double mid;
+        double log_mid;
     };
 
     Ticker                  ticker_;

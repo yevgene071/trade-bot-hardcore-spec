@@ -31,70 +31,79 @@ public:
     };
 
     explicit ApproachHmm(Params params) : params_(std::move(params)) {
-        // Precompute 1/(σ·√(2π)) and 1/σ² per state per dimension
+        // T4-MATH: Precompute log-space constants to avoid exp() in inner loop (#155)
         for (size_t s = 0; s < kStates; ++s) {
+            log_start_probs_[s] = std::log(std::max(params_.start_probs[s], 1e-10));
+            for (size_t j = 0; j < kStates; ++j) {
+                log_trans_matrix_[s][j] = std::log(std::max(params_.trans_matrix[s][j], 1e-10));
+            }
             for (size_t i = 0; i < 3; ++i) {
                 double sigma = std::max(params_.emissions[s].stds[i], 1e-9);
-                inv_norm_[s][i] = 1.0 / (sigma * kSqrt2Pi);
-                inv_var_[s][i]  = 1.0 / std::max(sigma * sigma, 1e-6);
+                log_inv_norm_[s][i] = std::log(1.0 / (sigma * kSqrt2Pi));
+                inv_var_[s][i]      = 1.0 / (2.0 * sigma * sigma);
             }
         }
     }
 
-    /**
-     * Forward algorithm to compute state probabilities.
-     * obs: vector of [speed, pullbacks, dist]
-     */
     std::array<double, kStates> predict(const std::vector<std::array<double, 3>>& observations) const {
         if (observations.empty()) return params_.start_probs;
 
-        std::array<double, kStates> alpha;
+        std::array<double, kStates> log_alpha;
         
         // Initial step
         for (size_t s = 0; s < kStates; ++s) {
-            alpha[s] = params_.start_probs[s] * emission_prob_(s, observations[0]);
-        }
-        double sum = alpha[0] + alpha[1] + alpha[2];
-        if (sum > 0) {
-            double inv_sum = 1.0 / sum;
-            alpha[0] *= inv_sum; alpha[1] *= inv_sum; alpha[2] *= inv_sum;
+            log_alpha[s] = log_start_probs_[s] + log_emission_prob_(s, observations[0]);
         }
 
         // Recursive steps
         for (size_t t = 1; t < observations.size(); ++t) {
-            std::array<double, kStates> next_alpha;
-            // Manual unroll for kStates=3 to avoid inner_product/lambda overhead
+            std::array<double, kStates> next_log_alpha;
             for (size_t j = 0; j < kStates; ++j) {
-                double trans_sum = alpha[0] * params_.trans_matrix[0][j] +
-                                 alpha[1] * params_.trans_matrix[1][j] +
-                                 alpha[2] * params_.trans_matrix[2][j];
-                next_alpha[j] = trans_sum * emission_prob_(j, observations[t]);
+                // Log-sum-exp for transition
+                double max_a = -1e100;
+                for (size_t i = 0; i < kStates; ++i) {
+                    max_a = std::max(max_a, log_alpha[i] + log_trans_matrix_[i][j]);
+                }
+                double sum_exp = 0.0;
+                for (size_t i = 0; i < kStates; ++i) {
+                    sum_exp += std::exp(log_alpha[i] + log_trans_matrix_[i][j] - max_a);
+                }
+                next_log_alpha[j] = max_a + std::log(sum_exp) + log_emission_prob_(j, observations[t]);
             }
-            double next_sum = next_alpha[0] + next_alpha[1] + next_alpha[2];
-            if (next_sum > 0) {
-                double inv_sum = 1.0 / next_sum;
-                alpha[0] = next_alpha[0] * inv_sum;
-                alpha[1] = next_alpha[1] * inv_sum;
-                alpha[2] = next_alpha[2] * inv_sum;
-            }
+            log_alpha = next_log_alpha;
+            
+            // Normalize log_alpha to prevent drift
+            double max_val = *std::max_element(log_alpha.begin(), log_alpha.end());
+            for (double& a : log_alpha) a -= max_val;
         }
 
-        return alpha;
+        // Convert back to probabilities
+        std::array<double, kStates> probs;
+        double sum_exp = 0.0;
+        for (size_t s = 0; s < kStates; ++s) {
+            probs[s] = std::exp(log_alpha[s]);
+            sum_exp += probs[s];
+        }
+        if (sum_exp > 0) {
+            for (double& p : probs) p /= sum_exp;
+        }
+        return probs;
     }
 
 private:
-    double emission_prob_(size_t state, const std::array<double, 3>& obs) const {
-        const auto& e = params_.emissions[state];
-        double p = 1.0;
+    double log_emission_prob_(size_t state, const std::array<double, 3>& obs) const {
+        double lp = 0.0;
         for (size_t i = 0; i < 3; ++i) {
-            double diff = obs[i] - e.means[i];
-            p *= inv_norm_[state][i] * std::exp(-0.5 * diff * diff * inv_var_[state][i]);
+            double diff = obs[i] - params_.emissions[state].means[i];
+            lp += log_inv_norm_[state][i] - (diff * diff * inv_var_[state][i]);
         }
-        return std::max(p, 1e-10);
+        return lp;
     }
 
     Params params_;
-    std::array<std::array<double, 3>, kStates> inv_norm_{};
+    std::array<double, kStates> log_start_probs_{};
+    std::array<std::array<double, kStates>, kStates> log_trans_matrix_{};
+    std::array<std::array<double, 3>, kStates> log_inv_norm_{};
     std::array<std::array<double, 3>, kStates> inv_var_{};
 };
 

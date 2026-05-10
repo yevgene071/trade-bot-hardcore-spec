@@ -141,6 +141,11 @@ double MarketDataFeed::get_mark_price(const Ticker& ticker) const {
     return it != m_mark_price_cache.end() ? it->second : 0.0;
 }
 
+std::unordered_map<Ticker, double> MarketDataFeed::get_all_mark_prices() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_mark_price_cache;
+}
+
 void MarketDataFeed::start() {
     m_active = true;
     if (m_ws_client->is_connected()) {
@@ -183,26 +188,35 @@ void MarketDataFeed::resubscribe_all() {
     }
 }
 
-std::vector<IMarketDataListener*> MarketDataFeed::get_target_listeners(const Ticker& ticker) {
+std::shared_ptr<const MarketDataFeed::ListenerList> MarketDataFeed::get_target_listeners(const Ticker& ticker) {
     std::lock_guard<std::mutex> lock(m_mutex);
     
-    if (auto it = m_merged_cache.find(ticker); it != m_merged_cache.end()) {
+    auto it = m_merged_cache.find(ticker);
+    if (it != m_merged_cache.end()) {
         return it->second;
     }
 
-    std::vector<IMarketDataListener*> targets = m_listeners;
+    auto targets = std::make_shared<ListenerList>();
+    // Specific listeners first (e.g. TickerController which updates the book)
     if (!ticker.empty()) {
-        if (auto it = m_ticker_listeners.find(ticker); it != m_ticker_listeners.end()) {
-            for (auto* l : it->second) {
-                if (std::find(targets.begin(), targets.end(), l) == targets.end()) {
-                    targets.push_back(l);
-                }
+        auto tit = m_ticker_listeners.find(ticker);
+        if (tit != m_ticker_listeners.end()) {
+            for (auto* l : tit->second) {
+                targets->push_back(l);
             }
         }
     }
     
-    m_merged_cache[ticker] = targets;
-    return targets;
+    // Then global listeners (e.g. Executor)
+    for (auto* l : m_listeners) {
+        if (std::find(targets->begin(), targets->end(), l) == targets->end()) {
+            targets->push_back(l);
+        }
+    }
+    
+    auto shared_targets = std::shared_ptr<const ListenerList>(std::move(targets));
+    m_merged_cache[ticker] = shared_targets;
+    return shared_targets;
 }
 
 void MarketDataFeed::handle_message(const nlohmann::json& j) {
@@ -227,35 +241,35 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
             auto trades = MetaScalpCodec::parse_trade_update(data);
             Ticker ticker = from_ms(MetaScalpCodec::get_val<std::string>(data, api::fields::kTicker, ""));
             auto targets = get_target_listeners(ticker);
-            for (auto* l : targets) l->on_trades(ticker, trades);
+            for (auto* l : *targets) l->on_trades(ticker, trades);
         } else if (type == "orderbook_snapshot") {
             Ticker ticker = from_ms(MetaScalpCodec::get_val<std::string>(data, api::fields::kTicker, ""));
             auto snap = MetaScalpCodec::parse_orderbook_snapshot(data, ticker);
             auto targets = get_target_listeners(ticker);
-            for (auto* l : targets) l->on_orderbook_snapshot(snap);
+            for (auto* l : *targets) l->on_orderbook_snapshot(snap);
         } else if (type == "orderbook_update") {
             Ticker ticker = from_ms(MetaScalpCodec::get_val<std::string>(data, api::fields::kTicker, ""));
             auto upd = MetaScalpCodec::parse_orderbook_update(data, ticker);
             auto targets = get_target_listeners(ticker);
-            for (auto* l : targets) l->on_orderbook_update(upd);
+            for (auto* l : *targets) l->on_orderbook_update(upd);
         } else if (type == "order_update") {
             auto upd = MetaScalpCodec::parse_order_update(data);
             upd.ticker = from_ms(upd.ticker);
             auto targets = get_target_listeners(upd.ticker);
-            for (auto* l : targets) l->on_order_update(upd);
+            for (auto* l : *targets) l->on_order_update(upd);
         } else if (type == "position_update") {
             auto upd = MetaScalpCodec::parse_position_update(data);
             upd.ticker = from_ms(upd.ticker);
             auto targets = get_target_listeners(upd.ticker);
-            for (auto* l : targets) l->on_position_update(upd);
+            for (auto* l : *targets) l->on_position_update(upd);
         } else if (type == "balance_update") {
             auto upd = MetaScalpCodec::parse_balance_update(data);
             auto targets = get_target_listeners("");
-            for (auto* l : targets) l->on_balance_update(upd);
+            for (auto* l : *targets) l->on_balance_update(upd);
         } else if (type == "finres_update") {
             auto upd = MetaScalpCodec::parse_finres_update(data);
             auto targets = get_target_listeners("");
-            for (auto* l : targets) l->on_finres_update(upd);
+            for (auto* l : *targets) l->on_finres_update(upd);
         } else if (type == "funding_update") {
             // PascalCase fields per MetaScalp API
             Ticker ticker = from_ms(MetaScalpCodec::get_val<std::string>(data, "Ticker", ""));
@@ -281,7 +295,7 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
             std::string msg = MetaScalpCodec::get_val<std::string>(data, "Message", "Unknown error");
             LOG_ERROR("WS API error: {}", msg);
             auto targets = get_target_listeners("");
-            for (auto* l : targets) l->on_error(msg);
+            for (auto* l : *targets) l->on_error(msg);
         }
     } catch (const std::exception& e) {
         LOG_ERROR("Error handling WS message {}: {}", type, e.what());

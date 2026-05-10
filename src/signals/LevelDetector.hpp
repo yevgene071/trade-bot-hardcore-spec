@@ -92,7 +92,7 @@ private:
         double level_price;
         std::chrono::system_clock::time_point start_ts;
     };
-    absl::flat_hash_map<double, ApproachState> current_approaches_;
+    absl::flat_hash_map<PriceTick, ApproachState> current_approaches_;
 };
 
 } // namespace trade_bot

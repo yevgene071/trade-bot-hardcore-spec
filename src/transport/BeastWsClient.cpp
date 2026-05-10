@@ -14,9 +14,6 @@ BeastWsClient::BeastWsClient(net::io_context& ioc)
     , m_reconnect_timer(ioc)
     , m_ping_timer(ioc) {
     m_ctx.set_default_verify_paths();
-    // Default to verify_peer for security.
-    // In local environments where MetaScalp might use self-signed certs,
-    // the user should configure the context appropriately or use a config option.
     m_ctx.set_verify_mode(net::ssl::verify_peer);
 }
 
@@ -24,8 +21,6 @@ BeastWsClient::~BeastWsClient() {
     m_closing = true;
     m_reconnect_timer.cancel();
     m_ping_timer.cancel();
-    // Socket will be closed when m_ws is destroyed. 
-    // We can't use shared_from_this() here.
 }
 
 void BeastWsClient::connect(const std::string& url) {
@@ -62,6 +57,7 @@ void BeastWsClient::disconnect() {
     m_reconnect_timer.cancel();
     m_ping_timer.cancel();
 
+    std::lock_guard<std::mutex> lock(m_ws_mutex);
     if (m_ws && m_connected) {
         std::visit([self = shared_from_this()](auto& ws) {
             ws.async_close(websocket::close_code::normal, [self](beast::error_code ec) {
@@ -76,8 +72,9 @@ void BeastWsClient::disconnect() {
 
 void BeastWsClient::send(std::string_view message) {
     auto msg = std::string(message);
+    
+    std::lock_guard<std::mutex> ws_lock(m_ws_mutex);
     if (!m_ws) {
-        // Not yet connected — queue the message, it will be flushed on handshake
         std::lock_guard<std::mutex> lock(m_write_mutex);
         constexpr size_t kMaxQueueSize = 1000;
         if (m_write_queue.size() >= kMaxQueueSize) m_write_queue.pop();
@@ -90,14 +87,11 @@ void BeastWsClient::send(std::string_view message) {
         {
             std::lock_guard<std::mutex> lock(self->m_write_mutex);
             write_in_progress = !self->m_write_queue.empty();
-            
-            // Fix for #146: Bound the write queue to prevent OOM
             constexpr size_t kMaxQueueSize = 1000;
             if (self->m_write_queue.size() >= kMaxQueueSize) {
-                self->m_write_queue.pop(); // Drop oldest
-                LOG_WARN("BeastWsClient: write queue overflow, dropping oldest message");
+                self->m_write_queue.pop();
+                LOG_WARN("BeastWsClient: write queue overflow");
             }
-            
             self->m_write_queue.push(msg);
         }
 
@@ -118,12 +112,15 @@ void BeastWsClient::on_resolve(beast::error_code ec, tcp::resolver::results_type
         return;
     }
 
-    if (m_use_ssl) {
-        m_ws = std::make_unique<std::variant<plain_stream, ssl_stream>>(
-            std::in_place_type<ssl_stream>, net::make_strand(m_ioc), m_ctx);
-    } else {
-        m_ws = std::make_unique<std::variant<plain_stream, ssl_stream>>(
-            std::in_place_type<plain_stream>, net::make_strand(m_ioc));
+    {
+        std::lock_guard<std::mutex> lock(m_ws_mutex);
+        if (m_use_ssl) {
+            m_ws = std::make_unique<std::variant<plain_stream, ssl_stream>>(
+                std::in_place_type<ssl_stream>, net::make_strand(m_ioc), m_ctx);
+        } else {
+            m_ws = std::make_unique<std::variant<plain_stream, ssl_stream>>(
+                std::in_place_type<plain_stream>, net::make_strand(m_ioc));
+        }
     }
 
     std::visit([&](auto& ws) {
@@ -186,8 +183,6 @@ void BeastWsClient::on_handshake(beast::error_code ec) {
     schedule_ping();
     do_read();
     
-    // Flush pre-connection queue — release lock before calling do_write()
-    // to avoid deadlock (do_write also acquires m_write_mutex).
     bool has_queued = false;
     {
         std::lock_guard<std::mutex> lock(m_write_mutex);
@@ -203,6 +198,7 @@ void BeastWsClient::do_read() {
         ws.async_read(m_buffer, beast::bind_front_handler(&BeastWsClient::on_read, shared_from_this()));
     }, *m_ws);
 }
+
 void BeastWsClient::on_read(beast::error_code ec, std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
     if (ec) {
@@ -214,20 +210,13 @@ void BeastWsClient::on_read(beast::error_code ec, std::size_t bytes_transferred)
         return;
     }
 
-    LOG_TRACE("WS read {} bytes", bytes_transferred);
-
     if (m_on_message) {
         try {
             auto data = beast::buffers_to_string(m_buffer.data());
-            LOG_TRACE("WS raw message: {}", data);
-
-            // MetaScalp usually sends 1 JSON per WS frame. 
-            // If it ever sends NDJSON, we'd need a line-based splitter here.
             auto j = nlohmann::json::parse(data);
             m_on_message(j);
         } catch (const std::exception& e) {
-            LOG_ERROR("WS JSON parse error: {} | Raw data: {}", e.what(), 
-                      beast::buffers_to_string(m_buffer.data()));
+            LOG_ERROR("WS JSON parse error: {}", e.what());
         }
     }
 
@@ -236,15 +225,17 @@ void BeastWsClient::on_read(beast::error_code ec, std::size_t bytes_transferred)
 }
 
 void BeastWsClient::do_write() {
-    std::string msg;
     {
         std::lock_guard<std::mutex> lock(m_write_mutex);
         if (m_write_queue.empty()) return;
-        msg = m_write_queue.front();
+        m_write_msg = std::move(m_write_queue.front());
     }
 
+    std::lock_guard<std::mutex> ws_lock(m_ws_mutex);
+    if (!m_ws) return;
+
     std::visit([&](auto& ws) {
-        ws.async_write(net::buffer(msg), beast::bind_front_handler(&BeastWsClient::on_write, shared_from_this()));
+        ws.async_write(net::buffer(m_write_msg), beast::bind_front_handler(&BeastWsClient::on_write, shared_from_this()));
     }, *m_ws);
 }
 

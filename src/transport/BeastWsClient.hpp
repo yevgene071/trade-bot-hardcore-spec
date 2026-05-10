@@ -64,6 +64,7 @@ private:
     using plain_stream = websocket::stream<beast::tcp_stream>;
     using ssl_stream = websocket::stream<beast::ssl_stream<beast::tcp_stream>>;
     std::unique_ptr<std::variant<plain_stream, ssl_stream>> m_ws;
+    mutable std::mutex m_ws_mutex;
 
     beast::flat_buffer m_buffer;
     
@@ -81,6 +82,7 @@ private:
     net::steady_timer m_ping_timer;
 
     std::queue<std::string> m_write_queue;
+    std::string m_write_msg; // Current message being written
     std::mutex m_write_mutex;
 
     std::function<void(const nlohmann::json&)> m_on_message;

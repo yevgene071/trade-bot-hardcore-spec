@@ -58,6 +58,10 @@ public:
     /// Returns the latest mark price, or 0.0 if not yet received.
     double get_mark_price(const Ticker& ticker) const;
 
+    /// Returns all cached mark prices with a single lock (avoids N separate
+    /// mutex acquisitions when iterating universe tickers for dashboard).
+    std::unordered_map<Ticker, double> get_all_mark_prices() const;
+
     // Optional tap invoked for every raw WS message before dispatch.
     // Callback receives (parsed_json, recv_ts_ns).  Used by DumpRecorder.
     using RawTap = std::function<void(const nlohmann::json&, int64_t)>;
@@ -66,7 +70,9 @@ public:
 private:
     void handle_message(const nlohmann::json& j);
     void resubscribe_all();
-    std::vector<IMarketDataListener*> get_target_listeners(const Ticker& ticker);
+    
+    using ListenerList = std::vector<IMarketDataListener*>;
+    std::shared_ptr<const ListenerList> get_target_listeners(const Ticker& ticker);
     void invalidate_cache_();
 
     std::shared_ptr<IWsClient> m_ws_client;
@@ -77,7 +83,8 @@ private:
     std::unordered_map<Ticker, std::vector<IMarketDataListener*>> m_ticker_listeners;
 
     // Cache for merged listeners (m_listeners + m_ticker_listeners[ticker])
-    std::unordered_map<Ticker, std::vector<IMarketDataListener*>> m_merged_cache;
+    // Shared pointer ensures thread-safe dispatch if cache is invalidated during iteration.
+    std::unordered_map<Ticker, std::shared_ptr<const ListenerList>> m_merged_cache;
 
     mutable std::mutex m_mutex;
     bool m_active = false;

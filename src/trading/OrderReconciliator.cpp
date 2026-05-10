@@ -213,11 +213,14 @@ bool OrderReconciliator::matches_intent_(const OrderIntent& intent,
     if (server.side != intent.side) return false;
     if (server.type != intent.type) return false;
 
-    const double price_tol = std::abs(intent.price) * (cfg_.price_tolerance_bps / 10'000.0);
-    if (std::abs(server.price - intent.price) > price_tol + 1e-12) return false;
+    // T4-MATCHING: Handle Market orders where price might be 0 in intent (#153)
+    if (intent.type != OrderType::Market) {
+        const double price_tol = std::max(1e-8, std::abs(intent.price) * (cfg_.price_tolerance_bps / 10'000.0));
+        if (std::abs(server.price - intent.price) > price_tol) return false;
+    }
 
-    const double size_tol = std::abs(intent.size) * (cfg_.size_tolerance_pct / 100.0);
-    if (std::abs(server.size - intent.size) > size_tol + 1e-12) return false;
+    const double size_tol = std::max(1e-8, std::abs(intent.size) * (cfg_.size_tolerance_pct / 100.0));
+    if (std::abs(server.size - intent.size) > size_tol) return false;
 
     return true;
 }

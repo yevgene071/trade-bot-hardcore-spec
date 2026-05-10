@@ -81,7 +81,7 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
 
     // ----- Maintain mid history before computing dynamics -----
     if (f.mid > 0.0) {
-        mid_history_[mid_head_] = {now, f.mid};
+        mid_history_[mid_head_] = {now, f.mid, std::log(f.mid)};
         mid_head_ = (mid_head_ + 1) % cfg_.reserve_history;
         if (mid_count_ < cfg_.reserve_history) mid_count_++;
     }
@@ -98,24 +98,25 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
         
         // Scan backwards in circular buffer
         double current_mid = f.mid;
-        double last_mid = current_mid;
+        double last_log_mid = mid_history_[(mid_head_ + cfg_.reserve_history - 1) % cfg_.reserve_history].log_mid;
         
         for (std::size_t i = 0; i < mid_count_; ++i) {
             std::size_t idx = (mid_head_ + cfg_.reserve_history - 1 - i) % cfg_.reserve_history;
             const auto& sample = mid_history_[idx];
             
-            if (i > 0) { // Skip the very first (current) sample which we already have in last_mid
+            if (i > 0) { // Skip the very first (current) sample
                 if (sample.t >= t1) mid1 = sample.mid;
                 if (sample.t >= t5) mid5 = sample.mid;
                 if (sample.t >= t30) mid30 = sample.mid;
                 if (sample.t >= t60) {
-                    if (sample.mid > 0 && last_mid > 0) {
-                        vol_acc.update(std::log(last_mid / sample.mid));
+                    if (sample.mid > 0) {
+                        // T4-PERF: log(a/b) = log(a) - log(b). Avoids expensive std::log in loop (#163).
+                        vol_acc.update(last_log_mid - sample.log_mid);
                     }
                 } else {
                     break;
                 }
-                last_mid = sample.mid;
+                last_log_mid = sample.log_mid;
             }
         }
 

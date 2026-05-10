@@ -44,7 +44,6 @@ void DumpRecorder::record(const nlohmann::json& msg, int64_t recv_ts_ns) {
     if (!out_) return;
     nlohmann::json line{{"recv_ts_ns", recv_ts_ns}, {"message", msg}};
     out_ << line.dump() << "\n";
-    out_.flush();
 }
 
 } // namespace trade_bot

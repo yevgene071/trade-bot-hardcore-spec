@@ -34,34 +34,40 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
         }
     }
 
-    // 1. Check conditions C1-C6
+    // 1. Check conditions C1-C6 (Pattern Recall: Scan history for matching levels)
     
-    // C1: LevelApproach
+    // C1: LevelApproach (most recent)
     auto it_approach = ctx_.recent_signals.find(SignalKind::LevelApproach);
     if (it_approach == ctx_.recent_signals.end() || 
         (now - it_approach->second.timestamp) > std::chrono::seconds(5)) return std::nullopt;
     
     double level_price = it_approach->second.price;
     
-    // C3: DensityDetected on the same level
-    auto it_density = ctx_.recent_signals.find(SignalKind::DensityDetected);
-    if (it_density == ctx_.recent_signals.end() ||
-        std::abs(it_density->second.price - level_price) / level_price * kBpsBase > 1.0 || // 1 bps tolerance
-        (now - it_density->second.timestamp) > std::chrono::seconds(10)) return std::nullopt;
+    // C3: DensityDetected on the same level (Search History)
+    auto it_density = std::find_if(ctx_.signal_history.rbegin(), ctx_.signal_history.rend(), [&](const auto& sig) {
+        if (sig.kind != SignalKind::DensityDetected) return false;
+        if ((now - sig.timestamp) > std::chrono::seconds(15)) return false;
+        double dist_bps = std::abs(sig.price - level_price) / level_price * kBpsBase;
+        return dist_bps <= 1.5; // 1.5 bps tolerance
+    });
+    if (it_density == ctx_.signal_history.rend()) return std::nullopt;
 
     // C4: TapeFade
     auto it_fade = ctx_.recent_signals.find(SignalKind::TapeFade);
     if (it_fade == ctx_.recent_signals.end() ||
         (now - it_fade->second.timestamp) > std::chrono::seconds(5)) return std::nullopt;
 
-    // C5: No Iceberg
-    auto it_iceberg = ctx_.recent_signals.find(SignalKind::IcebergSuspected);
-    if (it_iceberg != ctx_.recent_signals.end() &&
-        std::abs(it_iceberg->second.price - level_price) / level_price * kBpsBase < 2.0 && // 2 bps proximity
-        (now - it_iceberg->second.timestamp) < std::chrono::seconds(30)) return std::nullopt;
+    // C5: No Iceberg on this level
+    auto it_iceberg = std::find_if(ctx_.signal_history.rbegin(), ctx_.signal_history.rend(), [&](const auto& sig) {
+        if (sig.kind != SignalKind::IcebergSuspected) return false;
+        if ((now - sig.timestamp) > std::chrono::seconds(30)) return false;
+        double dist_bps = std::abs(sig.price - level_price) / level_price * kBpsBase;
+        return dist_bps <= 2.0; 
+    });
+    if (it_iceberg != ctx_.signal_history.rend()) return std::nullopt;
 
     // Direction
-    std::string side_str = it_density->second.payload.value("side", "");
+    std::string side_str = it_density->payload.value("side", "");
     Side plan_side = Side::None;
     if (side_str == "Bid") plan_side = Side::Buy; // Bounce from support -> Long
     else if (side_str == "Ask") plan_side = Side::Sell; // Bounce from resistance -> Short

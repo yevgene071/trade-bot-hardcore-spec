@@ -35,17 +35,24 @@ std::vector<ActiveTrade> PaperExecutor::get_active_trades() const {
         t.executed_size = pos.executed_size;
         t.avg_entry_price = pos.avg_price;
         t.state = TradeState::Open;
-        // Unrealized PnL using current mid price
-        auto bit = books_.find(ticker);
-        if (bit != books_.end()) {
-            double bid = bit->second->best_bid().value_or(0.0);
-            double ask = bit->second->best_ask().value_or(0.0);
-            if (bid > 0.0 && ask > 0.0) {
-                double mid = (bid + ask) * 0.5;
-                t.unrealized_pnl = (pos.plan.side == Side::Buy)
-                    ? (mid - pos.avg_price) * pos.executed_size
-                    : (pos.avg_price - mid) * pos.executed_size;
+        // Use exchange mark price when available (consistent with dashboard display),
+        // fall back to (bid+ask)/2 mid if mark not yet received.
+        double price = 0.0;
+        auto mit = mark_prices_.find(ticker);
+        if (mit != mark_prices_.end() && mit->second > 0.0) {
+            price = mit->second;
+        } else {
+            auto bit = books_.find(ticker);
+            if (bit != books_.end()) {
+                double bid = bit->second->best_bid().value_or(0.0);
+                double ask = bit->second->best_ask().value_or(0.0);
+                if (bid > 0.0 && ask > 0.0) price = (bid + ask) * 0.5;
             }
+        }
+        if (price > 0.0) {
+            t.unrealized_pnl = (pos.plan.side == Side::Buy)
+                ? (price - pos.avg_price) * pos.executed_size
+                : (pos.avg_price - price) * pos.executed_size;
         }
         res.push_back(t);
     }
@@ -58,10 +65,39 @@ std::vector<ActiveTrade> PaperExecutor::get_active_trades() const {
     return res;
 }
 
+void PaperExecutor::on_trade(const Ticker& ticker, const Trade& trade) {
+    tick(ticker, trade.timestamp);
+}
+
+void PaperExecutor::on_orderbook_snapshot(const OrderBookSnapshot& snap) {
+    tick(snap.ticker, snap.ts);
+}
+
+void PaperExecutor::on_orderbook_update(const OrderBookUpdate& upd) {
+    tick(upd.ticker, upd.ts);
+}
+
 void PaperExecutor::tick(std::chrono::system_clock::time_point now) {
-    // 1. Handle Pending Entries
+    // T4-PAPER: Collect all tickers that need processing (pending or open) (#157)
+    std::vector<Ticker> active;
+    active.reserve(pending_entries_.size() + positions_.size());
+    for (const auto& p : pending_entries_) active.push_back(p.ticker);
+    for (const auto& [t, _] : positions_) active.push_back(t);
+    
+    // De-duplicate
+    std::sort(active.begin(), active.end());
+    active.erase(std::unique(active.begin(), active.end()), active.end());
+
+    for (const auto& ticker : active) {
+        tick(ticker, now);
+    }
+}
+
+void PaperExecutor::tick(const Ticker& ticker, std::chrono::system_clock::time_point now) {
+    // 1. Handle Pending Entries for this ticker
     for (auto it = pending_entries_.begin(); it != pending_entries_.end(); ) {
         const auto& plan = *it;
+        if (plan.ticker != ticker) { ++it; continue; }
         
         // TTL Check
         if (now > plan.valid_until) {
@@ -88,10 +124,10 @@ void PaperExecutor::tick(std::chrono::system_clock::time_point now) {
             // Limit fill
             if (plan.side == Side::Buy && ask <= plan.entry_price) {
                 fill = true;
-                fill_price = plan.entry_price;
+                fill_price = std::min(plan.entry_price, ask); // gap protection
             } else if (plan.side == Side::Sell && bid >= plan.entry_price) {
                 fill = true;
-                fill_price = plan.entry_price;
+                fill_price = std::max(plan.entry_price, bid); // gap protection
             }
         }
 
@@ -112,7 +148,7 @@ void PaperExecutor::tick(std::chrono::system_clock::time_point now) {
             if (price_shift != 0.0) {
                 adjusted.entry_price  = fill_price;
                 adjusted.stop_price  += price_shift;
-                adjusted.tp1_price   += price_shift;
+                if (adjusted.tp1_price > 0.0) adjusted.tp1_price += price_shift;
                 if (adjusted.tp2_price) *adjusted.tp2_price += price_shift;
             }
 
@@ -123,76 +159,79 @@ void PaperExecutor::tick(std::chrono::system_clock::time_point now) {
         }
     }
 
-    // 2. Check Stops and TPs for existing positions
-    for (auto it = positions_.begin(); it != positions_.end(); ) {
-        auto& pos = it->second;
+    // 2. Check Stops and TPs for existing positions of this ticker
+    auto pit = positions_.find(ticker);
+    if (pit != positions_.end()) {
+        auto& pos = pit->second;
         auto bit = books_.find(pos.plan.ticker);
-        if (bit == books_.end()) { ++it; continue; }
-        
-        const auto* book = bit->second;
-        double bid = book->best_bid().value_or(0.0);
-        double ask = book->best_ask().value_or(0.0);
-        if (bid == 0.0 || ask == 0.0) { ++it; continue; }
+        if (bit != books_.end()) {
+            const auto* book = bit->second;
+            double bid = book->best_bid().value_or(0.0);
+            double ask = book->best_ask().value_or(0.0);
+            if (bid > 0.0 && ask > 0.0) {
+                bool exit = false;
+                std::string reason;
+                double exit_price = 0.0;
 
-        bool exit = false;
-        std::string reason;
-        double exit_price = 0.0;
-
-        // Stop Loss check
-        if (pos.plan.side == Side::Buy) {
-            if (bid <= pos.plan.stop_price) {
-                exit = true;
-                exit_price = pos.plan.stop_price;
-                reason = "Stop Loss";
-            }
-        } else {
-            if (ask >= pos.plan.stop_price) {
-                exit = true;
-                exit_price = pos.plan.stop_price;
-                reason = "Stop Loss";
-            }
-        }
-
-        // Take Profit check (TP1 only for simplified PaperExecutor)
-        if (!exit && pos.plan.tp1_price > 0.0) {
-            if (pos.plan.side == Side::Buy) {
-                if (ask >= pos.plan.tp1_price) {
-                    exit = true;
-                    exit_price = pos.plan.tp1_price;
-                    reason = "Take Profit";
+                // Stop Loss check
+                if (pos.plan.side == Side::Buy) {
+                    if (bid <= pos.plan.stop_price) {
+                        exit = true;
+                        // Gap protection: if bid is below stop_price, fill at bid
+                        exit_price = std::min(pos.plan.stop_price, bid);
+                        reason = "Stop Loss";
+                    }
+                } else {
+                    if (ask >= pos.plan.stop_price) {
+                        exit = true;
+                        // Gap protection: if ask is above stop_price, fill at ask
+                        exit_price = std::max(pos.plan.stop_price, ask);
+                        reason = "Stop Loss";
+                    }
                 }
-            } else {
-                if (bid <= pos.plan.tp1_price) {
-                    exit = true;
-                    exit_price = pos.plan.tp1_price;
-                    reason = "Take Profit";
+
+                // Take Profit check (TP1 only for simplified PaperExecutor)
+                if (!exit && pos.plan.tp1_price > 0.0) {
+                    if (pos.plan.side == Side::Buy) {
+                        if (ask >= pos.plan.tp1_price) {
+                            exit = true;
+                            // Gap protection: if ask is above tp_price, fill at ask (better fill)
+                            exit_price = std::max(pos.plan.tp1_price, ask);
+                            reason = "Take Profit";
+                        }
+                    } else {
+                        if (bid <= pos.plan.tp1_price) {
+                            exit = true;
+                            // Gap protection: if bid is below tp_price, fill at bid (better fill)
+                            exit_price = std::min(pos.plan.tp1_price, bid);
+                            reason = "Take Profit";
+                        }
+                    }
+                }
+
+                if (exit) {
+                    // Apply slippage on exit
+                    double slip = exit_price * (cfg_.slippage_bps / 10000.0);
+                    exit_price += (pos.plan.side == Side::Buy) ? -slip : slip;
+
+                    double pnl = (pos.plan.side == Side::Buy)
+                        ? (exit_price - pos.avg_price) * pos.executed_size
+                        : (pos.avg_price - exit_price) * pos.executed_size;
+
+                    LOG_INFO("PaperExecutor: FILLED Exit ({}) {} {} at {} | PnL: {:.4f}",
+                             reason, pos.plan.side == Side::Buy ? "Sell" : "Buy",
+                             pos.plan.ticker, exit_price, pnl);
+
+                    closed_trades_.push_back({pos.plan, pos.avg_price, exit_price,
+                                              pos.executed_size, pnl, reason});
+                    positions_.erase(pit);
                 }
             }
-        }
-
-        if (exit) {
-            // Apply slippage on exit
-            double slip = exit_price * (cfg_.slippage_bps / 10000.0);
-            exit_price += (pos.plan.side == Side::Buy) ? -slip : slip;
-
-            double pnl = (pos.plan.side == Side::Buy)
-                ? (exit_price - pos.avg_price) * pos.executed_size
-                : (pos.avg_price - exit_price) * pos.executed_size;
-
-            LOG_INFO("PaperExecutor: FILLED Exit ({}) {} {} at {} | PnL: {:.4f}",
-                     reason, pos.plan.side == Side::Buy ? "Sell" : "Buy",
-                     pos.plan.ticker, exit_price, pnl);
-
-            closed_trades_.push_back({pos.plan, pos.avg_price, exit_price,
-                                      pos.executed_size, pnl, reason});
-            it = positions_.erase(it);
-        } else {
-            ++it;
         }
     }
 }
 
-std::vector<PaperExecutor::ClosedTrade> PaperExecutor::pop_closed_trades() {
+std::vector<IExecutor::ClosedTrade> PaperExecutor::pop_closed_trades() {
     std::vector<ClosedTrade> result;
     result.swap(closed_trades_);
     return result;
@@ -201,17 +240,32 @@ std::vector<PaperExecutor::ClosedTrade> PaperExecutor::pop_closed_trades() {
 double PaperExecutor::unrealized_pnl() const {
     double total = 0.0;
     for (const auto& [ticker, pos] : positions_) {
-        auto bit = books_.find(ticker);
-        if (bit == books_.end()) continue;
-        double bid = bit->second->best_bid().value_or(0.0);
-        double ask = bit->second->best_ask().value_or(0.0);
-        if (bid == 0.0 || ask == 0.0) continue;
-        double mid = (bid + ask) * 0.5;
+        double price = 0.0;
+        auto mit = mark_prices_.find(ticker);
+        if (mit != mark_prices_.end() && mit->second > 0.0) {
+            price = mit->second;
+        } else {
+            auto bit = books_.find(ticker);
+            if (bit == books_.end()) continue;
+            double bid = bit->second->best_bid().value_or(0.0);
+            double ask = bit->second->best_ask().value_or(0.0);
+            if (bid == 0.0 || ask == 0.0) continue;
+            price = (bid + ask) * 0.5;
+        }
         total += (pos.plan.side == Side::Buy)
-            ? (mid - pos.avg_price) * pos.executed_size
-            : (pos.avg_price - mid) * pos.executed_size;
+            ? (price - pos.avg_price) * pos.executed_size
+            : (pos.avg_price - price) * pos.executed_size;
     }
     return total;
+}
+
+void PaperExecutor::inject_recovered_trades(const std::vector<ActiveTrade>& trades) {
+    for (const auto& t : trades) {
+        if (t.state == TradeState::Open || t.state == TradeState::Exiting) {
+            positions_[t.plan.ticker] = Position{t.plan, t.executed_size, t.avg_entry_price};
+            LOG_INFO("PaperExecutor: injected recovered position for {}", t.plan.ticker);
+        }
+    }
 }
 
 } // namespace trade_bot

@@ -7,6 +7,7 @@ using namespace trade_bot;
 class MockStrategy : public IStrategy {
 public:
     MOCK_METHOD(const std::string&, name, (), (const, override));
+    MOCK_METHOD(const Ticker&, ticker, (), (const, override));
     MOCK_METHOD(void, on_frame, (const FeatureFrame&), (override));
     MOCK_METHOD(void, on_signal, (const Signal&), (override));
     MOCK_METHOD(std::optional<TradePlan>, tick, (std::chrono::system_clock::time_point), (override));

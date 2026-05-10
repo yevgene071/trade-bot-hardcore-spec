@@ -35,6 +35,12 @@ public:
               double size_increment,
               std::size_t reserve_levels = 128);
 
+    // OrderBook contains std::atomic, so we need custom move operations
+    OrderBook(const OrderBook&) = delete;
+    OrderBook& operator=(const OrderBook&) = delete;
+    OrderBook(OrderBook&& other) noexcept;
+    OrderBook& operator=(OrderBook&& other) noexcept;
+
     void apply_snapshot(const OrderBookSnapshot& snap);
     void apply_update(const OrderBookUpdate& upd);
 

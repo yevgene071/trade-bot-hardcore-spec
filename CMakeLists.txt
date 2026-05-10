@@ -447,7 +447,8 @@ if(BUILD_TESTS)
     target_link_libraries(cluster_snapshot_codec_test PRIVATE
         GTest::gtest GTest::gtest_main
         spdlog::spdlog
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME cluster_snapshot_codec COMMAND cluster_snapshot_codec_test)
 
     add_executable(cluster_snapshot_manager_test
@@ -461,7 +462,8 @@ if(BUILD_TESTS)
     target_link_libraries(cluster_snapshot_manager_test PRIVATE
         GTest::gtest GTest::gtest_main GTest::gmock
         spdlog::spdlog
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME cluster_snapshot_manager COMMAND cluster_snapshot_manager_test)
 
     add_executable(notification_routing_test
@@ -625,7 +627,8 @@ if(BUILD_TESTS)
         absl::flat_hash_map
         absl::hash
         xsimd
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME level_detector COMMAND level_detector_test)
 
     add_executable(approach_zigzag_test
@@ -664,7 +667,8 @@ if(BUILD_TESTS)
         absl::flat_hash_map
         absl::hash
         xsimd
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME approach_analyzer COMMAND approach_analyzer_test)
 
     add_executable(leader_signal_test
@@ -679,7 +683,8 @@ if(BUILD_TESTS)
     target_link_libraries(leader_signal_test PRIVATE
         GTest::gtest GTest::gtest_main
         spdlog::spdlog
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME leader_signal COMMAND leader_signal_test)
 
     add_executable(strategy_engine_test
@@ -692,7 +697,8 @@ if(BUILD_TESTS)
     target_link_libraries(strategy_engine_test PRIVATE
         GTest::gtest GTest::gtest_main GTest::gmock
         spdlog::spdlog
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME strategy_engine COMMAND strategy_engine_test)
 
     add_executable(bounce_strategy_test
@@ -705,7 +711,8 @@ if(BUILD_TESTS)
     target_link_libraries(bounce_strategy_test PRIVATE
         GTest::gtest GTest::gtest_main
         spdlog::spdlog
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME bounce_strategy COMMAND bounce_strategy_test)
 
     add_executable(breakout_strategy_test
@@ -718,7 +725,8 @@ if(BUILD_TESTS)
     target_link_libraries(breakout_strategy_test PRIVATE
         GTest::gtest GTest::gtest_main
         spdlog::spdlog
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME breakout_strategy COMMAND breakout_strategy_test)
 
     add_executable(leaderlag_strategy_test
@@ -731,7 +739,8 @@ if(BUILD_TESTS)
     target_link_libraries(leaderlag_strategy_test PRIVATE
         GTest::gtest GTest::gtest_main
         spdlog::spdlog
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME leaderlag_strategy COMMAND leaderlag_strategy_test)
 
     add_executable(signal_level_bridge_test
@@ -748,7 +757,8 @@ if(BUILD_TESTS)
         spdlog::spdlog
         absl::btree
         xsimd
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        boost::boost)
     add_test(NAME signal_level_bridge COMMAND signal_level_bridge_test)
 
     add_executable(risk_manager_test
@@ -764,7 +774,8 @@ if(BUILD_TESTS)
         GTest::gtest GTest::gtest_main
         spdlog::spdlog
         nlohmann_json::nlohmann_json
-        nlohmann_json_schema_validator)
+        nlohmann_json_schema_validator
+        boost::boost)
     add_test(NAME risk_manager COMMAND risk_manager_test)
 
     add_executable(r13_funding_test
@@ -776,7 +787,7 @@ if(BUILD_TESTS)
         src/logger/Logger.cpp
     )
     target_include_directories(r13_funding_test PRIVATE src)
-    target_link_libraries(r13_funding_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator)
+    target_link_libraries(r13_funding_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator boost::boost)
     add_test(NAME r13_funding COMMAND r13_funding_test)
 
     add_executable(trading_day_reset_test
@@ -785,7 +796,7 @@ if(BUILD_TESTS)
         src/logger/Logger.cpp
     )
     target_include_directories(trading_day_reset_test PRIVATE src)
-    target_link_libraries(trading_day_reset_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json)
+    target_link_libraries(trading_day_reset_test PRIVATE GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
     add_test(NAME trading_day_reset COMMAND trading_day_reset_test)
 
     add_executable(risk_flow_test
@@ -983,6 +994,7 @@ if(BUILD_TESTS)
     add_executable(dashboard_server_test
         test/unit/dashboard_server_test.cpp
         src/control/DashboardServer.cpp
+        src/transport/DumpRecorder.cpp
         src/logger/Logger.cpp)
     target_include_directories(dashboard_server_test PRIVATE src)
     target_link_libraries(dashboard_server_test PRIVATE

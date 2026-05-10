@@ -65,6 +65,7 @@ double LeaderTracker::recompute_lag_observation_() {
     const std::size_t W = w_leader_.size();
     const auto K = static_cast<int>(cfg_.xcorr_max_lag_steps);
 
+    // T4-PERF: Calculate means once outside the shift loop (#152)
     auto mean_of = [&](const std::deque<double>& v) {
         return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
     };
@@ -74,6 +75,13 @@ double LeaderTracker::recompute_lag_observation_() {
     double best_corr = -2.0;
     int    best_shift = 0;
 
+    // Pre-center the windows for faster dot product
+    std::vector<double> dl(W), df(W);
+    for (size_t i = 0; i < W; ++i) {
+        dl[i] = w_leader_[i] - mean_l;
+        df[i] = w_follower_[i] - mean_f;
+    }
+
     for (int shift = -K; shift <= K; ++shift) {
         // shift > 0 means follower trails leader by `shift` samples.
         const std::size_t lo = static_cast<std::size_t>(std::max(0, shift));
@@ -82,14 +90,13 @@ double LeaderTracker::recompute_lag_observation_() {
 
         double sxy = 0.0, sxx = 0.0, syy = 0.0;
         for (std::size_t i = lo; i < hi; ++i) {
-            const double dx = w_leader_[i - static_cast<std::size_t>(std::max(0, shift))]
-                              - mean_l;
-            const double dy = w_follower_[i] - mean_f;
+            const double dx = dl[i - static_cast<std::size_t>(std::max(0, shift))];
+            const double dy = df[i];
             sxy += dx * dy;
             sxx += dx * dx;
             syy += dy * dy;
         }
-        if (sxx <= 0.0 || syy <= 0.0) continue;
+        if (sxx <= 1e-18 || syy <= 1e-18) continue;
         const double r = sxy / std::sqrt(sxx * syy);
         if (r > best_corr) {
             best_corr  = r;

@@ -199,11 +199,13 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
 }
 
 void LevelDetector::check_approaches_(const FeatureFrame& frame) {
+    const double price_inc = book_.price_increment();
     for (const auto& level : active_levels_) {
         double dist_bps = (frame.mid - level.price) / frame.mid * 10000.0;
+        const auto tick = PriceTick::from_price(level.price, price_inc);
         
         if (std::abs(dist_bps) <= cfg_.approach_trigger_bps) {
-            if (current_approaches_.find(level.price) == current_approaches_.end()) {
+            if (current_approaches_.find(tick) == current_approaches_.end()) {
                 Signal s {
                     .kind = SignalKind::LevelApproach,
                     .timestamp = frame.timestamp,
@@ -216,10 +218,10 @@ void LevelDetector::check_approaches_(const FeatureFrame& frame) {
                     }
                 };
                 bus_.publish(s);
-                current_approaches_[level.price] = {level.price, frame.timestamp};
+                current_approaches_[tick] = {level.price, frame.timestamp};
             }
         } else {
-            current_approaches_.erase(level.price);
+            current_approaches_.erase(tick);
         }
     }
 }

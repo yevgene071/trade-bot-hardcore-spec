@@ -44,6 +44,10 @@ public:
     Stats get_stats() const;
 
     private:
+    // Cached T-Digest results for performance
+    double cached_q99_ = 0.0;
+    size_t last_merge_weight_ = 0;
+
     void evict_expired_trades_(std::chrono::system_clock::time_point now);
 
     Ticker ticker_;

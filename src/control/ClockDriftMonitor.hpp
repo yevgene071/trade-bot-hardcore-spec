@@ -67,10 +67,10 @@ public:
 
 private:
     void run_loop_();
-    void update_average_(int64_t new_sample_ms);
-    void evaluate_thresholds_locked_();
+    void update_average_(int64_t sample);
+    void evaluate_thresholds_locked_(std::unique_lock<std::mutex>& lk);
 
-    Config                       cfg_;
+    Config                  cfg_;
     std::shared_ptr<INtpClient>  ntp_;
     KillSwitchCallback           kill_cb_;
 

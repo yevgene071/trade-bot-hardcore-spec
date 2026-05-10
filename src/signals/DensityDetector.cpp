@@ -71,6 +71,7 @@ void DensityDetector::on_trade(const Trade& trade) {
                 .price = trade.price,
                 .confidence = std::min(1.0, eaten_ratio),
                 .payload = nlohmann::json{
+                    {"side", meta.side == Side::Buy ? "Bid" : "Ask"},
                     {"eaten_ratio", eaten_ratio},
                     {"prints", meta.print_count}
                 }

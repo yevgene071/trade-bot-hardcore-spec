@@ -30,6 +30,9 @@ public:
     // IExecutor
     void submit(const TradePlan& plan) override;
     void cancel_all(const Ticker& ticker) override;
+    void inject_recovered_trades(const std::vector<ActiveTrade>& trades) override;
+    std::vector<ActiveTrade> get_active_trades() const override;
+    std::vector<ClosedTrade> pop_closed_trades() override;
 
     // IMarketDataListener
     void on_trade(const Ticker&, const Trade&) override {}
@@ -41,7 +44,8 @@ public:
     void on_finres_update([[maybe_unused]] const FinresUpdate& update) override {}
     void on_error(const std::string& msg) override;
 
-    void tick(std::chrono::system_clock::time_point now);
+    void tick(std::chrono::system_clock::time_point now) override;
+    void set_mark_prices(const std::unordered_map<Ticker, double>& marks) override;
 
     void set_alert_callback(std::function<void(const std::string&)> cb) { alert_cb_ = cb; }
 
@@ -59,6 +63,8 @@ private:
 
     mutable std::mutex mutex_;
     std::map<Ticker, std::vector<ActiveTrade>> trades_;
+    std::vector<ClosedTrade> closed_trades_;
+    std::unordered_map<Ticker, double> mark_prices_;
     
     OrderReconciliator reconciliator_;
     std::atomic<int> error_streak_{0};

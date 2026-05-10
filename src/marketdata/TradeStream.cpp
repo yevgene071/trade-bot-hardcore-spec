@@ -96,7 +96,24 @@ TradeStream::Stats TradeStream::get_stats() const {
     s.sell_vol_5s = sell_vol_5s_.sum();
     s.sell_vol_30s = sell_vol_30s_.sum();
 
-    s.q99_size = size_distribution_.quantile(0.99);
+    // quantile(0.99) triggers TDigest::merge() which calls std::sort.
+    // Calling it every 100ms for every ticker is expensive.
+    // T4-PERF: Only re-merge if we have significant new data (e.g. 50 new prints)
+    double total_w = size_distribution_.total_weight();
+    if (total_w > 0) {
+        if (total_w > static_cast<double>(last_merge_weight_ + 50)) {
+            // Need to cast to non-const for merge (mutable-like behavior)
+            auto& mutable_dist = const_cast<TDigest&>(size_distribution_);
+            s.q99_size = mutable_dist.quantile(0.99);
+            
+            const_cast<TradeStream*>(this)->cached_q99_ = s.q99_size;
+            const_cast<TradeStream*>(this)->last_merge_weight_ = static_cast<size_t>(total_w);
+        } else {
+            s.q99_size = cached_q99_;
+        }
+    } else {
+        s.q99_size = 0.0;
+    }
 
     s.hawkes_intensity_buy = hawkes_intensity_buy_;
     s.hawkes_intensity_sell = hawkes_intensity_sell_;
