@@ -35,6 +35,18 @@ std::vector<ActiveTrade> PaperExecutor::get_active_trades() const {
         t.executed_size = pos.executed_size;
         t.avg_entry_price = pos.avg_price;
         t.state = TradeState::Open;
+        // Unrealized PnL using current mid price
+        auto bit = books_.find(ticker);
+        if (bit != books_.end()) {
+            double bid = bit->second->best_bid().value_or(0.0);
+            double ask = bit->second->best_ask().value_or(0.0);
+            if (bid > 0.0 && ask > 0.0) {
+                double mid = (bid + ask) * 0.5;
+                t.unrealized_pnl = (pos.plan.side == Side::Buy)
+                    ? (mid - pos.avg_price) * pos.executed_size
+                    : (pos.avg_price - mid) * pos.executed_size;
+            }
+        }
         res.push_back(t);
     }
     for (const auto& plan : pending_entries_) {
@@ -88,10 +100,23 @@ void PaperExecutor::tick(std::chrono::system_clock::time_point now) {
             double slip = fill_price * (cfg_.slippage_bps / 10000.0);
             fill_price += (plan.side == Side::Buy) ? slip : -slip;
 
-            LOG_INFO("PaperExecutor: FILLED Entry {} {} at {}", 
+            LOG_INFO("PaperExecutor: FILLED Entry {} {} at {}",
                      plan.side == Side::Buy ? "Buy" : "Sell", plan.ticker, fill_price);
-            
-            positions_[plan.ticker] = {plan, plan.size_coin, fill_price};
+
+            // For market orders the fill price can deviate from plan.entry_price.
+            // Shift TP and SL by the same offset so the trade's risk structure
+            // is preserved relative to the actual fill price, preventing TP from
+            // firing immediately at a loss when the market moved past TP before fill.
+            TradePlan adjusted = plan;
+            double price_shift = fill_price - plan.entry_price;
+            if (price_shift != 0.0) {
+                adjusted.entry_price  = fill_price;
+                adjusted.stop_price  += price_shift;
+                adjusted.tp1_price   += price_shift;
+                if (adjusted.tp2_price) *adjusted.tp2_price += price_shift;
+            }
+
+            positions_[plan.ticker] = {adjusted, plan.size_coin, fill_price};
             it = pending_entries_.erase(it);
         } else {
             ++it;
@@ -150,14 +175,43 @@ void PaperExecutor::tick(std::chrono::system_clock::time_point now) {
             double slip = exit_price * (cfg_.slippage_bps / 10000.0);
             exit_price += (pos.plan.side == Side::Buy) ? -slip : slip;
 
-            LOG_INFO("PaperExecutor: FILLED Exit ({}) {} {} at {}", 
-                     reason, pos.plan.side == Side::Buy ? "Sell" : "Buy", pos.plan.ticker, exit_price);
-            
+            double pnl = (pos.plan.side == Side::Buy)
+                ? (exit_price - pos.avg_price) * pos.executed_size
+                : (pos.avg_price - exit_price) * pos.executed_size;
+
+            LOG_INFO("PaperExecutor: FILLED Exit ({}) {} {} at {} | PnL: {:.4f}",
+                     reason, pos.plan.side == Side::Buy ? "Sell" : "Buy",
+                     pos.plan.ticker, exit_price, pnl);
+
+            closed_trades_.push_back({pos.plan, pos.avg_price, exit_price,
+                                      pos.executed_size, pnl, reason});
             it = positions_.erase(it);
         } else {
             ++it;
         }
     }
+}
+
+std::vector<PaperExecutor::ClosedTrade> PaperExecutor::pop_closed_trades() {
+    std::vector<ClosedTrade> result;
+    result.swap(closed_trades_);
+    return result;
+}
+
+double PaperExecutor::unrealized_pnl() const {
+    double total = 0.0;
+    for (const auto& [ticker, pos] : positions_) {
+        auto bit = books_.find(ticker);
+        if (bit == books_.end()) continue;
+        double bid = bit->second->best_bid().value_or(0.0);
+        double ask = bit->second->best_ask().value_or(0.0);
+        if (bid == 0.0 || ask == 0.0) continue;
+        double mid = (bid + ask) * 0.5;
+        total += (pos.plan.side == Side::Buy)
+            ? (mid - pos.avg_price) * pos.executed_size
+            : (pos.avg_price - mid) * pos.executed_size;
+    }
+    return total;
 }
 
 } // namespace trade_bot

@@ -20,6 +20,7 @@ public:
         FeatureFrame frame_at_entry;
         double pnl_usd{0.0};
         double duration_sec{0.0};
+        double exit_price{0.0};
         std::string cause_of_exit;
     };
 

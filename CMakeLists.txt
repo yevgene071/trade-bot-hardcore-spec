@@ -108,8 +108,8 @@ add_executable(trade_bot
     src/executor/LiveExecutor.cpp
     src/executor/StartupRecovery.cpp
     src/logger/TradeJournal.cpp
-    src/transport/external/BinanceFundingClient.cpp
 )
+
 target_include_directories(trade_bot PRIVATE src)
 target_link_libraries(trade_bot PRIVATE 
     spdlog::spdlog 

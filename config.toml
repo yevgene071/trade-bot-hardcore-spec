@@ -9,7 +9,7 @@ version = "0.0.1"
 name = "trade_bot_hardcore"
 
 [logger]
-level = "trace" # trace, debug, info, warn, error, critical
+level = "info" # trace, debug, info, warn, error, critical
 path = "logs/trade_bot.log"
 
 [network]
@@ -61,7 +61,7 @@ funding_blackout_pre_sec = 30
 funding_blackout_post_sec = 30
 # Other
 allow_hedge = false
-whitelist_tickers = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+whitelist_tickers = []
 exchange_error_streak = 5
 ws_reconnect_timeout_sec = 15
 ws_loss_poll_interval_ms = 500
@@ -211,7 +211,12 @@ pool_refresh_min       = 30
 # Operator-guaranteed tickers (bypass warmup requirement).
 # Once warmup is implemented this list can be cleared and the bot
 # will self-select the best tickers by the criteria below.
-manual_allow           = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+manual_allow           = [
+    "BTC_USDT", "ETH_USDT", "BNB_USDT", "SOL_USDT", "XRP_USDT",
+    "DOGE_USDT", "ADA_USDT", "AVAX_USDT", "LINK_USDT", "DOT_USDT",
+    "LTC_USDT", "NEAR_USDT", "APT_USDT", "ARB_USDT", "OP_USDT",
+    "SUI_USDT", "INJ_USDT", "TRX_USDT", "FIL_USDT", "ATOM_USDT"
+]
 
 # Dynamic pool filter (active once warmup stats are collected):
 # Skip top-N highest-volume tickers — they're too efficient for scalping.

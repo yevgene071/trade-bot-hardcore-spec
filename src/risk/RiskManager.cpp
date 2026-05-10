@@ -81,13 +81,19 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
-    // R5. Universe
-    if (!universe_.is_boosted(plan.ticker, now)) { 
-         if (std::find(cfg_.whitelist_tickers.begin(), cfg_.whitelist_tickers.end(), plan.ticker) == cfg_.whitelist_tickers.end()) {
-            d.reason = RejectReason::NotInUniverse;
+    // R5. Universe — accept if ticker is in the active pool, boosted, or explicitly whitelisted.
+    {
+        const auto& active = universe_.active();
+        const bool in_pool = std::find(active.begin(), active.end(), plan.ticker) != active.end();
+        const bool boosted  = universe_.is_boosted(plan.ticker, now);
+        const bool listed   = !cfg_.whitelist_tickers.empty() &&
+            std::find(cfg_.whitelist_tickers.begin(), cfg_.whitelist_tickers.end(), plan.ticker)
+                != cfg_.whitelist_tickers.end();
+        if (!in_pool && !boosted && !listed) {
+            d.reason  = RejectReason::NotInUniverse;
             d.details = "Ticker not in tradable universe or whitelist: " + plan.ticker;
             return d;
-         }
+        }
     }
 
     // R6. Stop validation

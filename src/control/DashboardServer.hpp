@@ -31,6 +31,15 @@ public:
             std::string              ticker;
             std::vector<std::string> strategies;
             bool                     boosted{false};
+            double                   mark_price{0.0};
+        };
+
+        struct SignalEvent {
+            std::string kind;
+            std::string ticker;
+            double      price{0.0};
+            double      confidence{0.0};
+            std::string time_str; // HH:MM:SS.mmm
         };
 
         AccountState account;
@@ -38,6 +47,7 @@ public:
         std::vector<TradeJournal::Entry> recent_journal;
         std::map<std::string, int> signal_counts;
         std::vector<UniverseRow> universe_rows;
+        std::vector<SignalEvent> recent_signals; // newest first, max 60
         bool kill_switch_active{false};
         std::string version;
     };

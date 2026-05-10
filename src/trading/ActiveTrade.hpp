@@ -37,6 +37,7 @@ struct ActiveTrade {
     /// re-arm the BE-stop on subsequent partial fills.
     bool       tp1_filled{false};
     std::chrono::system_clock::time_point opened_at;
+    double     unrealized_pnl{0.0};
 
     bool operator==(const ActiveTrade&) const = default;
 };

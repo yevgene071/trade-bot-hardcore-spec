@@ -33,3 +33,4 @@ GEMINI.md
 
 .gemini/
 gha-creds-*.json
+node_modules

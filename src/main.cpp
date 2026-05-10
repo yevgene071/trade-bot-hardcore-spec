@@ -31,11 +31,14 @@
 #include "risk/TradingDay.hpp"
 
 #include <chrono>
+#include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <spdlog/fmt/ranges.h>
 #include <iostream>
 #include <memory>
 #include <thread>
+#include <deque>
 #include <map>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/executor_work_guard.hpp>
@@ -115,7 +118,28 @@ private:
                 "IcebergSuspected","TapeBurst","TapeFade","TapeFlush","TapeDistribution",
                 "LevelFormed","LevelApproach","LevelRejection","LevelBreak","LeaderMove"};
             auto idx = static_cast<std::size_t>(s.kind);
-            signal_counts_[idx < std::size(kKindNames) ? kKindNames[idx] : "Unknown"]++;
+            const char* kind_name = idx < std::size(kKindNames) ? kKindNames[idx] : "Unknown";
+            signal_counts_[kind_name]++;
+
+            // Ring buffer of recent signal events for the dashboard feed.
+            // Called on ioc_ thread (same as tick()), so no mutex needed.
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                s.timestamp.time_since_epoch()) % 1000;
+            auto tt = std::chrono::system_clock::to_time_t(s.timestamp);
+            std::tm tm_buf{};
+            gmtime_r(&tt, &tm_buf);
+            char tbuf[16];
+            std::snprintf(tbuf, sizeof(tbuf), "%02d:%02d:%02d.%03d",
+                          tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec,
+                          static_cast<int>(ms.count()));
+            DashboardServer::State::SignalEvent ev;
+            ev.kind       = kind_name;
+            ev.ticker     = s.ticker;
+            ev.price      = s.price;
+            ev.confidence = s.confidence;
+            ev.time_str   = tbuf;
+            recent_signals_.push_front(std::move(ev));
+            if (recent_signals_.size() > 60) recent_signals_.pop_back();
         });
 
         strategy_engine_ = std::make_unique<StrategyEngine>(*signal_bus_);
@@ -126,9 +150,13 @@ private:
             account_state_ = persisted->account_state;
             last_reset_day_ = persisted->last_reset_day_utc;
         } else {
-            account_state_.equity_usd = 10000.0;
+            account_state_.equity_usd          = 10000.0;
+            account_state_.starting_equity_usd = 10000.0;
             last_reset_day_ = TradingDay::current_date_utc();
         }
+        // Guard against persisted state saved before starting_equity was set.
+        if (account_state_.starting_equity_usd <= 0.0)
+            account_state_.starting_equity_usd = account_state_.equity_usd;
         // In paper mode there are no exchange balance updates, so seed free_balance
         // from equity so the dashboard shows a non-zero figure.
         if (account_state_.free_balance_usd == 0.0 && account_state_.equity_usd > 0.0)
@@ -305,6 +333,20 @@ private:
         strategy_engine_->tick(now);
         executor_->tick(now);
 
+        // Apply closed trades → update equity and write journal
+        for (const auto& ct : executor_->pop_closed_trades()) {
+            account_state_.realized_pnl_today_usd += ct.pnl_usd;
+            account_state_.equity_usd             += ct.pnl_usd;
+            account_state_.free_balance_usd       += ct.pnl_usd;
+            TradeJournal::Entry je;
+            je.plan          = ct.plan;
+            je.pnl_usd       = ct.pnl_usd;
+            je.exit_price    = ct.exit_price;
+            je.cause_of_exit = ct.reason;
+            journal_.log_entry(je);
+        }
+        account_state_.unrealized_pnl_usd = executor_->unrealized_pnl();
+
         if (now - last_persist_ > std::chrono::seconds(10)) {
             persister_->save({account_state_, {}, last_reset_day_, false, ""});
             last_persist_ = now;
@@ -312,6 +354,7 @@ private:
 
         DashboardServer::State dash_state;
         dash_state.account = account_state_;
+        dash_state.recent_journal = journal_.get_recent_entries(20);
         dash_state.open_trades = executor_->get_active_trades();
         dash_state.kill_switch_active = kill_switch_->is_triggered();
         dash_state.version = Config::get<std::string>("app.version");
@@ -321,8 +364,10 @@ private:
             row.ticker     = ticker;
             row.strategies = universe_.enabled_strategies(ticker);
             row.boosted    = universe_.is_boosted(ticker, now);
+            row.mark_price = feed_->get_mark_price(ticker);
             dash_state.universe_rows.push_back(std::move(row));
         }
+        dash_state.recent_signals.assign(recent_signals_.begin(), recent_signals_.end());
         dashboard_->update_state(dash_state);
     }
 
@@ -359,6 +404,8 @@ private:
     std::map<Ticker, const OrderBook*> books_for_executor_;
     std::map<Ticker, std::chrono::system_clock::time_point> last_funding_times_;
     std::map<std::string, int> signal_counts_;
+    std::deque<DashboardServer::State::SignalEvent> recent_signals_; // newest first, max 60
+    TradeJournal journal_{"journal"};
 };
 
 int main() {
