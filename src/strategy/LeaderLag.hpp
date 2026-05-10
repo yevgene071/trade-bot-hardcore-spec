@@ -22,8 +22,8 @@ public:
         std::chrono::seconds entry_timeout{5};
     };
 
-    LeaderLag(Ticker ticker, const Config& cfg);
-    explicit LeaderLag(Ticker ticker);
+    LeaderLag(Ticker ticker, TickerInfo info, const Config& cfg);
+    LeaderLag(Ticker ticker, TickerInfo info);
 
     const std::string& name() const override { return name_; }
     const Ticker& ticker() const override { return ticker_; }
@@ -34,6 +34,7 @@ public:
 
 private:
     Ticker          ticker_;
+    TickerInfo      info_;
     std::string     name_;
     Config          cfg_;
     StrategyContext ctx_;

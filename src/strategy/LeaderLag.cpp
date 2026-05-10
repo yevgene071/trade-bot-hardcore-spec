@@ -4,13 +4,21 @@
 
 namespace trade_bot {
 
-LeaderLag::LeaderLag(Ticker ticker, const Config& cfg)
+namespace {
+double round_to_tick(double val, double tick) {
+    if (tick <= 0) return val;
+    return std::round(val / tick) * tick;
+}
+}
+
+LeaderLag::LeaderLag(Ticker ticker, TickerInfo info, const Config& cfg)
     : ticker_(std::move(ticker))
+    , info_(std::move(info))
     , name_("LeaderLag")
     , cfg_(cfg) {}
 
-LeaderLag::LeaderLag(Ticker ticker)
-    : LeaderLag(std::move(ticker), Config{}) {}
+LeaderLag::LeaderLag(Ticker ticker, TickerInfo info)
+    : LeaderLag(std::move(ticker), std::move(info), Config{}) {}
 
 void LeaderLag::on_frame(const FeatureFrame& frame) {
     if (frame.ticker == ticker_) {
@@ -50,13 +58,13 @@ std::optional<TradePlan> LeaderLag::tick(std::chrono::system_clock::time_point n
 
     // Calculate Prices
     double mid = ctx_.last_frame.mid;
-    double entry_price = mid; // Market entry
+    double entry_price = round_to_tick(mid, info_.price_increment);
     double stop_dist = mid * (cfg_.stop_distance_bps / 10000.0);
-    double stop_price = (plan_side == Side::Buy) ? mid - stop_dist : mid + stop_dist;
+    double stop_price = round_to_tick((plan_side == Side::Buy) ? mid - stop_dist : mid + stop_dist, info_.price_increment);
 
     double expected_catchup_bps = std::abs(lag_pct) * 100.0;
     double tp1_offset = mid * (expected_catchup_bps * cfg_.tp1_catchup_ratio / 10000.0);
-    double tp1_price = (plan_side == Side::Buy) ? mid + tp1_offset : mid - tp1_offset;
+    double tp1_price = round_to_tick((plan_side == Side::Buy) ? mid + tp1_offset : mid - tp1_offset, info_.price_increment);
 
     TradePlan plan {
         .ticker = ticker_,
@@ -70,7 +78,7 @@ std::optional<TradePlan> LeaderLag::tick(std::chrono::system_clock::time_point n
         .size_coin = 0.0,
         .risk_usd = 0.0,
         .strategy_name = name_,
-        .reason = "Leader lag detected: " + std::to_string(lag_pct) + "%",
+        .reason = "Leader lag detected",
         .evidence = {it_move->second},
         .valid_until = now + cfg_.entry_timeout
     };
