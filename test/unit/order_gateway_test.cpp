@@ -71,3 +71,40 @@ TEST_F(OrderGatewayTest, PlaceOrder) {
     EXPECT_EQ(result.status, "ok");
     EXPECT_EQ(result.client_id, "ms_123");
 }
+
+TEST_F(OrderGatewayTest, GetConnectionsWrapped) {
+    auto http = std::make_shared<MockHttpClient>();
+    OrderGateway gateway(http);
+    
+    nlohmann::json connections_json = {
+        {"connections", {
+            {{"Id", 1}, {"Name", "Test Connection"}, {"State", "Connected"}, {"ViewMode", false}}
+        }}
+    };
+    
+    http->m_next_response = {200, connections_json.dump(), {}};
+    
+    auto connections = gateway.get_connections();
+    ASSERT_EQ(connections.size(), 1);
+    EXPECT_EQ(connections[0].id, 1);
+    EXPECT_EQ(connections[0].name, "Test Connection");
+}
+
+TEST_F(OrderGatewayTest, GetTickersWrapped) {
+    auto http = std::make_shared<MockHttpClient>();
+    OrderGateway gateway(http);
+    
+    nlohmann::json tickers_json = {
+        {"connectionId", 1},
+        {"tickers", {
+            {{"Name", "BTCUSDT"}, {"BaseAsset", "BTC"}, {"QuoteAsset", "USDT"}}
+        }}
+    };
+    
+    http->m_next_response = {200, tickers_json.dump(), {}};
+    
+    auto tickers = gateway.get_tickers(1);
+    ASSERT_EQ(tickers.size(), 1);
+    EXPECT_EQ(tickers[0].name, "BTCUSDT");
+}
+

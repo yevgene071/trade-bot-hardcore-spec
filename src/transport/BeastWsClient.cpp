@@ -76,6 +76,14 @@ void BeastWsClient::disconnect() {
 
 void BeastWsClient::send(std::string_view message) {
     auto msg = std::string(message);
+    if (!m_ws) {
+        // Not yet connected — queue the message, it will be flushed on handshake
+        std::lock_guard<std::mutex> lock(m_write_mutex);
+        constexpr size_t kMaxQueueSize = 1000;
+        if (m_write_queue.size() >= kMaxQueueSize) m_write_queue.pop();
+        m_write_queue.push(std::move(msg));
+        return;
+    }
     auto executor = std::visit([](auto& ws) { return ws.get_executor(); }, *m_ws);
     net::post(executor, [self = shared_from_this(), msg = std::move(msg)]() {
         bool write_in_progress = false;
@@ -192,10 +200,8 @@ void BeastWsClient::do_read() {
         ws.async_read(m_buffer, beast::bind_front_handler(&BeastWsClient::on_read, shared_from_this()));
     }, *m_ws);
 }
-
 void BeastWsClient::on_read(beast::error_code ec, std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
-
     if (ec) {
         if (!m_closing) {
             LOG_WARN("WS read error: {}", ec.message());
@@ -205,13 +211,20 @@ void BeastWsClient::on_read(beast::error_code ec, std::size_t bytes_transferred)
         return;
     }
 
+    LOG_TRACE("WS read {} bytes", bytes_transferred);
+
     if (m_on_message) {
         try {
             auto data = beast::buffers_to_string(m_buffer.data());
+            LOG_TRACE("WS raw message: {}", data);
+
+            // MetaScalp usually sends 1 JSON per WS frame. 
+            // If it ever sends NDJSON, we'd need a line-based splitter here.
             auto j = nlohmann::json::parse(data);
             m_on_message(j);
         } catch (const std::exception& e) {
-            LOG_ERROR("WS JSON parse error: {}", e.what());
+            LOG_ERROR("WS JSON parse error: {} | Raw data: {}", e.what(), 
+                      beast::buffers_to_string(m_buffer.data()));
         }
     }
 
@@ -242,12 +255,14 @@ void BeastWsClient::on_write(beast::error_code ec, std::size_t bytes_transferred
         return;
     }
 
+    bool more = false;
     {
         std::lock_guard<std::mutex> lock(m_write_mutex);
         m_write_queue.pop();
-        if (!m_write_queue.empty()) {
-            do_write();
-        }
+        more = !m_write_queue.empty();
+    }
+    if (more) {
+        do_write();
     }
 }
 

@@ -9,7 +9,7 @@ version = "0.0.1"
 name = "trade_bot_hardcore"
 
 [logger]
-level = "info" # trace, debug, info, warn, error, critical
+level = "trace" # trace, debug, info, warn, error, critical
 path = "logs/trade_bot.log"
 
 [network]
@@ -19,7 +19,7 @@ ws_max_reconnect_delay_ms = 30000
 metascalp_max_rps = 20
 
 [trading]
-symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
 max_concurrent_orders = 5
 
 [risk]
@@ -61,7 +61,7 @@ funding_blackout_pre_sec = 30
 funding_blackout_post_sec = 30
 # Other
 allow_hedge = false
-whitelist_tickers = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+whitelist_tickers = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
 exchange_error_streak = 5
 ws_reconnect_timeout_sec = 15
 ws_loss_poll_interval_ms = 500
@@ -80,8 +80,8 @@ finres_kill_on_staleness = false
 [clock]
 sources = ["pool.ntp.org", "time.google.com"]
 check_interval_sec = 30
-warn_drift_ms = 200
-max_clock_drift_ms = 500
+warn_drift_ms = 500
+max_clock_drift_ms = 2000
 
 
 [external_feeds]
@@ -202,6 +202,25 @@ affinity_threshold = 0.4
 affinity_stable_min = 5
 
 [universe]
+[universe.pool]
+allow_patterns         = ["*USDT"]
+deny_patterns          = ["*UP*", "*DOWN*", "*BULL*", "*BEAR*", "*1000*"]
+require_trading_allowed = true
+max_pool_size          = 30
+pool_refresh_min       = 30
+# Operator-guaranteed tickers (bypass warmup requirement).
+# Once warmup is implemented this list can be cleared and the bot
+# will self-select the best tickers by the criteria below.
+manual_allow           = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+
+# Dynamic pool filter (active once warmup stats are collected):
+# Skip top-N highest-volume tickers — they're too efficient for scalping.
+# Target mid-caps where density/level patterns are more pronounced.
+exclude_top_n_by_volume = 10
+min_volume_24h_usd      = 10000000   # 10M (lower than spec default 50M to include more mid-caps)
+max_avg_spread_bps      = 15
+warmup_sec              = 600
+
 [universe.affinity]
 # Settings for TickerUniverse
 affinity_stable_min = 5

@@ -26,8 +26,8 @@ std::optional<int> MetaScalpDiscovery::discover() {
             if (response.status == 200) {
                 try {
                     auto j = nlohmann::json::parse(response.body);
-                    if (j.contains("App") && j["App"] == "MetaScalp") {
-                        std::string version = j.value("Version", "unknown");
+                    if (j.contains("app") && j["app"] == "MetaScalp") {
+                        std::string version = j.value("version", "unknown");
                         LOG_INFO("MetaScalp API discovered on port {} (Version: {})", port, version);
                         return port;
                     }

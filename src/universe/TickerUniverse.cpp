@@ -34,7 +34,9 @@ bool TickerUniverse::passes_filter_(const Ticker& ticker, double& out_volume) co
     std::optional<TickerStats> s;
     if (stats_lookup_) s = stats_lookup_(ticker);
 
-    if (manual_override) {
+    const bool screener_override = screener_approved_.count(ticker) > 0;
+
+    if (manual_override || screener_override) {
         if (s) out_volume = s->volume_24h_usd;
         return true;
     }
@@ -130,10 +132,33 @@ void TickerUniverse::on_big_amount(const Ticker& ticker, double /*size_usd*/,
     refresh_affinity();
 }
 
+void TickerUniverse::seed_candidates(const std::vector<Ticker>& candidates) {
+    all_candidates_ = candidates;
+}
+
 void TickerUniverse::on_screener_new_coin(const Ticker& ticker) {
-    LOG_INFO("TickerUniverse: new coin from screener: {}", ticker);
-    // In a real bot this would trigger an immediate GET /tickers 
-    // or add it to a 'must-warmup' set.
+    if (!filters_.accepts(ticker)) return;
+    if (screener_approved_.insert(ticker).second) {
+        LOG_INFO("[Universe] Screener: {} approved, rebuilding pool ({} screener coins)",
+                 ticker, screener_approved_.size());
+        std::vector<Ticker> pool_candidates;
+        pool_candidates.reserve(all_candidates_.size());
+        for (const auto& t : all_candidates_) {
+            if (screener_approved_.count(t) ||
+                std::find(cfg_.filters.manual_allow.begin(),
+                          cfg_.filters.manual_allow.end(), t)
+                != cfg_.filters.manual_allow.end()) {
+                pool_candidates.push_back(t);
+            }
+        }
+        // add manual_allow that might not be in all_candidates_
+        for (const auto& t : cfg_.filters.manual_allow) {
+            if (std::find(pool_candidates.begin(), pool_candidates.end(), t) == pool_candidates.end())
+                pool_candidates.push_back(t);
+        }
+        refresh_pool(pool_candidates);
+        refresh_affinity();
+    }
 }
 
 void TickerUniverse::on_big_event(const Ticker& ticker,

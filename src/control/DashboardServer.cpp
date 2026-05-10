@@ -39,7 +39,7 @@ static const char* kDashboardHtml = R"html(
     </style>
 </head>
 <body>
-    <h1>🚀 Trade Bot Dashboard <small id="version" style="font-size: 0.5em; color: #666;"></small></h1>
+    <h1>🚀 Trade Bot Dashboard <small id="version" style="font-size: 0.5em; color: #666;"></small><div id="ws-status" style="display:inline-block;margin-left:10px;padding:3px 10px;border-radius:12px;font-size:0.75em;background:#f44336;color:white;">● Disconnected</div></h1>
     <div id="killswitch-alert" style="display:none; background: #b71c1c; color: white; padding: 10px; margin-bottom: 20px; border-radius: 5px; font-weight: bold;">
         ⚠️ KILL-SWITCH TRIGGERED ⚠️
     </div>
@@ -56,6 +56,11 @@ static const char* kDashboardHtml = R"html(
         <div class="card signals">
             <h2>Signal Counters</h2>
             <div id="signal-list"></div>
+        </div>
+
+        <div class="card" style="border-left-color:#00bcd4;">
+            <h2 style="color:#00bcd4;">Ticker Universe</h2>
+            <div id="universe-list" style="font-size:0.9em;"></div>
         </div>
 
         <div class="card">
@@ -133,6 +138,33 @@ static const char* kDashboardHtml = R"html(
             $('free-balance').textContent   = '$' + Number(s.account.free_balance_usd  || 0).toFixed(2);
             $('killswitch-alert').style.display = s.kill_switch_active ? 'block' : 'none';
 
+            // Universe
+            const uList = $('universe-list');
+            uList.replaceChildren();
+            const uni = s.universe || [];
+            if (uni.length === 0) {
+                const p = document.createElement('div');
+                p.style.color = '#666';
+                p.textContent = 'No active tickers';
+                uList.appendChild(p);
+            }
+            for (const row of uni) {
+                const div = document.createElement('div');
+                div.className = 'stat';
+                div.style.marginBottom = '6px';
+                const tk = document.createElement('span');
+                tk.textContent = row.ticker + (row.boosted ? ' [BOOST]' : '');
+                if (row.boosted) tk.style.color = '#ffeb3b';
+                const strats = document.createElement('span');
+                strats.className = 'val';
+                strats.style.fontSize = '0.85em';
+                strats.textContent = (row.strategies && row.strategies.length)
+                    ? row.strategies.join(', ') : 'none';
+                div.appendChild(tk);
+                div.appendChild(strats);
+                uList.appendChild(div);
+            }
+
             // Signals
             const sigList = $('signal-list');
             sigList.replaceChildren();
@@ -176,6 +208,7 @@ static const char* kDashboardHtml = R"html(
 
             // Recorder status
             const rec = s.dump_recorder || {};
+            _recording = !!rec.active;  // Sync with server state
             const isRec = !!rec.active;
             $('rec-status').textContent = isRec ? '● RECORDING' : 'idle';
             $('rec-status').style.color = isRec ? '#f44336' : '#aaa';
@@ -205,10 +238,11 @@ static const char* kDashboardHtml = R"html(
         let backoff = 500;
         function connect() {
             const ws = new WebSocket('ws://' + window.location.host + '/ws');
-            ws.onopen    = () => { backoff = 500; };
+            ws.onopen    = () => { backoff = 500; $('ws-status').textContent = '● Live'; $('ws-status').style.background = '#4caf50'; };
             ws.onmessage = (ev) => { try { updateUI(JSON.parse(ev.data)); }
                                      catch (e) { console.error('bad payload', e); } };
             ws.onclose   = () => {
+                $('ws-status').textContent = '● Reconnecting…'; $('ws-status').style.background = '#ff9800';
                 backoff = Math.min(backoff * 2, 30000);
                 setTimeout(connect, backoff);
             };
@@ -265,8 +299,8 @@ struct DashboardServer::Session : public std::enable_shared_from_this<DashboardS
 
     Session(tcp::socket socket, DashboardServer& p) : ws(std::move(socket)), parent(p) {}
 
-    void start() {
-        ws.async_accept([self = shared_from_this()](beast::error_code ec) {
+    void start(const http::request<http::string_body>& req) {
+        ws.async_accept(req, [self = shared_from_this()](beast::error_code ec) {
             if (!ec) self->send_initial();
         });
     }
@@ -403,6 +437,9 @@ void DashboardServer::update_state(const State& state) {
         payload = serialize_state_locked_();
         sessions_snap.assign(sessions_.begin(), sessions_.end());
     }
+
+    LOG_TRACE("Dashboard update: {} bytes, {} sessions", payload.size(), sessions_snap.size());
+
     for (auto& s : sessions_snap) {
         s->send_payload(payload);
     }
@@ -451,6 +488,14 @@ std::string DashboardServer::serialize_state_locked_() const {
         {"active", recorder_ && recorder_->is_active()},
         {"path",   recorder_ ? recorder_->path() : ""}
     };
+    j["universe"] = nlohmann::json::array();
+    for (const auto& r : s.universe_rows) {
+        j["universe"].push_back({
+            {"ticker",     r.ticker},
+            {"strategies", r.strategies},
+            {"boosted",    r.boosted}
+        });
+    }
     return j.dump();
 }
 
@@ -467,13 +512,14 @@ void DashboardServer::on_accept(beast::error_code, tcp::socket socket) {
     std::make_shared<HttpSession>(std::move(socket), *this)->run();
 }
 
-void DashboardServer::start_ws_session(tcp::socket socket) {
+void DashboardServer::start_ws_session(tcp::socket socket,
+                                        const http::request<http::string_body>& req) {
     auto ws_session = std::make_shared<Session>(std::move(socket), *this);
     {
         std::lock_guard lock(mutex_);
         sessions_.insert(ws_session);
     }
-    ws_session->start();
+    ws_session->start(req);
 }
 
 void HttpSession::handle_request() {
@@ -495,7 +541,7 @@ void HttpSession::handle_request() {
     }
 
     if (websocket::is_upgrade(*req)) {
-        parent.start_ws_session(stream.release_socket());
+        parent.start_ws_session(stream.release_socket(), *req);
         return;
     }
 
@@ -531,6 +577,11 @@ void HttpSession::handle_request() {
                 arr.push_back(line);
         }
         send_json(http::status::ok, arr.dump());
+        return;
+    }
+
+    if (req->method() == http::verb::get && req->target() == "/api/state") {
+        send_json(http::status::ok, parent.serialize_state());
         return;
     }
 

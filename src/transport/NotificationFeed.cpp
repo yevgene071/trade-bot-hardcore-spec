@@ -49,8 +49,13 @@ void NotificationFeed::handle_message_(const nlohmann::json& j) {
 }
 
 void NotificationFeed::route_notification_(const Notification& n) {
-    // Filter by exchange and market type
-    if (n.exchange_id != cfg_.exchange_id || n.market_type != cfg_.market_type) {
+    // Filter by exchange/market type only when explicitly configured (non-zero).
+    if (cfg_.exchange_id != 0 && n.exchange_id != cfg_.exchange_id) {
+        dropped_wrong_connection_++;
+        MetricsRegistry::instance().counter_inc("trade_bot_notification_dropped_total");
+        return;
+    }
+    if (cfg_.market_type != 0 && n.market_type != cfg_.market_type) {
         dropped_wrong_connection_++;
         MetricsRegistry::instance().counter_inc("trade_bot_notification_dropped_total");
         return;

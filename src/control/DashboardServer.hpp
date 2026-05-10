@@ -27,10 +27,17 @@ namespace trade_bot {
 class DashboardServer {
 public:
     struct State {
+        struct UniverseRow {
+            std::string              ticker;
+            std::vector<std::string> strategies;
+            bool                     boosted{false};
+        };
+
         AccountState account;
         std::vector<ActiveTrade> open_trades;
         std::vector<TradeJournal::Entry> recent_journal;
         std::map<std::string, int> signal_counts;
+        std::vector<UniverseRow> universe_rows;
         bool kill_switch_active{false};
         std::string version;
     };
@@ -65,7 +72,8 @@ public:
     void start();
 
     // Internal usage
-    void start_ws_session(boost::asio::ip::tcp::socket socket);
+    void start_ws_session(boost::asio::ip::tcp::socket socket,
+                          const boost::beast::http::request<boost::beast::http::string_body>& req);
 
     /// Snapshot the current state to a JSON string. Public for the unit test
     /// that pins the deadlock-free serializer path.

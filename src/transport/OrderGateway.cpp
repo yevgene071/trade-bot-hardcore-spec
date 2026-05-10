@@ -16,10 +16,17 @@ std::vector<ConnectionInfo> OrderGateway::get_connections() {
     }
     
     auto j = nlohmann::json::parse(response.body);
-    std::vector<ConnectionInfo> result;
+    const nlohmann::json* arr = nullptr;
     if (j.is_array()) {
-        result.resize(j.size());
-        std::transform(j.begin(), j.end(), result.begin(), [](const auto& item) {
+        arr = &j;
+    } else if (j.contains("connections") && j["connections"].is_array()) {
+        arr = &j["connections"];
+    }
+
+    std::vector<ConnectionInfo> result;
+    if (arr) {
+        result.resize(arr->size());
+        std::transform(arr->begin(), arr->end(), result.begin(), [](const auto& item) {
             return MetaScalpCodec::parse_connection_info(item);
         });
     }
@@ -44,10 +51,17 @@ std::vector<TickerInfo> OrderGateway::get_tickers(int connection_id, bool refres
     }
     
     auto j = nlohmann::json::parse(response.body);
-    std::vector<TickerInfo> result;
+    const nlohmann::json* arr = nullptr;
     if (j.is_array()) {
-        result.resize(j.size());
-        std::transform(j.begin(), j.end(), result.begin(), [](const auto& item) {
+        arr = &j;
+    } else if (j.contains("tickers") && j["tickers"].is_array()) {
+        arr = &j["tickers"];
+    }
+
+    std::vector<TickerInfo> result;
+    if (arr) {
+        result.resize(arr->size());
+        std::transform(arr->begin(), arr->end(), result.begin(), [](const auto& item) {
             return MetaScalpCodec::parse_ticker_info(item);
         });
     }
@@ -63,10 +77,17 @@ std::vector<RestOrder> OrderGateway::get_open_orders(int connection_id, const Ti
     }
     
     auto j = nlohmann::json::parse(response.body);
-    std::vector<RestOrder> result;
+    const nlohmann::json* arr = nullptr;
     if (j.is_array()) {
-        result.resize(j.size());
-        std::transform(j.begin(), j.end(), result.begin(), [](const auto& item) {
+        arr = &j;
+    } else if (j.contains("orders") && j["orders"].is_array()) {
+        arr = &j["orders"];
+    }
+
+    std::vector<RestOrder> result;
+    if (arr) {
+        result.resize(arr->size());
+        std::transform(arr->begin(), arr->end(), result.begin(), [](const auto& item) {
             return MetaScalpCodec::parse_rest_order(item);
         });
     }
@@ -82,10 +103,17 @@ std::vector<PositionUpdate> OrderGateway::get_positions(int connection_id) {
     }
     
     auto j = nlohmann::json::parse(response.body);
-    std::vector<PositionUpdate> result;
+    const nlohmann::json* arr = nullptr;
     if (j.is_array()) {
-        result.resize(j.size());
-        std::transform(j.begin(), j.end(), result.begin(), [](const auto& item) {
+        arr = &j;
+    } else if (j.contains("positions") && j["positions"].is_array()) {
+        arr = &j["positions"];
+    }
+
+    std::vector<PositionUpdate> result;
+    if (arr) {
+        result.resize(arr->size());
+        std::transform(arr->begin(), arr->end(), result.begin(), [](const auto& item) {
             return MetaScalpCodec::parse_position_update(item);
         });
     }

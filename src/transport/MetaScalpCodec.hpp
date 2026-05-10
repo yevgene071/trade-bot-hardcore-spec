@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string_view>
+#include <cctype>
 
 namespace trade_bot {
 
@@ -103,6 +104,18 @@ public:
     static OrderStatus parse_order_status(const nlohmann::json& v);
     static PositionStatus parse_position_status(const nlohmann::json& v);
     static std::chrono::system_clock::time_point parse_timestamp(const std::string& ts_str);
+
+    template<typename T>
+    static T get_val(const nlohmann::json& j, const std::string& key, T default_val = T()) {
+        if (j.contains(key)) return j.value(key, default_val);
+        std::string alt = key;
+        if (!alt.empty()) {
+            if (std::isupper(alt[0])) alt[0] = std::tolower(alt[0]);
+            else alt[0] = std::toupper(alt[0]);
+            if (j.contains(alt)) return j.value(alt, default_val);
+        }
+        return default_val;
+    }
 
 private:
     static void check_required(const nlohmann::json& j, std::string_view field);

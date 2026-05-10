@@ -95,3 +95,36 @@ TEST(CodecTest, FinresUpdateParsing) {
     EXPECT_EQ(finres.finreses[0].currency, "USDT");
     EXPECT_EQ(finres.finreses[0].result, 10.5);
 }
+
+TEST(CodecTest, CamelCaseParsing) {
+    // Test order update with camelCase
+    nlohmann::json j_order = {
+        {"orderId", 12345},
+        {"ticker", "BTCUSDT"},
+        {"side", "Buy"},
+        {"type", "Limit"},
+        {"price", 60000.5},
+        {"status", "New"}
+    };
+    auto update = MetaScalpCodec::parse_order_update(j_order);
+    EXPECT_EQ(update.order_id, 12345);
+    EXPECT_EQ(update.ticker, "BTCUSDT");
+
+    // Test orderbook snapshot with lowercase keys
+    nlohmann::json j_ob = {
+        {"connectionId", 1},
+        {"ticker", "ETHUSDT"},
+        {"asks", {
+            {{"price", 2500.1}, {"size", 1.0}}
+        }},
+        {"bids", {
+            {{"price", 2499.9}, {"size", 2.0}}
+        }}
+    };
+    auto snap = MetaScalpCodec::parse_orderbook_snapshot(j_ob, "ETHUSDT");
+    ASSERT_EQ(snap.asks.size(), 1);
+    EXPECT_DOUBLE_EQ(snap.asks[0].price, 2500.1);
+    ASSERT_EQ(snap.bids.size(), 1);
+    EXPECT_DOUBLE_EQ(snap.bids[0].price, 2499.9);
+}
+

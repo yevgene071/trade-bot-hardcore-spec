@@ -9,6 +9,7 @@
 #include "signals/LevelDetector.hpp"
 #include "signals/ApproachAnalyzer.hpp"
 #include "signals/LeaderSignal.hpp"
+#include "transport/MarketDataFeed.hpp"
 
 #include <memory>
 
@@ -16,8 +17,9 @@ namespace trade_bot {
 
 /**
  * T3-INTEGRATION: Container for all per-ticker market data and signal processing components.
+ * Implements IMarketDataListener so it can be registered directly with MarketDataFeed.
  */
-struct TickerController {
+struct TickerController : public IMarketDataListener {
     std::unique_ptr<OrderBook> book;
     std::unique_ptr<TradeStream> stream;
     std::unique_ptr<FeatureExtractor> extractor;
@@ -52,11 +54,26 @@ struct TickerController {
         stream->on_trade(t);
         for (auto& d : detectors) d->on_trade(t);
     }
-    
+
     void on_book_update(const OrderBookUpdate& u) {
         book->apply_update(u);
         for (auto& d : detectors) d->on_book_update(u);
     }
+
+    // IMarketDataListener — market data dispatch from MarketDataFeed
+    void on_trade(const Ticker& /*ticker*/, const Trade& t) override { on_trade(t); }
+    void on_trades(const Ticker& /*ticker*/, const std::vector<Trade>& trades) override {
+        for (const auto& t : trades) on_trade(t);
+    }
+    void on_orderbook_snapshot(const OrderBookSnapshot& snap) override {
+        book->apply_snapshot(snap);
+    }
+    void on_orderbook_update(const OrderBookUpdate& upd) override { on_book_update(upd); }
+    void on_order_update(const OrderUpdate&) override {}
+    void on_position_update(const PositionUpdate&) override {}
+    void on_balance_update(const BalanceUpdate&) override {}
+    void on_finres_update(const FinresUpdate&) override {}
+    void on_error(const std::string&) override {}
     
     FeatureFrame tick(std::chrono::system_clock::time_point now) {
         stream->update(now);

@@ -69,6 +69,11 @@ public:
     TickerUniverse();
     explicit TickerUniverse(Config cfg);
 
+    void update_config(Config cfg) {
+        cfg_ = std::move(cfg);
+        filters_ = UniverseFilters(cfg_.filters);
+    }
+
     void set_stats_lookup(StatsLookup fn);
     void set_affinity_change_handler(AffinityChange fn);
     void register_strategy(const std::string& name, AffinityScore fn);
@@ -90,7 +95,7 @@ public:
 
     void on_big_tick(const Ticker& ticker, double size_usd, std::chrono::system_clock::time_point now);
     void on_big_amount(const Ticker& ticker, double size_usd, std::chrono::system_clock::time_point now);
-    static void on_screener_new_coin(const Ticker& ticker);
+    void on_screener_new_coin(const Ticker& ticker);
 
     void on_big_event(const Ticker& ticker, std::chrono::system_clock::time_point now);
     bool is_boosted(const Ticker& ticker,
@@ -101,6 +106,10 @@ public:
 
     void cache_meta(const Ticker& ticker, const TickerMeta& meta);
     std::optional<TickerMeta> meta(const Ticker& ticker) const;
+
+    /// Seed the full list of static-filtered candidates (called once at startup).
+    /// These are the candidates `on_screener_new_coin` will draw from.
+    void seed_candidates(const std::vector<Ticker>& candidates);
 
 private:
     bool passes_filter_(const Ticker& ticker, double& out_volume) const;
@@ -116,6 +125,9 @@ private:
     std::unordered_map<Ticker, std::chrono::system_clock::time_point> boosts_;
     std::unordered_map<Ticker, double>             large_amounts_;
     std::unordered_map<Ticker, TickerMeta>         meta_cache_;
+
+    std::set<Ticker>                               screener_approved_;  // tickers from MetaScalp screener
+    std::vector<Ticker>                            all_candidates_;     // full static-filtered list
 };
 
 }  // namespace trade_bot

@@ -6,6 +6,7 @@
 #include "control/SntpClient.hpp"
 #include "control/TickerController.hpp"
 #include "transport/MarketDataFeed.hpp"
+#include "transport/NotificationFeed.hpp"
 #include "transport/DumpRecorder.hpp"
 #include "transport/MetaScalpCodec.hpp"
 #include "transport/MetaScalpDiscovery.hpp"
@@ -19,6 +20,7 @@
 #include "transport/external/FeedStalenessMonitor.hpp"
 #include "marketdata/ClusterSnapshot.hpp"
 #include "universe/TickerUniverse.hpp"
+#include "universe/UniverseFilters.hpp"
 #include "strategy/StrategyEngine.hpp"
 #include "strategy/BounceFromDensity.hpp"
 #include "strategy/BreakoutEatThrough.hpp"
@@ -31,11 +33,13 @@
 
 #include <chrono>
 #include <filesystem>
+#include <spdlog/fmt/ranges.h>
 #include <iostream>
 #include <memory>
 #include <thread>
 #include <map>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/steady_timer.hpp>
 
 #include "control/DashboardServer.hpp"
@@ -78,7 +82,10 @@ private:
         kill_switch_->start();
 
         auto ntp = std::make_shared<SntpClient>();
-        clock_monitor_ = std::make_unique<ClockDriftMonitor>(ntp, ClockDriftMonitor::Config{});
+        clock_monitor_ = std::make_unique<ClockDriftMonitor>(ntp, ClockDriftMonitor::Config{
+            .warn_drift_ms      = Config::get_or<int64_t>("clock.warn_drift_ms",      500),
+            .max_clock_drift_ms = Config::get_or<int64_t>("clock.max_clock_drift_ms", 2000),
+        });
         clock_monitor_->start();
 
         auto& ext_ioc = ExternalIoContext::instance();
@@ -90,18 +97,29 @@ private:
         const auto dashboard_addr = Config::get_or<std::string>("dashboard.bind_address", "127.0.0.1");
         const auto dashboard_port = static_cast<uint16_t>(Config::get_or<int64_t>("dashboard.port", 8080));
         const auto dashboard_token = Config::get_or<std::string>("dashboard.auth_token", std::string{});
-        dashboard_ = std::make_unique<DashboardServer>(ioc_, dashboard_addr, dashboard_port, dashboard_token);
+        dashboard_ = std::make_unique<DashboardServer>(dashboard_ioc_, dashboard_addr, dashboard_port, dashboard_token);
         dashboard_->start();
 
         const auto metrics_port = static_cast<uint16_t>(Config::get_or<int64_t>("metrics.port", 9090));
         const auto metrics_addr = Config::get_or<std::string>("metrics.bind_address", "127.0.0.1");
         const auto metrics_token = Config::get_or<std::string>("metrics.auth_token", std::string{});
-        metrics_exporter_ = std::make_unique<MetricsExporter>(ioc_, metrics_addr, metrics_port, metrics_token);
+        metrics_exporter_ = std::make_unique<MetricsExporter>(dashboard_ioc_, metrics_addr, metrics_port, metrics_token);
         metrics_exporter_->start();
+
+        dashboard_thread_ = std::thread([this]() {
+            auto work = boost::asio::make_work_guard(dashboard_ioc_);
+            dashboard_ioc_.run();
+        });
 
         signal_bus_ = std::make_unique<SignalBus>();
         signal_bus_->subscribe([&](const Signal& s) {
             MetricsRegistry::instance().counter_inc("trade_bot_signals_total", {{"kind", std::to_string(static_cast<int>(s.kind))}});
+            static constexpr const char* kKindNames[] = {
+                "DensityDetected","DensityRemoved","DensityEating",
+                "IcebergSuspected","TapeBurst","TapeFade","TapeFlush","TapeDistribution",
+                "LevelFormed","LevelApproach","LevelRejection","LevelBreak","LeaderMove"};
+            auto idx = static_cast<std::size_t>(s.kind);
+            signal_counts_[idx < std::size(kKindNames) ? kKindNames[idx] : "Unknown"]++;
         });
 
         strategy_engine_ = std::make_unique<StrategyEngine>(*signal_bus_);
@@ -127,12 +145,29 @@ private:
         auto port = discovery.discover();
         if (!port) throw std::runtime_error("MetaScalp not found");
 
-        feed_ = std::make_unique<MarketDataFeed>(ws, 1);
+        auto gateway = std::make_shared<OrderGateway>(http);
+        gateway->set_port(*port);
+        
+        int connection_id = 1; // Default
+        try {
+            auto connections = gateway->get_connections();
+            for (const auto& conn : connections) {
+                if (conn.name.find("Futures") != std::string::npos) {
+                    connection_id = conn.id;
+                    LOG_INFO("Selected connection {}: {}", connection_id, conn.name);
+                    break;
+                }
+            }
+        } catch (const std::exception& e) {
+            LOG_WARN("Failed to get connections, using default ID 1: {}", e.what());
+        }
+
+        feed_ = std::make_unique<MarketDataFeed>(ws, connection_id);
         feed_->set_record_tap([this](const nlohmann::json& msg, int64_t ts_ns) {
             dump_recorder_.record(msg, ts_ns);
         });
         dashboard_->set_recorder(&dump_recorder_);
-        cluster_client_ = std::make_unique<ClusterSnapshotClient>(*http, "http://localhost:" + std::to_string(*port), 1);
+        cluster_client_ = std::make_unique<ClusterSnapshotClient>(*http, "http://localhost:" + std::to_string(*port), connection_id);
         cluster_mgr_ = std::make_unique<ClusterSnapshotManager>(*cluster_client_);
         cluster_mgr_->start();
 
@@ -148,10 +183,12 @@ private:
         });
 
         universe_.set_affinity_change_handler([&](const Ticker& ticker, const std::string& strategy, bool enabled) {
+            LOG_INFO("[Universe] {} {} for {}", enabled ? "ENABLED" : "DISABLED", strategy, ticker);
             if (enabled) {
                 if (!controllers_.contains(ticker)) {
                     controllers_[ticker] = std::make_unique<TickerController>(ticker, *signal_bus_, universe_, *cluster_mgr_);
                     books_for_executor_[ticker] = controllers_[ticker]->book.get();
+                    feed_->add_listener(ticker, controllers_[ticker].get());
                     feed_->subscribe_ticker(ticker);
                     funding_client_->add_ticker(ticker);
                 }
@@ -172,14 +209,72 @@ private:
         universe_.register_strategy("leaderlag", [](const Ticker&){ return true; });
 
         ws->connect("ws://127.0.0.1:" + std::to_string(*port) + "/ws");
-        // Fix for #141: Actually discovery already provides the port, but ws://127.0.0.1 is still hardcoded.
-        // In a real scenario, discovery might provide the full endpoint.
-        // For now, let's ensure we use the discovered port consistently.
         feed_->start();
-        
-        auto initial_universe = Config::get_or<std::vector<std::string>>("universe.initial_pool", {"BTCUSDT", "ETHUSDT"});
-        universe_.refresh_pool(initial_universe);
+
+        // -- Universe discovery -------------------------------------------------
+        auto allow_pats = Config::get_or<std::vector<std::string>>(
+            "universe.pool.allow_patterns", std::vector<std::string>{"*USDT"});
+        auto deny_pats  = Config::get_or<std::vector<std::string>>(
+            "universe.pool.deny_patterns",
+            std::vector<std::string>{"*UP*", "*DOWN*", "*BULL*", "*BEAR*", "*1000*"});
+        auto operator_allow = Config::get_or<std::vector<std::string>>(
+            "universe.pool.manual_allow",
+            Config::get_or<std::vector<std::string>>("trading.symbols",
+                std::vector<std::string>{}));
+
+        // Fetch all tickers, apply static filter, cache meta for every candidate.
+        std::vector<Ticker> all_candidates;
+        try {
+            auto all_infos = gateway->get_tickers(connection_id);
+            LOG_INFO("[Universe] Fetched {} tickers from MetaScalp", all_infos.size());
+
+            UniverseFilters::Config flt_cfg;
+            flt_cfg.allow_patterns = allow_pats;
+            flt_cfg.deny_patterns  = deny_pats;
+            UniverseFilters static_flt(flt_cfg);
+
+            for (auto& info : all_infos) {
+                if (!info.is_trading_allowed)       continue;
+                if (!static_flt.accepts(info.name)) continue;
+                universe_.cache_meta(info.name, TickerMeta{
+                    info.price_increment, info.size_increment,
+                    info.min_size, info.max_size});
+                all_candidates.push_back(info.name);
+            }
+            LOG_INFO("[Universe] {}/{} tickers pass static filter",
+                     all_candidates.size(), all_infos.size());
+        } catch (const std::exception& e) {
+            LOG_WARN("[Universe] get_tickers failed ({}), using operator list only", e.what());
+            all_candidates = operator_allow;
+        }
+
+        TickerUniverse::Config u_cfg;
+        u_cfg.filters.allow_patterns = allow_pats;
+        u_cfg.filters.deny_patterns  = deny_pats;
+        u_cfg.filters.manual_allow   = operator_allow;
+        u_cfg.max_pool_size = static_cast<std::size_t>(
+            Config::get_or<int64_t>("universe.pool.max_pool_size", 30));
+        universe_.update_config(u_cfg);
+
+        // Seed full candidate list so on_screener_new_coin() can build the pool.
+        universe_.seed_candidates(all_candidates);
+
+        // Initial pool: operator's manual_allow list (bypasses stats gate).
+        // The screener (NotificationFeed) will expand this dynamically.
+        universe_.refresh_pool(operator_allow);
         universe_.refresh_affinity();
+        LOG_INFO("[Universe] Initial pool ({} tickers): [{}]", universe_.active().size(),
+                 fmt::join(universe_.active(), ", "));
+
+        // -- Notification feed (screener + BigTick) ----------------------------
+        // Uses a separate WS connection so its on_message handler does not
+        // conflict with MarketDataFeed's handler on the same socket.
+        auto notif_ws = std::make_shared<BeastWsClient>(ioc_);
+        notif_feed_ = std::make_unique<NotificationFeed>(notif_ws, universe_,
+                                                         NotificationFeed::Config{});
+        notif_ws->connect("ws://127.0.0.1:" + std::to_string(*port) + "/ws");
+        notif_feed_->start();
+        LOG_INFO("[Universe] NotificationFeed started — screener will populate pool");
     }
 
     void schedule_tick() {
@@ -227,13 +322,25 @@ private:
         dash_state.open_trades = executor_->get_active_trades();
         dash_state.kill_switch_active = kill_switch_->is_triggered();
         dash_state.version = Config::get<std::string>("app.version");
+        dash_state.signal_counts = signal_counts_;
+        for (const auto& ticker : universe_.active()) {
+            DashboardServer::State::UniverseRow row;
+            row.ticker     = ticker;
+            row.strategies = universe_.enabled_strategies(ticker);
+            row.boosted    = universe_.is_boosted(ticker, now);
+            dash_state.universe_rows.push_back(std::move(row));
+        }
         dashboard_->update_state(dash_state);
     }
 
 private:
     boost::asio::io_context& ioc_;
+    // Separate io_context for HTTP (dashboard + metrics) so market data WS
+    // processing on ioc_ cannot starve HTTP responses.
+    boost::asio::io_context dashboard_ioc_;
+    std::thread dashboard_thread_;
     boost::asio::steady_timer timer_;
-    
+
     TickerUniverse universe_;
     NewsCalendar news_;
     AccountState account_state_;
@@ -250,6 +357,7 @@ private:
     std::unique_ptr<StrategyEngine> strategy_engine_;
     std::unique_ptr<RiskManager> risk_manager_;
     std::unique_ptr<MarketDataFeed> feed_;
+    std::unique_ptr<NotificationFeed> notif_feed_;
     std::unique_ptr<ClusterSnapshotClient> cluster_client_;
     std::unique_ptr<ClusterSnapshotManager> cluster_mgr_;
     std::unique_ptr<PaperExecutor> executor_;
@@ -258,6 +366,7 @@ private:
     std::map<Ticker, std::unique_ptr<TickerController>> controllers_;
     std::map<Ticker, const OrderBook*> books_for_executor_;
     std::map<Ticker, std::chrono::system_clock::time_point> last_funding_times_;
+    std::map<std::string, int> signal_counts_;
 };
 
 int main() {
@@ -272,3 +381,4 @@ int main() {
     }
     return 0;
 }
+
