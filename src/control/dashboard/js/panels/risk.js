@@ -12,13 +12,15 @@ function renderRisk(data) {
 
   // Gauges
   renderGauge('margin-gauge', r.margin_used_pct || 0, '%');
-  renderGauge('exposure-gauge', r.exposure_usd || 0, '$', r.exposure_max_usd);
+  renderGauge('exposure-gauge', r.exposure_pct || 0, '%', 100);
   renderGauge('daily-pnl-gauge', r.daily_pnl_pct || 0, '%', 2); // 2% limit
 
   // Progress bars
   const lossFill = $('loss-limit-bar');
   if (lossFill) {
-    const pct = Math.min(100, (Math.abs(r.daily_pnl_usd || 0) / (r.daily_loss_limit || 1)) * 100);
+    const dailyPnlUsd = (data.account && data.account.realized_pnl_today_usd) || 0;
+    const dailyLossLimit = Math.abs(r.daily_pnl_pct || 0) > 0.001 ? Math.abs(dailyPnlUsd / (r.daily_pnl_pct / 100)) * 2 : 1000; // rough derived limit
+    const pct = Math.min(100, (Math.abs(dailyPnlUsd) / Math.max(1, dailyLossLimit)) * 100);
     lossFill.style.width = pct + '%';
     lossFill.style.background = pct > 80 ? 'var(--negative-bright)' : 'var(--accent)';
   }
@@ -26,11 +28,11 @@ function renderRisk(data) {
   const slotsFill = $('pos-slots-bar');
   const slotsLabel = slotsFill ? slotsFill.parentElement.previousElementSibling : null;
   if (slotsFill) {
-    const used = r.pos_slots_used || 0;
-    const total = r.pos_slots_total || 3;
-    const pct = (used / total) * 100;
+    const openTrades = (data.open_trades && data.open_trades.length) || 0;
+    const total = 3;
+    const pct = (openTrades / total) * 100;
     slotsFill.style.width = pct + '%';
-    if (slotsLabel) slotsLabel.textContent = `Position Slots (${used}/${total})`;
+    if (slotsLabel) slotsLabel.textContent = `Position Slots (${openTrades}/${total})`;
   }
 }
 

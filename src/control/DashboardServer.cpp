@@ -93,6 +93,7 @@ DashboardServer::DashboardServer(net::io_context& ioc,
                                  uint16_t port,
                                  std::string auth_token)
     : ioc_(ioc)
+    , strand_(net::make_strand(ioc_.get_executor()))
     , acceptor_(ioc, {net::ip::make_address(address), port})
     , auth_token_(std::move(auth_token)) {
     if (auth_token_.empty() && address != "127.0.0.1" && address != "::1") {
@@ -141,6 +142,12 @@ void DashboardServer::update_state(const State& state) {
     {
         std::lock_guard lock(mutex_);
         current_state_ = state;
+        // Accumulate equity history
+        if (state.server_time_unix > 0) {
+            equity_history_.push_back({state.server_time_unix, state.account.equity_usd});
+            while (equity_history_.size() > kMaxEquityHistory)
+                equity_history_.pop_front();
+        }
         if (sessions_.empty()) return;
         payload = serialize_state_locked_();
         snap.assign(sessions_.begin(), sessions_.end());
@@ -157,7 +164,7 @@ void DashboardServer::update_state_async(State state) {
     // so the trading loop is never blocked by JSON serialization.
     // State is taken by value and moved into the lambda to avoid
     // an extra copy of potentially large vector fields.
-    boost::asio::post(ioc_, [this, state = std::move(state)]() mutable {
+    net::post(strand_, [this, state = std::move(state)]() mutable {
         update_state(state);
     });
 }
@@ -328,6 +335,11 @@ std::string DashboardServer::serialize_state_locked_() const {
     j["ob_imbalance"]  = s.ob_imbalance;
     j["selected_ticker"] = s.selected_ticker;
 
+    j["equity_history"] = nlohmann::json::array();
+    for (const auto& pt : equity_history_) {
+        j["equity_history"].push_back({{"ts", pt.first}, {"equity", pt.second}});
+    }
+
     return j.dump();
 }
 
@@ -447,6 +459,25 @@ void HttpSession::handle_request() {
             }
         } catch (...) {}
         send_json(http::status::bad_request, R"({"error":"missing ticker"})");
+        return;
+    }
+
+    if (req->method() == http::verb::post && req->target() == "/api/killswitch/toggle") {
+        bool active;
+        {
+            std::lock_guard lock(parent.mutex_);
+            parent.current_state_.kill_switch_active = !parent.current_state_.kill_switch_active;
+            active = parent.current_state_.kill_switch_active;
+        }
+        nlohmann::json j;
+        j["ok"] = true;
+        j["active"] = active;
+        send_json(http::status::ok, j.dump());
+        return;
+    }
+
+    if (req->method() == http::verb::post && req->target() == "/api/command") {
+        send_json(http::status::ok, R"({"ok":true})");
         return;
     }
 

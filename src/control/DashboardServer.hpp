@@ -11,6 +11,7 @@
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
@@ -18,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <set>
@@ -154,6 +156,8 @@ public:
     void set_selected_ticker(std::string ticker);
     [[nodiscard]] std::string get_selected_ticker() const noexcept;
 
+    friend struct HttpSession;
+
 private:
     void do_accept();
     void on_accept(boost::beast::error_code ec, boost::asio::ip::tcp::socket socket);
@@ -163,12 +167,17 @@ private:
     std::string serialize_state_locked_() const;
 
     boost::asio::io_context& ioc_;
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
     boost::asio::ip::tcp::acceptor acceptor_;
     std::string auth_token_;
 
     mutable std::mutex mutex_;
     State current_state_;
     DumpRecorder* recorder_{nullptr};
+
+    // Equity history ring buffer (1 point per update_state call, max 3600)
+    static constexpr std::size_t kMaxEquityHistory = 3600;
+    std::deque<std::pair<int64_t, double>> equity_history_;
 
     // We'll store active WebSocket sessions here
     struct Session;

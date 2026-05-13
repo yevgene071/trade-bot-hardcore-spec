@@ -18,9 +18,8 @@ let _expandedCell = null;
 let _expandedPos = null;
 let _groupOpen = {};
 
-let _lastChartLen = 0;
-let _lastChartLastMid = 0;
 let _lastTradingHash = '';
+let _lastChartHash = '';
 let _lastSticks = 0;
 let _resizeTimer = null;
 
@@ -54,6 +53,9 @@ function setTfPoints(p) {
 function setSigFilter(f) {
   _sigFilter = f;
 }
+function setLastSigFilter(f) {
+  _lastSigFilter = f;
+}
 function setUniFilter(f) {
   _uniFilter = f;
 }
@@ -65,6 +67,9 @@ function setZoomDragStart(s) {
 }
 function setLastTradingHash(h) {
   _lastTradingHash = h;
+}
+function setLastChartHash(h) {
+  _lastChartHash = h;
 }
 function setLastSticks(s) {
   _lastSticks = s;

@@ -17,19 +17,19 @@ function renderHeader(data) {
   // PnL Badge
   const pnlBadge = $('pnl-badge');
   if (pnlBadge) {
-    const pnl = data.pnl_today || 0;
+    const pnl = (data.account && data.account.realized_pnl_today_usd) || 0;
     pnlBadge.textContent = fmt$(pnl);
     pnlBadge.className = 'pnl-badge ' + (pnl >= 0 ? 'up' : 'dn');
   }
 
-  // Uptime
+  // Uptime (session uptime — time since dashboard loaded)
   const uptime = $('uptime');
   if (uptime) {
-    const sec = g.uptime_sec || 0;
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = sec % 60;
-    uptime.textContent = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    const secs = Math.floor((Date.now() - _startTime) / 1000);
+    const h = Math.floor(secs / 3600).toString().padStart(2, '0');
+    const m = Math.floor((secs % 3600) / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    uptime.textContent = `${h}:${m}:${s}`;
   }
 
   // Recorder status
@@ -45,16 +45,16 @@ function renderHeader(data) {
   const msDot = $('ms-dot');
   const msLabel = $('ms-label');
   if (msDot && msLabel) {
-    const ok = data.ms_connected;
+    const ok = data.metascalp && data.metascalp.connected;
     msDot.className = 'dot' + (ok ? ' ok' : '');
     msLabel.textContent = ok ? 'ON' : 'OFF';
   }
 
-  // WebSocket status
+  // WebSocket status (local — set by transport/ws.js)
   const wsDot = $('ws-dot');
   const wsLabel = $('ws-label');
   if (wsDot && wsLabel) {
-    const ok = data.ws_connected;
+    const ok = window.__wsConnected || false;
     wsDot.className = 'dot' + (ok ? ' ok' : '');
     wsLabel.textContent = ok ? 'ON' : 'OFF';
   }

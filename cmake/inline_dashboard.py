@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bundle the modular dashboard into a single self-contained HTML file.
+r"""Bundle the modular dashboard into a single self-contained HTML file.
 
 Phases implemented:
 * #237 (Phase 0): passthrough copy of ``index.html``.

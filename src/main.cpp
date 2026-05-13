@@ -223,8 +223,16 @@ private:
         if (persisted) {
             account_state_ = persisted->account_state;
             last_reset_day_ = persisted->last_reset_day_utc;
-            LOG_INFO("Loaded account state: equity={}, realized_pnl={}, starting_equity={}", 
-                     account_state_.equity_usd, account_state_.realized_pnl_today_usd, 
+            // Guard: persisted equity may be 0 if a previous bug zeroed it out.
+            // Recover from starting_equity_usd which is always persisted correctly.
+            if (account_state_.equity_usd <= 0.0 && account_state_.starting_equity_usd > 0.0) {
+                account_state_.equity_usd      = account_state_.starting_equity_usd;
+                account_state_.free_balance_usd = account_state_.starting_equity_usd;
+                LOG_WARN("Persisted equity_usd was 0 — recovered from starting_equity_usd={}",
+                         account_state_.starting_equity_usd);
+            }
+            LOG_INFO("Loaded account state: equity={}, realized_pnl={}, starting_equity={}",
+                     account_state_.equity_usd, account_state_.realized_pnl_today_usd,
                      account_state_.starting_equity_usd);
         } else {
             account_state_.equity_usd          = 10000.0;
@@ -324,7 +332,8 @@ private:
 
         // T4-EXECUTOR: Respect mode config (paper vs live)
         const std::string mode = Config::get_or<std::string>("executor.mode", "paper");
-        if (mode == "live") {
+        live_executor_ = (mode == "live");
+        if (live_executor_) {
             executor_ = std::make_unique<LiveExecutor>(connection_id, *gateway, *feed_);
         } else {
             executor_ = std::make_unique<PaperExecutor>(books_for_executor_);
@@ -630,10 +639,14 @@ private:
     void tick() {
         auto now = std::chrono::system_clock::now();
         
-        // T4-RISK: Update AccountState from exchange via FinresHandler
-        if (finres_handler_) {
+        // T4-RISK: Update AccountState from exchange via FinresHandler.
+        // In paper mode the executor manages its own simulated balance — skip
+        // finres so the real exchange balance (which may be 0 for a paper account)
+        // does not overwrite the paper starting equity and trip the starting_equity
+        // > 0 guard in RiskManager, blocking all plan evaluation.
+        if (live_executor_ && finres_handler_) {
             auto finres = finres_handler_->get_snapshot(m_connection_id_for_tick);
-            if (finres) {
+            if (finres && finres->equity > 0.0) {
                 account_state_.free_balance_usd = finres->balance;
                 account_state_.equity_usd       = finres->equity;
             }
@@ -928,6 +941,7 @@ private:
     std::map<Ticker, const OrderBook*> books_for_executor_;
     std::map<Ticker, std::chrono::system_clock::time_point> last_funding_times_;
     int m_connection_id_for_tick{1};
+    bool live_executor_{false};  // true only when executor.mode == "live"
     std::vector<Ticker> pending_candidates_;  // fallback pool when screener doesn't respond
     std::map<std::string, int> signal_counts_;
     std::deque<DashboardServer::State::SignalEvent> recent_signals_; // newest first, max 60

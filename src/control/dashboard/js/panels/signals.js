@@ -11,11 +11,12 @@
 function buildSignalFilters(data) {
   const container = $('sig-filter-row');
   if (!container) return;
-  const sigs = data.signals || [];
+  const sigs = data.recent_signals || [];
   const kinds = ['ALL', ...new Set(sigs.map((s) => s.kind))].sort();
 
-  if (_lastSigFilter === JSON.stringify(kinds)) return;
-  setSigFilter(JSON.stringify(kinds)); // Use setter for last filter tracking
+  const kindsKey = JSON.stringify(kinds);
+  if (_lastSigFilter === kindsKey) return;
+  setLastSigFilter(kindsKey);
 
   container.replaceChildren();
   kinds.forEach((k) => {
@@ -34,7 +35,7 @@ function buildSignalFilters(data) {
 }
 
 function renderSignals(data) {
-  const sigs = data.signals || [];
+  const sigs = data.recent_signals || [];
   const filtered = _sigFilter ? sigs.filter((s) => s.kind === _sigFilter) : sigs;
   const MAX_FEED = 100;
 
@@ -250,6 +251,10 @@ function renderSignals(data) {
     }
   }
 
+  // Mark ALL current signals as seen so the badge only highlights
+  // signals that arrive between polls, regardless of active filter.
+  sigs.forEach((s) => _seenSignals.add(s.time_str + s.ticker + s.kind));
+
   if (_seenSignals.size > 10000) {
     const arr = [..._seenSignals];
     _seenSignals = new Set(arr.slice(arr.length - 5000));
@@ -262,12 +267,7 @@ function renderSignals(data) {
 function renderSigCounts(data) {
   const body = $('sig-cnt-body');
   if (!body) return;
-  const sigs = data.signals || [];
-  const counts = {};
-  sigs.forEach((s) => {
-    counts[s.kind] = (counts[s.kind] || 0) + 1;
-  });
-
+  const counts = data.signal_counts || {};
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   body.replaceChildren();
   if (!sorted.length) {

@@ -11,12 +11,17 @@
 function renderPositions(data) {
   const body = $('pos-body');
   if (!body) return;
-  const rows = data.positions || [];
+  const rows = data.open_trades || [];
   const badge = $('pos-tab-badge');
   if (badge) {
     badge.textContent = rows.length;
     badge.style.display = rows.length ? 'inline' : 'none';
   }
+
+  // Hash-based diffing to avoid DOM thrashing
+  const hash = rows.map((p) => p.plan.ticker + p.plan.side + p.avg_entry_price + p.unrealized_pnl).join('|');
+  if (body.dataset.lastHash === hash) return;
+  body.dataset.lastHash = hash;
 
   body.replaceChildren();
   if (!rows.length) {
@@ -31,25 +36,30 @@ function renderPositions(data) {
   rows.forEach((p) => {
     const tr = el('tr');
     tr.style.cursor = 'pointer';
-    tr.addEventListener('click', () => selectTicker(p.ticker));
-    if (p.ticker === _selTicker) tr.classList.add('active');
+    tr.addEventListener('click', () => selectTicker(p.plan.ticker));
+    if (p.plan.ticker === _selTicker) tr.classList.add('active');
 
-    const sideCls = p.side === 1 ? 'val-up' : 'val-dn';
-    const sideTxt = p.side === 1 ? 'LONG' : 'SHORT';
+    const side = p.plan.side || 0;
+    const sideCls = side === 1 ? 'val-up' : 'val-dn';
+    const sideTxt = side === 1 ? 'LONG' : 'SHORT';
+    const pnlUsd = p.unrealized_pnl || 0;
+    const entry = p.avg_entry_price || 0;
+    const mark = p.plan.ticker === _selTicker ? (data.ob_mid || entry) : entry;
+    const pnlPct = entry > 0 ? ((mark - entry) / entry) * (side === 1 ? 100 : -100) : 0;
 
     tr.innerHTML = `
-      <td class="mono" style="font-weight:700;">${p.ticker}</td>
+      <td class="mono" style="font-weight:700;">${p.plan.ticker}</td>
       <td class="${sideCls}" style="font-weight:700;">${sideTxt}</td>
-      <td class="mono">${fmtT(p.entry_price)}</td>
-      <td class="mono">${fmtT(p.mark_price)}</td>
-      <td class="mono" style="color:var(--negative-bright)">${fmtT(p.stop_loss)}</td>
-      <td class="mono" style="color:var(--positive-bright)">${fmtT(p.take_profit)}</td>
-      <td class="mono ${p.pnl_usd >= 0 ? 'val-up' : 'val-dn'}">${fmt$(p.pnl_usd)} (${fmtPct(p.pnl_pct)})</td>
+      <td class="mono">${fmtT(entry)}</td>
+      <td class="mono">${fmtT(mark)}</td>
+      <td class="mono" style="color:var(--negative-bright)">${fmtT(p.plan.stop_price)}</td>
+      <td class="mono" style="color:var(--positive-bright)">${fmtT(p.plan.tp1_price)}</td>
+      <td class="mono ${pnlUsd >= 0 ? 'val-up' : 'val-dn'}">${fmt$(pnlUsd)} (${fmtPct(pnlPct)})</td>
       <td>
         <div class="progress-ring-container">
           <svg class="progress-ring" width="24" height="24">
             <circle class="progress-ring-circle" stroke="var(--muted)" stroke-width="2" fill="transparent" r="10" cx="12" cy="12"/>
-            <circle class="progress-ring-circle-fill" stroke="${p.pnl_usd >= 0 ? 'var(--positive-bright)' : 'var(--negative-bright)'}" stroke-width="2" stroke-dasharray="62.83" stroke-dashoffset="${62.83 * (1 - Math.min(1, Math.abs(p.pnl_pct) / 2))}" fill="transparent" r="10" cx="12" cy="12"/>
+            <circle class="progress-ring-circle-fill" stroke="${pnlUsd >= 0 ? 'var(--positive-bright)' : 'var(--negative-bright)'}" stroke-width="2" stroke-dasharray="62.83" stroke-dashoffset="${62.83 * (1 - Math.min(1, Math.abs(pnlPct) / 2))}" fill="transparent" r="10" cx="12" cy="12"/>
           </svg>
         </div>
       </td>

@@ -144,4 +144,25 @@ function initChartZoom() {
       }
     });
   }
+
+  // Timeframe preset buttons
+  document.querySelectorAll('#trade-tf-buttons .tf-btn').forEach((btn) => {
+    if (!btn.dataset.tfInit) {
+      btn.dataset.tfInit = '1';
+      btn.addEventListener('click', () => {
+        const tf = parseInt(btn.dataset.tf);
+        if (tf > 0) {
+          setTfPoints(tf);
+          document
+            .querySelectorAll('#trade-tf-buttons .tf-btn')
+            .forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          if (tfCustom) tfCustom.value = '';
+          setChartZoom(null);
+          updateZoomIndicator();
+          if (_state) renderTrading(_state);
+        }
+      });
+    }
+  });
 }

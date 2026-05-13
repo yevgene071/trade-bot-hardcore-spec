@@ -13,6 +13,14 @@ function renderUniverse(data) {
   if (!body) return;
   const rows = data.universe || [];
   const states = data.strategy_states || [];
+
+  // Universe badge — tickers with ready_state >= Ready (2)
+  const uniBadge = $('uni-tab-badge');
+  if (uniBadge) {
+    const readyCount = states.filter((s) => s.ready_state >= 2).length;
+    uniBadge.textContent = readyCount;
+    uniBadge.style.display = readyCount > 0 ? 'inline' : 'none';
+  }
   const stMap = new Map();
   states.forEach((s) => {
     if (!stMap.has(s.ticker)) stMap.set(s.ticker, new Map());
@@ -32,6 +40,11 @@ function renderUniverse(data) {
       filterRow.appendChild(chip);
     });
   }
+
+  // Hash diffing
+  const hash = rows.map((u) => u.ticker + u.mark_price + u.boosted + (u.strategies || []).join(',')).join('|') + _uniFilter;
+  if (body.dataset.lastHash === hash) return;
+  body.dataset.lastHash = hash;
 
   body.replaceChildren();
   if (!rows.length) {

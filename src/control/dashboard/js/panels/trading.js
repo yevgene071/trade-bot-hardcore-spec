@@ -199,4 +199,30 @@ function renderTrading(data, forceRender) {
       drawPriceChart(ctx, w, h, sliced);
     }
   }
+
+  // ── Mini charts ──
+  const miniSpread = $('trade-mini-spread');
+  if (miniSpread) {
+    const { ctx, w, h } = setupCanvas(miniSpread);
+    const history = data.chart_history || [];
+    drawMiniChart(ctx, w, h, history, 'spread_bps', '#e8edf5', 'Spread');
+  }
+  const miniVol = $('trade-mini-vol');
+  if (miniVol) {
+    const { ctx, w, h } = setupCanvas(miniVol);
+    const history = data.chart_history || [];
+    drawMiniChart(ctx, w, h, history, 'buy_vol_5s', 'rgba(16,185,129,0.8)', 'Buy Vol');
+  }
+  const miniAgg = $('trade-mini-agg');
+  if (miniAgg) {
+    const { ctx, w, h } = setupCanvas(miniAgg);
+    const history = data.chart_history || [];
+    drawMiniChart(ctx, w, h, history, 'tape_aggression', 'var(--accent2)', 'Aggression');
+  }
+  const miniCorr = $('trade-mini-corr');
+  if (miniCorr) {
+    const { ctx, w, h } = setupCanvas(miniCorr);
+    const history = data.chart_history || [];
+    drawMiniChart(ctx, w, h, history, 'leader_correlation', 'var(--warning)', 'Correlation');
+  }
 }

@@ -11,7 +11,7 @@
             <div class="kpi"><div class="kpi-label">Free Balance</div><div class="kpi-value lg" id="free-bal">$0.00</div></div>
             <div class="kpi"><div class="kpi-label">Unrealized</div><div class="kpi-value lg" id="unreal-pnl">$0.00</div></div>
           </div>
-          <div class="chart-container lg" id="eq-chart" style="margin-top:8px;"></div>
+          <canvas class="chart-container lg" id="eq-chart" style="margin-top:8px;"></canvas>
           <div class="kpi-grid col4" style="margin-top:8px;">
             <div class="kpi"><div class="kpi-label">Win Rate</div><div class="kpi-value" id="m-wr">0%</div></div>
             <div class="kpi"><div class="kpi-label">PF</div><div class="kpi-value" id="m-pf">0.0</div></div>
@@ -46,11 +46,22 @@
     <div class="card">
       <div class="card-head">
         <h3>Strategy Heatmap</h3>
-        <div class="filter-row" id="hm-filters"></div>
+        <div class="filter-row" id="hm-filter-row"></div>
       </div>
       <div class="card-body" style="padding:2px;">
         <div class="heatmap-grid" id="heatmap-body"></div>
-        <div class="detail-panel" id="hm-detail"></div>
+        <div class="detail-panel open" id="hm-detail">
+          <div class="detail-head">
+            <span id="detail-ticker" class="mono" style="font-weight:700;font-size:12px;">—</span>
+            <span id="detail-price" class="mono" style="font-size:12px;">—</span>
+            <span id="detail-change" class="val">—</span>
+          </div>
+          <div id="detail-stats" style="display:flex;flex-direction:column;gap:3px;margin-top:4px;font-size:10px;"></div>
+          <div style="margin-top:8px;">
+            <div class="kpi-label" style="margin-bottom:4px;">Conditions</div>
+            <div id="cond-list"></div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="grid-2">

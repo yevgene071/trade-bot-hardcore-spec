@@ -10,15 +10,19 @@
  */
 
 function renderHeatmap(data) {
-  const container = $('heatmap-grid');
+  const container = $('heatmap-body');
   if (!container) return;
-  const items = data.heatmap || [];
+  const items = data.universe || [];
+  const stMap = new Map();
+  (data.strategy_states || []).forEach((s) => {
+    stMap.set(s.ticker, s);
+  });
 
   // Filter
   const filterRow = $('hm-filter-row');
   if (filterRow) {
     filterRow.replaceChildren();
-    ['ALL', 'Hot', 'Volatile'].forEach((f) => {
+    ['ALL', 'Ready', 'Trading'].forEach((f) => {
       const chip = el('span', 'filter-chip', f);
       if (_hmFilter === f) chip.classList.add('active');
       chip.addEventListener('click', () => {
@@ -30,10 +34,16 @@ function renderHeatmap(data) {
   }
 
   const filtered = items.filter((it) => {
-    if (_hmFilter === 'Hot') return it.score > 70;
-    if (_hmFilter === 'Volatile') return it.volatility > 20;
+    const st = stMap.get(it.ticker);
+    if (_hmFilter === 'Ready') return st && st.ready_state === 2;
+    if (_hmFilter === 'Trading') return st && st.ready_state === 4;
     return true;
   });
+
+  // Hash diffing
+  const hash = filtered.map((it) => it.ticker + it.mark_price + it.boosted).join('|');
+  if (container.dataset.lastHash === hash) return;
+  container.dataset.lastHash = hash;
 
   container.replaceChildren();
   if (!filtered.length) {
@@ -46,14 +56,16 @@ function renderHeatmap(data) {
     card.addEventListener('click', () => selectTicker(it.ticker));
     if (it.ticker === _selTicker) card.classList.add('active');
 
+    const st = stMap.get(it.ticker);
+    const score = st ? st.readiness_pct || 0 : 0;
     const scoreColor =
-      it.score > 80 ? 'var(--positive-bright)' : it.score > 50 ? 'var(--warning)' : 'var(--muted)';
+      score > 80 ? 'var(--positive-bright)' : score > 50 ? 'var(--warning)' : 'var(--muted)';
     card.innerHTML = `
-      <div class="hm-ticker">${it.ticker}</div>
-      <div class="hm-score" style="color:${scoreColor}">${it.score.toFixed(0)}</div>
+      <div class="hm-ticker">${it.ticker}${it.boosted ? '<span class="boosted-star">&#9733;</span>' : ''}</div>
+      <div class="hm-score" style="color:${scoreColor}">${score.toFixed(0)}</div>
       <div class="hm-stats">
-        <span>${fmtPct(it.change_24h)}</span>
-        <span>Vol: ${it.volatility.toFixed(1)}</span>
+        <span>${fmtT2(it.mark_price)}</span>
+        <span>${(it.strategies || []).join(', ')}</span>
       </div>
     `;
     container.appendChild(card);
@@ -61,18 +73,18 @@ function renderHeatmap(data) {
 }
 
 function renderDetail(data) {
-  const d = data.detail || {};
-  const t = d.ticker || '—';
+  const t = data.selected_ticker || _selTicker || '—';
   const tickerEl = $('detail-ticker');
   if (tickerEl) tickerEl.textContent = t;
 
   const priceEl = $('detail-price');
-  if (priceEl) priceEl.textContent = fmt$(d.price);
+  if (priceEl) priceEl.textContent = fmt$(data.ob_mid || 0);
 
   const changeEl = $('detail-change');
   if (changeEl) {
-    changeEl.textContent = fmtPct(d.change_24h);
-    changeEl.className = 'val ' + (d.change_24h >= 0 ? 'val-up' : 'val-dn');
+    const change = 0; // not available from server currently
+    changeEl.textContent = fmtPct(change);
+    changeEl.className = 'val ' + (change >= 0 ? 'val-up' : 'val-dn');
   }
 
   const stats = $('detail-stats');
@@ -83,17 +95,19 @@ function renderDetail(data) {
       row.innerHTML = `<span>${label}</span><span class="mono">${val}</span>`;
       stats.appendChild(row);
     };
-    addStat('24h High', fmt$(d.high_24h));
-    addStat('24h Low', fmt$(d.low_24h));
-    addStat('Volume', fmtSz(d.volume_24h));
-    addStat('ATR (1h)', fmtT(d.atr_1h));
+    addStat('Mid', fmtT(data.ob_mid || 0));
+    addStat('Spread bps', (data.ob_spread_bps || 0).toFixed(2));
+    addStat('Imbalance', (data.ob_imbalance || 0).toFixed(3));
+    addStat('Selected', t);
   }
 }
 
 function renderConditions(data) {
   const container = $('cond-list');
   if (!container) return;
-  const conds = data.conditions || [];
+  // Derive conditions from strategy_states for selected ticker
+  const st = (data.strategy_states || []).find((s) => s.ticker === (data.selected_ticker || _selTicker));
+  const conds = st ? st.conditions || [] : [];
   container.replaceChildren();
 
   if (!conds.length) {
@@ -107,7 +121,7 @@ function renderConditions(data) {
     item.innerHTML = `
       <div class="cond-info">
         <span class="cond-name">${c.name}</span>
-        <span class="cond-desc">${c.description}</span>
+        <span class="cond-desc">${c.current} / ${c.target} ${c.unit || ''}</span>
       </div>
       <div class="cond-status ${statusCls}">${c.met ? 'MET' : 'WAIT'}</div>
     `;

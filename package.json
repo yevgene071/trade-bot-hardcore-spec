@@ -3,6 +3,6 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "agentic-flow": "github:ruvnet/agentic-flow#v2.3.6"
+    "agentic-flow": "https://github.com/ruvnet/agentic-flow/archive/refs/tags/v2.3.6.tar.gz"
   }
 }

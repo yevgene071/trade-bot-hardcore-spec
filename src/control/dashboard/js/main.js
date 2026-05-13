@@ -41,13 +41,16 @@
 document.addEventListener('DOMContentLoaded', () => {
   console.log('Dashboard bootstrap started');
 
-  // Initialize tabs (already called in app/tabs.js, but safe to ensure)
+  // Initialize tabs
   if (typeof initTabs === 'function') initTabs();
 
-  // Start polling (already called in app/update.js)
-  if (typeof poll === 'function') poll();
+  // Start polling + recurring interval
+  if (typeof poll === 'function') {
+    poll();
+    setInterval(poll, 1000);
+  }
 
-  // Optional: Connect WebSocket
+  // Connect WebSocket
   if (typeof connectWS === 'function') connectWS();
 
   // Update clock immediately
