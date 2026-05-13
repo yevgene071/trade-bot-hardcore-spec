@@ -120,11 +120,14 @@ set(DASHBOARD_HTML_BUNDLED  "${CMAKE_CURRENT_BINARY_DIR}/dashboard.bundled.html"
 set(DASHBOARD_HTML_H        "${CMAKE_CURRENT_BINARY_DIR}/dashboard_html.h")
 set(INLINE_DASHBOARD_PY     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/inline_dashboard.py")
 set(EMBED_HTML_PY           "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_html.py")
+file(GLOB DASHBOARD_STYLE_DEPS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard/styles/*.css"
+)
 
 add_custom_command(
     OUTPUT ${DASHBOARD_HTML_BUNDLED}
     COMMAND ${Python3_EXECUTABLE} ${INLINE_DASHBOARD_PY} ${DASHBOARD_HTML_SRC} ${DASHBOARD_HTML_BUNDLED}
-    DEPENDS ${DASHBOARD_HTML_SRC} ${INLINE_DASHBOARD_PY}
+    DEPENDS ${DASHBOARD_HTML_SRC} ${INLINE_DASHBOARD_PY} ${DASHBOARD_STYLE_DEPS}
     COMMENT "Bundling dashboard → dashboard.bundled.html"
 )
 

@@ -1,29 +1,26 @@
 #!/usr/bin/env python3
-"""Bundle the modular dashboard into a single HTML file.
+"""Bundle the modular dashboard into a single self-contained HTML file.
 
 Phases implemented:
 * #237 (Phase 0): passthrough copy of ``index.html``.
 * #238 (Phase 1): ``<!-- include: path -->`` directives.
+* #239 (Phase 2): ``<link rel="stylesheet" href="...">`` inlining with
+  recursive local CSS ``@import`` expansion.
 
-Future phases (#239..#245) will extend this script to inline CSS chunks
-and JS modules referenced from ``index.html`` so the emitted bundle
-remains a single self-contained file — preserving the current
-``embed_html.py`` mechanism that compiles the dashboard into the C++
-binary.
+Directive contract:
 
-Directive contract (Phase 1):
-
-* ``<!-- include: <relative/path> -->`` is replaced by the raw byte
-  contents of the referenced file, resolved relative to the directory
-  of the file that contains the directive (i.e. includes inside
-  fragments resolve relative to the fragment, not the root index).
-* No bytes are added or stripped around the replacement — the directive
-  must occupy exactly the byte range that should be substituted.
-  Fragments MUST NOT be wrapped with extra leading/trailing newlines.
-* Includes are resolved recursively. A cycle (A → B → A) is a fatal
-  error.
-* A missing target file is a fatal error — we never emit a partial
-  bundle.
+* ``<!-- include: <relative/path> -->`` is replaced by the raw byte contents of
+  the referenced file, resolved relative to the directory of the file that
+  contains the directive (i.e. includes inside fragments resolve relative to the
+  fragment, not the root index).
+* Includes are resolved recursively. A cycle (A → B → A) is a fatal error.
+* ``<link rel="stylesheet" href="<relative/path>">`` is replaced by a
+  ``<style>`` block whose contents are the referenced stylesheet with all local
+  ``@import`` statements recursively expanded.
+* CSS ``@import`` targets are resolved relative to the stylesheet that contains
+  the import. Cycles are fatal errors. External imports (``http:``, ``https:``,
+  protocol-relative URLs, ``data:``, etc.) are preserved as-is.
+* A missing target file is a fatal error — we never emit a partial bundle.
 
 Usage:
     inline_dashboard.py <input_index_html> <output_bundle_html>
@@ -33,42 +30,96 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
-# HTML comment form of the include directive. Paths are a run of
-# non-whitespace characters; surrounding whitespace inside the comment
-# is tolerated. Multiple directives on the same line are handled
-# correctly by ``re.sub`` — each match is replaced independently.
+# HTML comment form of the include directive. Paths are a run of non-whitespace
+# characters; surrounding whitespace inside the comment is tolerated. Multiple
+# directives on the same line are handled correctly by ``re.sub`` — each match is
+# replaced independently.
 _INCLUDE_RE = re.compile(rb"<!--\s*include:\s*(\S+?)\s*-->")
 
+# Phase 2 stylesheet links are intentionally simple and local. Keep the matcher
+# strict so unrelated links (preconnect, icons, alternate stylesheets) are not
+# rewritten accidentally.
+_STYLESHEET_LINK_RE = re.compile(
+    rb"<link\s+rel=[\"']stylesheet[\"']\s+href=[\"']([^\"']+)[\"']\s*/?>"
+)
 
-def _expand(path: Path, stack: tuple[Path, ...]) -> bytes:
-    """Return the byte contents of ``path`` with include directives expanded.
+# Accept all common CSS forms used by hand-authored stylesheets:
+#   @import "file.css";
+#   @import 'file.css';
+#   @import url("file.css");
+#   @import url(file.css);
+_CSS_IMPORT_RE = re.compile(
+    rb"@import\s+(?:url\(\s*)?[\"']?([^\"'\)\s;]+)[\"']?\s*\)?\s*;"
+)
 
-    ``stack`` is the chain of files currently being expanded; used to
-    detect cycles.
-    """
+
+def _die(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _is_external_url(raw: str) -> bool:
+    parsed = urlparse(raw)
+    return raw.startswith("//") or parsed.scheme not in ("", "file")
+
+
+def _read_file(path: Path, kind: str) -> tuple[Path, bytes]:
     resolved = path.resolve()
-    if resolved in stack:
-        chain = " -> ".join(str(p) for p in stack + (resolved,))
-        print(f"error: cyclic include detected: {chain}", file=sys.stderr)
-        sys.exit(1)
-
     try:
-        data = resolved.read_bytes()
+        return resolved, resolved.read_bytes()
     except FileNotFoundError:
-        print(f"error: include target not found: {resolved}", file=sys.stderr)
-        sys.exit(1)
+        _die(f"{kind} target not found: {resolved}")
+
+
+def _format_cycle(kind: str, stack: tuple[Path, ...], repeated: Path) -> None:
+    chain = " -> ".join(str(p) for p in stack + (repeated,))
+    _die(f"cyclic {kind} detected: {chain}")
+
+
+def _expand_css(path: Path, stack: tuple[Path, ...]) -> bytes:
+    """Return ``path`` with local CSS imports recursively expanded."""
+    resolved, data = _read_file(path, "stylesheet")
+    if resolved in stack:
+        _format_cycle("stylesheet import", stack, resolved)
 
     base_dir = resolved.parent
+    css_stack = stack + (resolved,)
 
-    def _replace(match: re.Match[bytes]) -> bytes:
-        # Directive paths are ASCII-only file paths, decoding as UTF-8 is
-        # safe and lets us use pathlib comfortably.
+    def _replace_import(match: re.Match[bytes]) -> bytes:
+        raw_target = match.group(1).decode("utf-8")
+        if _is_external_url(raw_target):
+            return match.group(0)
+        return _expand_css(base_dir / raw_target, css_stack)
+
+    return _CSS_IMPORT_RE.sub(_replace_import, data)
+
+
+def _expand_html(path: Path, stack: tuple[Path, ...]) -> bytes:
+    """Return ``path`` with HTML includes and stylesheet links expanded."""
+    resolved, data = _read_file(path, "include")
+    if resolved in stack:
+        _format_cycle("include", stack, resolved)
+
+    base_dir = resolved.parent
+    html_stack = stack + (resolved,)
+
+    def _replace_include(match: re.Match[bytes]) -> bytes:
+        # Directive paths are ASCII-only file paths, decoding as UTF-8 is safe
+        # and lets us use pathlib comfortably.
         rel = match.group(1).decode("utf-8")
-        target = (base_dir / rel)
-        return _expand(target, stack + (resolved,))
+        return _expand_html(base_dir / rel, html_stack)
 
-    return _INCLUDE_RE.sub(_replace, data)
+    def _replace_stylesheet(match: re.Match[bytes]) -> bytes:
+        href = match.group(1).decode("utf-8")
+        if _is_external_url(href):
+            return match.group(0)
+        css = _expand_css(base_dir / href, stack=())
+        return b"<style>\n" + css.rstrip(b"\n") + b"\n</style>"
+
+    data = _INCLUDE_RE.sub(_replace_include, data)
+    return _STYLESHEET_LINK_RE.sub(_replace_stylesheet, data)
 
 
 def main() -> None:
@@ -83,10 +134,9 @@ def main() -> None:
     dst = Path(sys.argv[2])
 
     if not src.is_file():
-        print(f"error: input file not found: {src}", file=sys.stderr)
-        sys.exit(1)
+        _die(f"input file not found: {src}")
 
-    expanded = _expand(src, stack=())
+    expanded = _expand_html(src, stack=())
 
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_bytes(expanded)
