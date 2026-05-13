@@ -28,17 +28,17 @@ function renderCommand(data) {
 
   // Compute metrics from strategy_stats + risk (server has no dedicated metrics field)
   const stats = data.strategy_stats || [];
-  let totalWins = 0, totalLosses = 0, totalTrades = 0, positivePnl = 0, negativePnl = 0;
+  let totalWins = 0, totalLosses = 0, totalTrades = 0, totalGrossProfit = 0, totalGrossLoss = 0;
   stats.forEach((s) => {
     totalWins += s.wins || 0;
     totalLosses += s.losses || 0;
     totalTrades += s.total_trades || 0;
-    if ((s.total_pnl || 0) > 0) positivePnl += s.total_pnl;
-    else negativePnl += Math.abs(s.total_pnl || 0);
+    totalGrossProfit += s.gross_profit || 0;
+    totalGrossLoss += s.gross_loss || 0;
   });
   const m = {
     win_rate: (totalWins + totalLosses) > 0 ? (totalWins / (totalWins + totalLosses)) * 100 : 0,
-    profit_factor: negativePnl > 0 ? positivePnl / negativePnl : (positivePnl > 0 ? 99.9 : 0),
+    profit_factor: totalGrossLoss > 0 ? totalGrossProfit / totalGrossLoss : (totalGrossProfit > 0 ? 99.9 : 0),
     total_trades: totalTrades,
     max_drawdown: (data.risk && data.risk.current_drawdown_pct) || 0,
   };

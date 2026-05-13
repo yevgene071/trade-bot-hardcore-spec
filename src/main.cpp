@@ -795,8 +795,13 @@ private:
                             st.name = e.plan.strategy_name;
                             st.total_trades++;
                             st.total_pnl += e.pnl_usd;
-                            if (e.pnl_usd > 0) st.wins++;
-                            else if (e.pnl_usd < 0) st.losses++;
+                            if (e.pnl_usd > 0) {
+                                st.wins++;
+                                st.gross_profit += e.pnl_usd;
+                            } else if (e.pnl_usd < 0) {
+                                st.losses++;
+                                st.gross_loss += std::abs(e.pnl_usd);
+                            }
                             if (e.pnl_usd > st.best_pnl || st.total_trades == 1) st.best_pnl = e.pnl_usd;
                             if (e.pnl_usd < st.worst_pnl || st.total_trades == 1) st.worst_pnl = e.pnl_usd;
                         }

@@ -42,8 +42,25 @@ function renderUniverse(data) {
   }
 
   // Hash diffing
-  const hash = rows.map((u) => u.ticker + u.mark_price + u.boosted + (u.strategies || []).join(',')).join('|') + _uniFilter;
-  if (body.dataset.lastHash === hash) return;
+  const hash = rows.map((u) => u.ticker + u.boosted + (u.strategies || []).join(',')).join('|') + _uniFilter;
+  if (body.dataset.lastHash === hash) {
+    // Fast path: update mark prices only
+    let rowIdx = 0;
+    const trs = body.querySelectorAll('tr');
+    rows.forEach((u) => {
+      const sm = stMap.get(u.ticker);
+      if (_uniFilter === 'Ready' && (!sm || ![...sm.values()].some((s) => s.ready_state === 2)))
+        return;
+      if (_uniFilter === 'Trading' && (!sm || ![...sm.values()].some((s) => s.ready_state === 4)))
+        return;
+      
+      if (rowIdx < trs.length && trs[rowIdx].children.length >= 2) {
+        trs[rowIdx].children[1].textContent = fmtT2(u.mark_price);
+      }
+      rowIdx++;
+    });
+    return;
+  }
   body.dataset.lastHash = hash;
 
   body.replaceChildren();

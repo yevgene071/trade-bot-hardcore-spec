@@ -41,8 +41,31 @@ function renderHeatmap(data) {
   });
 
   // Hash diffing
-  const hash = filtered.map((it) => it.ticker + it.mark_price + it.boosted).join('|');
-  if (container.dataset.lastHash === hash) return;
+  const hash = filtered.map((it) => it.ticker + it.boosted + (it.strategies || []).join(',')).join('|');
+  if (container.dataset.lastHash === hash) {
+    // Fast path: update mark prices and scores
+    const cards = container.querySelectorAll('.hm-card');
+    filtered.forEach((it, i) => {
+      if (i >= cards.length) return;
+      const card = cards[i];
+      const st = stMap.get(it.ticker);
+      const score = st ? st.readiness_pct || 0 : 0;
+      const scoreColor =
+        score > 80 ? 'var(--positive-bright)' : score > 50 ? 'var(--warning)' : 'var(--muted)';
+      
+      const scoreEl = card.querySelector('.hm-score');
+      if (scoreEl) {
+        scoreEl.textContent = score.toFixed(0);
+        scoreEl.style.color = scoreColor;
+      }
+      
+      const statsEl = card.querySelector('.hm-stats');
+      if (statsEl && statsEl.children.length > 0) {
+        statsEl.children[0].textContent = fmtT2(it.mark_price);
+      }
+    });
+    return;
+  }
   container.dataset.lastHash = hash;
 
   container.replaceChildren();
