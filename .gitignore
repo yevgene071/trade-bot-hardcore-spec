@@ -34,3 +34,8 @@ GEMINI.md
 .gemini/
 gha-creds-*.json
 node_modules
+journal/account_state.json
+CLAUDE.md
+claude-flow.config.json
+Connections
+data/
