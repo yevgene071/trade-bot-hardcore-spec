@@ -1,0 +1,10 @@
+.condition-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
+.condition-name { width: 110px; text-align: right; color: var(--muted); font-size: 11px; flex-shrink: 0; }
+.condition-bar { flex: 1; height: 6px; background: var(--subtle); border-radius: 3px; overflow: hidden; }
+.condition-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.condition-fill.met { background: var(--positive); }
+.condition-fill.unmet { background: var(--warning); }
+.condition-val { font-family: var(--mono); font-size: 11px; color: var(--text); width: 85px; text-align: right; flex-shrink: 0; }
+.condition-status { width: 18px; text-align: center; font-size: 12px; }
+.condition-status.met { color: var(--positive); }
+.condition-status.unmet { color: var(--negative); }
