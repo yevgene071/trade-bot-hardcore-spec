@@ -18,7 +18,7 @@ function renderFunding(data) {
   }
 
   body.replaceChildren();
-  rates.forEach(r => {
+  rates.forEach((r) => {
     const tr = el('tr');
     const rateCls = r.rate >= 0 ? 'val-up' : 'val-dn';
     tr.innerHTML = `

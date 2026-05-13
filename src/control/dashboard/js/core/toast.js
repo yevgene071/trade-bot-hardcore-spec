@@ -10,18 +10,18 @@ function toast(title, msg, type) {
   t.className = 'toast ' + (type || '');
   const progress = el('div', 'toast-progress');
   t.appendChild(progress);
-  
+
   const strong = el('strong');
   strong.textContent = title;
-  
+
   const span = el('span');
   span.style.cssText = 'font-size:11px;color:var(--muted)';
   span.innerHTML = msg;
-  
+
   t.appendChild(strong);
   t.appendChild(el('br'));
   t.appendChild(span);
-  
+
   const container = $('toasts');
   if (container) {
     container.appendChild(t);

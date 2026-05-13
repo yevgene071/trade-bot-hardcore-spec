@@ -11,16 +11,16 @@
  */
 
 function initTabs() {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      
+      document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
+
       const content = $('tab-' + tab);
       if (content) content.classList.add('active');
-      
+
       if (tab === 'trading') {
         setTimeout(() => {
           initChartZoom();

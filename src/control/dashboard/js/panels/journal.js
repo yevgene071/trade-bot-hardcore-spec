@@ -14,8 +14,10 @@ function renderJournal(data) {
   const allEntries = (data.recent_journal || []).slice(0, 50);
   const stratFilter = $('jrn-strat-filter');
   const curStrat = stratFilter ? stratFilter.value : '';
-  const entries = curStrat ? allEntries.filter(e => e.plan.strategy_name.includes(curStrat)) : allEntries;
-  
+  const entries = curStrat
+    ? allEntries.filter((e) => e.plan.strategy_name.includes(curStrat))
+    : allEntries;
+
   const countEl = $('jrn-count');
   if (countEl) countEl.textContent = entries.length;
 
@@ -29,7 +31,7 @@ function renderJournal(data) {
     return;
   }
 
-  entries.forEach(e => {
+  entries.forEach((e) => {
     const tr = el('tr');
     const pnlCls = e.pnl_usd >= 0 ? 'val-up' : 'val-dn';
     tr.innerHTML = `

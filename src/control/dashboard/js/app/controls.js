@@ -12,7 +12,7 @@ function renderControls(data) {
   if (ks) {
     ks.style.display = data.kill_switch_active ? 'block' : 'none';
   }
-  
+
   const ksBtn = $('ks-btn');
   if (ksBtn) {
     ksBtn.textContent = data.kill_switch_active ? 'DEACTIVATE KILL-SWITCH' : 'ACTIVATE KILL-SWITCH';

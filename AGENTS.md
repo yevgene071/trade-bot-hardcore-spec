@@ -38,3 +38,34 @@
 - `CMAKE_EXPORT_COMPILE_COMMANDS=ON` включён для поддержки clangd.
 - В Debug‑сборке включены AddressSanitizer и UndefinedBehaviorSanitizer (`-fsanitize=address,undefined`).
 - В Release‑сборке включены `-march=native` и LTO.
+
+## Dashboard Development
+Dashboard is a modular web application located in `src/control/dashboard/`. It is bundled into a single HTML file during build.
+
+### Directory Structure
+- `index.html`: Main entry point (skeleton).
+- `styles/`: CSS modules (split by functionality).
+- `js/core/`: Base logic (state, dom, formatters, clock).
+- `js/charts/`: Canvas rendering and zoom logic.
+- `js/panels/`: UI panel renderers.
+- `js/transport/`: API and WebSocket communication.
+- `js/app/`: Orchestration and update logic.
+- `html/`: HTML fragments included via `<!-- include: ... -->`.
+
+### Development Workflow
+1. **Adding a Panel**:
+   - Create HTML fragment in `html/tabs/`.
+   - Add CSS in `styles/`.
+   - Create renderer in `js/panels/`.
+   - Register in `js/main.js` using `// @depends-on`.
+   - Add to `updateApp()` in `js/app/update.js`.
+
+2. **Bundling**:
+   The dashboard is bundled by `cmake/inline_dashboard.py`. It performs:
+   - HTML fragment inclusion.
+   - CSS `@import` recursive inlining.
+   - JS `@depends-on` topological sorting and inlining.
+   - Fail-fast on circular dependencies.
+
+3. **Visual Testing**:
+   Use `scripts/dashboard_visual_diff.py` (if available) to compare rendered output against `docs/dashboard_reference.png`.

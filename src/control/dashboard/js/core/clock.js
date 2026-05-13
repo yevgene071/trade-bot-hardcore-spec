@@ -15,7 +15,7 @@ function updateClock() {
 }
 
 function updateFundingCountdowns() {
-  document.querySelectorAll('.funding-countdown').forEach(el => {
+  document.querySelectorAll('.funding-countdown').forEach((el) => {
     const next = parseInt(el.dataset.next);
     if (!next) return;
     const diff = Math.max(0, Math.floor((next - Date.now()) / 1000));

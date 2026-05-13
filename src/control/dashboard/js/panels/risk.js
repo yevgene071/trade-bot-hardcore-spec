@@ -9,7 +9,7 @@
  */
 function renderRisk(data) {
   const r = data.risk || {};
-  
+
   // Gauges
   renderGauge('margin-gauge', r.margin_used_pct || 0, '%');
   renderGauge('exposure-gauge', r.exposure_usd || 0, '$', r.exposure_max_usd);
@@ -38,8 +38,9 @@ function renderGauge(id, val, unit, max = 100) {
   const el = $(id);
   if (!el) return;
   const pct = Math.min(100, (val / max) * 100);
-  const color = pct > 80 ? 'var(--negative-bright)' : pct > 50 ? 'var(--warning)' : 'var(--positive-bright)';
-  
+  const color =
+    pct > 80 ? 'var(--negative-bright)' : pct > 50 ? 'var(--warning)' : 'var(--positive-bright)';
+
   el.style.background = `conic-gradient(${color} ${pct}%, var(--bg-card) 0)`;
   el.innerHTML = `<div class="gauge-inner"><div class="gauge-val">${unit === '$' ? fmtSz(val) : val.toFixed(1) + unit}</div></div>`;
 }

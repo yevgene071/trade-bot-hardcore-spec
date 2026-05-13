@@ -28,7 +28,7 @@ function renderPositions(data) {
     return;
   }
 
-  rows.forEach(p => {
+  rows.forEach((p) => {
     const tr = el('tr');
     tr.style.cursor = 'pointer';
     tr.addEventListener('click', () => selectTicker(p.ticker));

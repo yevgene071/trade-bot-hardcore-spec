@@ -27,7 +27,8 @@ function initChartZoom() {
 
   function xToIdx(px, dataLen) {
     const w = container.clientWidth;
-    const padL = 10, padR = 45;
+    const padL = 10,
+      padR = 45;
     const pw = w - padL - padR;
     if (pw <= 0 || dataLen <= 1) return 0;
     return Math.max(0, Math.min(dataLen - 1, Math.round(((px - padL) / pw) * (dataLen - 1))));
@@ -53,7 +54,7 @@ function initChartZoom() {
     const x2 = Math.max(_zoomDragStart.x, px);
     select.style.display = 'block';
     select.style.left = x1 + 'px';
-    select.style.width = (x2 - x1) + 'px';
+    select.style.width = x2 - x1 + 'px';
   });
 
   container.addEventListener('mouseup', (e) => {
@@ -81,36 +82,40 @@ function initChartZoom() {
   });
 
   // Mouse wheel zoom in/out
-  container.addEventListener('wheel', (e) => {
-    if (!_state?.chart_history?.length) return;
-    e.preventDefault();
-    const totalLen = _state.chart_history.length;
-    const rect = container.getBoundingClientRect();
-    const cursorRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / container.clientWidth));
-    
-    if (_chartZoom === null) {
-      // Start zoom around cursor
-      const range = Math.round(totalLen * 0.4);
-      const center = Math.round(cursorRatio * (totalLen - 1));
-      setChartZoom({
-        start: Math.max(0, center - Math.round(range * cursorRatio)),
-        end: Math.min(totalLen - 1, center + Math.round(range * (1 - cursorRatio)))
-      });
-    } else {
-      // Zoom in/out around cursor
-      const delta = e.deltaY > 0 ? 1.2 : 1 / 1.2;
-      const range = _chartZoom.end - _chartZoom.start;
-      const center = _chartZoom.start + range * cursorRatio;
-      const newRange = Math.min(Math.max(3, Math.round(range * delta)), totalLen - 1);
-      const newStart = Math.max(0, Math.round(center - newRange * cursorRatio));
-      setChartZoom({
-        start: newStart,
-        end: Math.min(totalLen - 1, newStart + newRange)
-      });
-    }
-    updateZoomIndicator();
-    renderTrading(_state, true);
-  }, { passive: false });
+  container.addEventListener(
+    'wheel',
+    (e) => {
+      if (!_state?.chart_history?.length) return;
+      e.preventDefault();
+      const totalLen = _state.chart_history.length;
+      const rect = container.getBoundingClientRect();
+      const cursorRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / container.clientWidth));
+
+      if (_chartZoom === null) {
+        // Start zoom around cursor
+        const range = Math.round(totalLen * 0.4);
+        const center = Math.round(cursorRatio * (totalLen - 1));
+        setChartZoom({
+          start: Math.max(0, center - Math.round(range * cursorRatio)),
+          end: Math.min(totalLen - 1, center + Math.round(range * (1 - cursorRatio))),
+        });
+      } else {
+        // Zoom in/out around cursor
+        const delta = e.deltaY > 0 ? 1.2 : 1 / 1.2;
+        const range = _chartZoom.end - _chartZoom.start;
+        const center = _chartZoom.start + range * cursorRatio;
+        const newRange = Math.min(Math.max(3, Math.round(range * delta)), totalLen - 1);
+        const newStart = Math.max(0, Math.round(center - newRange * cursorRatio));
+        setChartZoom({
+          start: newStart,
+          end: Math.min(totalLen - 1, newStart + newRange),
+        });
+      }
+      updateZoomIndicator();
+      renderTrading(_state, true);
+    },
+    { passive: false }
+  );
 
   // Click on zoom indicator to reset
   const indicator = $('zoom-indicator');
@@ -130,7 +135,9 @@ function initChartZoom() {
       const v = parseInt(tfCustom.value);
       if (v >= 10 && v <= 300) {
         setTfPoints(v);
-        document.querySelectorAll('#trade-tf-buttons .tf-btn').forEach(b => b.classList.remove('active'));
+        document
+          .querySelectorAll('#trade-tf-buttons .tf-btn')
+          .forEach((b) => b.classList.remove('active'));
         setChartZoom(null);
         updateZoomIndicator();
         if (_state) renderTrading(_state);

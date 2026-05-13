@@ -22,14 +22,14 @@
 
 function updateApp(data) {
   setState(data);
-  
+
   // Panels
   renderHeader(data);
   renderCommand(data);
   renderRisk(data);
   renderStrategyPerf(data);
   renderFunding(data);
-  
+
   renderHeatmap(data);
   renderDetail(data);
   renderConditions(data);
@@ -41,18 +41,18 @@ function updateApp(data) {
 
   // Charts
   renderEquityChart(data);
-  
+
   // Controls
   renderControls(data);
 }
 
 function poll() {
   fetch('/api/state')
-    .then(r => r.json())
-    .then(data => {
+    .then((r) => r.json())
+    .then((data) => {
       updateApp(data);
     })
-    .catch(err => {
+    .catch((err) => {
       console.error('Poll error:', err);
     });
 }
@@ -65,8 +65,10 @@ poll();
 window.addEventListener('resize', () => {
   if (typeof _resizeTimer !== 'undefined') {
     clearTimeout(_resizeTimer);
-    setResizeTimer(setTimeout(() => { 
-      if (_state) renderTrading(_state, true); 
-    }, 100));
+    setResizeTimer(
+      setTimeout(() => {
+        if (_state) renderTrading(_state, true);
+      }, 100)
+    );
   }
 });

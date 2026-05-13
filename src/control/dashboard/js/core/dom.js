@@ -5,7 +5,7 @@
 /**
  * DOM manipulation helpers.
  */
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
 function el(tag, cls, txt) {
   const e = document.createElement(tag);
@@ -16,26 +16,32 @@ function el(tag, cls, txt) {
 
 function sigClass(kind) {
   const m = {
-    'DensityDetected': 'sig-DensityDetected',
-    'DensityRemoved': 'sig-DensityRemoved',
-    'DensityEating': 'sig-DensityEating',
-    'IcebergSuspected': 'sig-IcebergSuspected',
-    'TapeBurst': 'sig-TapeBurst',
-    'TapeFade': 'sig-TapeFade',
-    'TapeFlush': 'sig-TapeFlush',
-    'TapeDistribution': 'sig-TapeDistribution',
-    'LevelFormed': 'sig-LevelFormed',
-    'LevelApproach': 'sig-LevelApproach',
-    'LevelRejection': 'sig-LevelRejection',
-    'LevelBreak': 'sig-LevelBreak',
-    'LeaderMove': 'sig-LeaderMove'
+    DensityDetected: 'sig-DensityDetected',
+    DensityRemoved: 'sig-DensityRemoved',
+    DensityEating: 'sig-DensityEating',
+    IcebergSuspected: 'sig-IcebergSuspected',
+    TapeBurst: 'sig-TapeBurst',
+    TapeFade: 'sig-TapeFade',
+    TapeFlush: 'sig-TapeFlush',
+    TapeDistribution: 'sig-TapeDistribution',
+    LevelFormed: 'sig-LevelFormed',
+    LevelApproach: 'sig-LevelApproach',
+    LevelRejection: 'sig-LevelRejection',
+    LevelBreak: 'sig-LevelBreak',
+    LeaderMove: 'sig-LeaderMove',
   };
   return m[kind] || '';
 }
 
 function stratBadge(name) {
   if (!name) return '';
-  const cls = name.includes('Bounce') ? 'strat-bounce' : name.includes('Breakout') ? 'strat-breakout' : name.includes('Leader') ? 'strat-leaderlag' : '';
+  const cls = name.includes('Bounce')
+    ? 'strat-bounce'
+    : name.includes('Breakout')
+      ? 'strat-breakout'
+      : name.includes('Leader')
+        ? 'strat-leaderlag'
+        : '';
   const short = name.replace('FromDensity', '').replace('EatThrough', '');
   return `<span class="strat-badge ${cls}">${short}</span>`;
 }

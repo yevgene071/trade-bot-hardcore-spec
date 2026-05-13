@@ -12,18 +12,20 @@ function buildSignalFilters(data) {
   const container = $('sig-filter-row');
   if (!container) return;
   const sigs = data.signals || [];
-  const kinds = ['ALL', ...new Set(sigs.map(s => s.kind))].sort();
+  const kinds = ['ALL', ...new Set(sigs.map((s) => s.kind))].sort();
 
   if (_lastSigFilter === JSON.stringify(kinds)) return;
   setSigFilter(JSON.stringify(kinds)); // Use setter for last filter tracking
 
   container.replaceChildren();
-  kinds.forEach(k => {
+  kinds.forEach((k) => {
     const chip = el('span', 'filter-chip', k);
     if (_sigFilter === k || (_sigFilter === '' && k === 'ALL')) chip.classList.add('active');
     chip.addEventListener('click', () => {
       setSigFilter(k === 'ALL' ? '' : k);
-      document.querySelectorAll('#sig-filter-row .filter-chip').forEach(c => c.classList.remove('active'));
+      document
+        .querySelectorAll('#sig-filter-row .filter-chip')
+        .forEach((c) => c.classList.remove('active'));
       chip.classList.add('active');
       renderSignals(data);
     });
@@ -33,12 +35,12 @@ function buildSignalFilters(data) {
 
 function renderSignals(data) {
   const sigs = data.signals || [];
-  const filtered = _sigFilter ? sigs.filter(s => s.kind === _sigFilter) : sigs;
+  const filtered = _sigFilter ? sigs.filter((s) => s.kind === _sigFilter) : sigs;
   const MAX_FEED = 100;
 
   const badge = $('sig-tab-badge');
   if (badge) {
-    const newCount = sigs.filter(s => !_seenSignals.has(s.time_str + s.ticker + s.kind)).length;
+    const newCount = sigs.filter((s) => !_seenSignals.has(s.time_str + s.ticker + s.kind)).length;
     badge.textContent = newCount;
     badge.style.display = newCount ? 'inline' : 'none';
   }
@@ -48,7 +50,12 @@ function renderSignals(data) {
   if (feed) {
     let newCount = 0;
     while (newCount < filtered.length) {
-      if (_renderedSigKeys.has(filtered[newCount].time_str + filtered[newCount].ticker + filtered[newCount].kind)) break;
+      if (
+        _renderedSigKeys.has(
+          filtered[newCount].time_str + filtered[newCount].ticker + filtered[newCount].kind
+        )
+      )
+        break;
       newCount++;
     }
 
@@ -56,7 +63,7 @@ function renderSignals(data) {
       feed.replaceChildren();
     } else if (newCount >= filtered.length || feed.children.length === 0) {
       feed.replaceChildren();
-      filtered.slice(0, MAX_FEED).forEach(s => {
+      filtered.slice(0, MAX_FEED).forEach((s) => {
         const key = s.time_str + s.ticker + s.kind;
         _renderedSigKeys.add(key);
         const div = el('div', 'feed-item ' + sigClass(s.kind));
@@ -101,7 +108,14 @@ function renderSignals(data) {
   if (feedFull) {
     let newCountFull = 0;
     while (newCountFull < filtered.length) {
-      if (_renderedSigFullKeys.has(filtered[newCountFull].time_str + filtered[newCountFull].ticker + filtered[newCountFull].kind)) break;
+      if (
+        _renderedSigFullKeys.has(
+          filtered[newCountFull].time_str +
+            filtered[newCountFull].ticker +
+            filtered[newCountFull].kind
+        )
+      )
+        break;
       newCountFull++;
     }
 
@@ -110,38 +124,40 @@ function renderSignals(data) {
     } else if (newCountFull >= filtered.length || feedFull.children.length === 0) {
       feedFull.replaceChildren();
       const groups = new Map();
-      filtered.forEach(s => {
+      filtered.forEach((s) => {
         if (!groups.has(s.ticker)) groups.set(s.ticker, []);
         groups.get(s.ticker).push(s);
       });
-      [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([ticker, gsigs]) => {
-        const grp = el('div', 'sig-group');
-        const key = 'sig-grp-' + ticker;
-        if (_groupOpen[key] === undefined) _groupOpen[key] = true;
-        const head = el('div', 'sig-group-head');
-        head.innerHTML = `<span>${ticker} <span style="color:var(--muted)">(${gsigs.length})</span></span><span style="font-size:10px;">${_groupOpen[key] ? '▼' : '▶'}</span>`;
-        head.addEventListener('click', () => {
-          _groupOpen[key] = !_groupOpen[key];
-          const body = grp.querySelector('.sig-group-body');
-          if (body) body.classList.toggle('open', _groupOpen[key]);
-          head.querySelector('span:last-child').textContent = _groupOpen[key] ? '▼' : '▶';
+      [...groups.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([ticker, gsigs]) => {
+          const grp = el('div', 'sig-group');
+          const key = 'sig-grp-' + ticker;
+          if (_groupOpen[key] === undefined) _groupOpen[key] = true;
+          const head = el('div', 'sig-group-head');
+          head.innerHTML = `<span>${ticker} <span style="color:var(--muted)">(${gsigs.length})</span></span><span style="font-size:10px;">${_groupOpen[key] ? '▼' : '▶'}</span>`;
+          head.addEventListener('click', () => {
+            _groupOpen[key] = !_groupOpen[key];
+            const body = grp.querySelector('.sig-group-body');
+            if (body) body.classList.toggle('open', _groupOpen[key]);
+            head.querySelector('span:last-child').textContent = _groupOpen[key] ? '▼' : '▶';
+          });
+          grp.appendChild(head);
+          const bodyEl = el('div', 'sig-group-body');
+          if (_groupOpen[key]) bodyEl.classList.add('open');
+          gsigs.forEach((s) => {
+            const sigKey = s.time_str + s.ticker + s.kind;
+            _renderedSigFullKeys.add(sigKey);
+            const div = el('div', 'feed-item ' + sigClass(s.kind));
+            div.dataset.sk = sigKey;
+            const isNew = !_seenSignals.has(sigKey);
+            _seenSignals.add(sigKey);
+            div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence || 0).toFixed(2)})</span>${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
+            bodyEl.appendChild(div);
+          });
+          grp.appendChild(bodyEl);
+          feedFull.appendChild(grp);
         });
-        grp.appendChild(head);
-        const bodyEl = el('div', 'sig-group-body');
-        if (_groupOpen[key]) bodyEl.classList.add('open');
-        gsigs.forEach(s => {
-          const sigKey = s.time_str + s.ticker + s.kind;
-          _renderedSigFullKeys.add(sigKey);
-          const div = el('div', 'feed-item ' + sigClass(s.kind));
-          div.dataset.sk = sigKey;
-          const isNew = !_seenSignals.has(sigKey);
-          _seenSignals.add(sigKey);
-          div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence || 0).toFixed(2)})</span>${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
-          bodyEl.appendChild(div);
-        });
-        grp.appendChild(bodyEl);
-        feedFull.appendChild(grp);
-      });
     } else if (newCountFull > 0) {
       const atBottom = feedFull.scrollHeight - feedFull.scrollTop <= feedFull.clientHeight + 40;
       const newByTicker = new Map();
@@ -152,7 +168,7 @@ function renderSignals(data) {
       }
 
       for (const [ticker, newSigs] of newByTicker) {
-        const grp = Array.from(feedFull.children).find(c => {
+        const grp = Array.from(feedFull.children).find((c) => {
           const h = c.querySelector('.sig-group-head');
           return h && h.textContent.trimStart().startsWith(ticker);
         });
@@ -248,7 +264,9 @@ function renderSigCounts(data) {
   if (!body) return;
   const sigs = data.signals || [];
   const counts = {};
-  sigs.forEach(s => { counts[s.kind] = (counts[s.kind] || 0) + 1; });
+  sigs.forEach((s) => {
+    counts[s.kind] = (counts[s.kind] || 0) + 1;
+  });
 
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   body.replaceChildren();

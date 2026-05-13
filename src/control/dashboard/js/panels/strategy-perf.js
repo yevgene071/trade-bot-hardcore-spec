@@ -18,7 +18,7 @@ function renderStrategyPerf(data) {
   }
 
   body.replaceChildren();
-  stats.forEach(s => {
+  stats.forEach((s) => {
     const row = el('div', 'strat-perf-row');
     const pnlCls = s.pnl_usd >= 0 ? 'val-up' : 'val-dn';
     row.innerHTML = `

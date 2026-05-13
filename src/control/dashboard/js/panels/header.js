@@ -9,7 +9,7 @@
  */
 function renderHeader(data) {
   const g = data.gauges || {};
-  
+
   // Brand version
   const vTag = $('v-tag');
   if (vTag) vTag.textContent = data.version || 'v0.0.1';

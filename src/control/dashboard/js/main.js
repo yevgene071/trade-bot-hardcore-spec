@@ -33,3 +33,23 @@
 // @depends-on: app/tabs.js
 // @depends-on: app/update.js
 // @depends-on: transport/ws.js
+
+/**
+ * Bootstrap logic.
+ * Phase 8: DOMContentLoaded, connect, start intervals.
+ */
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('Dashboard bootstrap started');
+
+  // Initialize tabs (already called in app/tabs.js, but safe to ensure)
+  if (typeof initTabs === 'function') initTabs();
+
+  // Start polling (already called in app/update.js)
+  if (typeof poll === 'function') poll();
+
+  // Optional: Connect WebSocket
+  if (typeof connectWS === 'function') connectWS();
+
+  // Update clock immediately
+  if (typeof updateClock === 'function') updateClock();
+});

@@ -9,7 +9,7 @@
  */
 function renderCommand(data) {
   const a = data.account || {};
-  
+
   const update = (id, val, fmt) => {
     const el = $(id);
     if (el) el.textContent = fmt(val);
@@ -28,8 +28,8 @@ function renderCommand(data) {
 
   // Metrics
   const m = data.metrics || {};
-  update('m-wr', m.win_rate, v => (v || 0).toFixed(0) + '%');
-  update('m-pf', m.profit_factor, v => (v || 0).toFixed(2));
-  update('m-trades', m.total_trades, v => v || 0);
-  update('max-dd', m.max_drawdown, v => (v || 0).toFixed(1) + '%');
+  update('m-wr', m.win_rate, (v) => (v || 0).toFixed(0) + '%');
+  update('m-pf', m.profit_factor, (v) => (v || 0).toFixed(2));
+  update('m-trades', m.total_trades, (v) => v || 0);
+  update('max-dd', m.max_drawdown, (v) => (v || 0).toFixed(1) + '%');
 }

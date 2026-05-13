@@ -19,11 +19,15 @@ function renderEquityChart(data) {
     return;
   }
 
-  const pad = { top: 10, right: 40, bottom: 20, left: 10 }, pw = w - pad.left - pad.right, ph = h - pad.top - pad.bottom;
-  const vals = history.map(p => p.equity);
-  const min = Math.min(...vals), max = Math.max(...vals), range = (max - min) || 1;
-  const toX = i => pad.left + (i / (vals.length - 1)) * pw;
-  const toY = v => pad.top + ph - ((v - min) / range) * ph;
+  const pad = { top: 10, right: 40, bottom: 20, left: 10 },
+    pw = w - pad.left - pad.right,
+    ph = h - pad.top - pad.bottom;
+  const vals = history.map((p) => p.equity);
+  const min = Math.min(...vals),
+    max = Math.max(...vals),
+    range = max - min || 1;
+  const toX = (i) => pad.left + (i / (vals.length - 1)) * pw;
+  const toY = (v) => pad.top + ph - ((v - min) / range) * ph;
 
   drawGrid(ctx, w, h, pad);
 
