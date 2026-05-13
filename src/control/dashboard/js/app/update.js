@@ -57,9 +57,8 @@ function poll() {
     });
 }
 
-// Start polling
+// poll() will be called by main.js bootstrap
 setInterval(poll, 1000);
-poll();
 
 // Handle resize
 window.addEventListener('resize', () => {

@@ -31,5 +31,4 @@ function initTabs() {
   });
 }
 
-// Initialize tabs on load
-initTabs();
+// initTabs() will be called by main.js bootstrap

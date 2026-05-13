@@ -8,7 +8,7 @@
  */
 
 function renderControls(data) {
-  const ks = $('kill-switch-banner');
+  const ks = $('ks-banner');
   if (ks) {
     ks.style.display = data.kill_switch_active ? 'block' : 'none';
   }
