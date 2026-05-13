@@ -1,0 +1,9 @@
+#toasts { position: fixed; bottom: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+.toast { pointer-events: auto; background: var(--surface-raised); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 8px 12px; border-radius: var(--radius-sm); box-shadow: 0 8px 24px rgba(0,0,0,0.6); font-size: 12.5px; animation: slideIn 0.35s ease-out; position: relative; overflow: hidden; min-width: 200px; max-width: 320px; }
+.toast.pos { border-left-color: var(--positive); }
+.toast.neg { border-left-color: var(--negative); }
+.toast-progress { position: absolute; bottom: 0; left: 0; height: 2px; background: var(--accent); animation: toastTimer 5s linear forwards; }
+.toast.pos .toast-progress { background: var(--positive); }
+.toast.neg .toast-progress { background: var(--negative); }
+@keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes toastTimer { from { width: 100%; } to { width: 0%; } }
