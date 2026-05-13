@@ -21,7 +21,6 @@ void LeaderSignal::on_frame(const FeatureFrame& frame) {
     if (frame.ticker != ticker_) return;
     
     our_history_.push_back({frame.timestamp, frame.mid});
-    while (our_history_.size() > 100) our_history_.pop_front();
     
     check_signal_(frame.timestamp);
 }
@@ -30,7 +29,6 @@ void LeaderSignal::on_leader_frame(const FeatureFrame& frame) {
     if (frame.ticker != leader_ticker_) return;
     
     leader_history_.push_back({frame.timestamp, frame.mid});
-    while (leader_history_.size() > 100) leader_history_.pop_front();
 }
 
 void LeaderSignal::check_signal_(std::chrono::system_clock::time_point now) {
@@ -44,13 +42,13 @@ void LeaderSignal::check_signal_(std::chrono::system_clock::time_point now) {
         if (history.empty()) return 0.0;
         double cur = history.back().second;
         double prev = 0.0;
-        for (auto it = history.rbegin(); it != history.rend(); ++it) {
-            if ((now - it->first) >= std::chrono::seconds(5)) {
-                prev = it->second;
+        for (int i = static_cast<int>(history.size()) - 1; i >= 0; --i) {
+            if ((now - history[i].first) >= std::chrono::seconds(5)) {
+                prev = history[i].second;
                 break;
             }
         }
-        if (prev == 0.0) prev = history.front().second;
+        if (prev == 0.0) prev = history[0].second;
         return (cur - prev) / prev * 100.0;
     };
 
@@ -70,14 +68,13 @@ void LeaderSignal::check_signal_(std::chrono::system_clock::time_point now) {
                 .ticker = ticker_,
                 .price = our_history_.back().second,
                 .confidence = tracker_.confidence(),
-                .payload = nlohmann::json{
-                    {"leader_ticker", leader_ticker_},
-                    {"leader_move_pct", leader_move},
-                    {"our_move_pct", our_move},
-                    {"expected_move_pct", expected_move},
-                    {"lag_pct", lag_diff},
-                    {"correlation", corr},
-                    {"lag_ms", tracker_.lag_ms()}
+                .payload = {
+                    .lag_pct = lag_diff,
+                    .correlation = corr,
+                    .leader_move_pct = leader_move,
+                    .our_move_pct = our_move,
+                    .expected_move_pct = expected_move,
+                    .lag_ms = static_cast<double>(tracker_.lag_ms())
                 }
             };
             bus_.publish(s);

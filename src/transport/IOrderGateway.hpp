@@ -21,7 +21,7 @@ public:
     virtual BalanceUpdate get_balance(int connection_id) = 0;
     
     virtual PlaceOrderResult place_order(int connection_id, const PlaceOrderRequest& request) = 0;
-    virtual void cancel_order(int connection_id, int64_t order_id) = 0;
+    virtual void cancel_order(int connection_id, int64_t order_id, const Ticker& ticker) = 0;
     virtual void cancel_all_orders(int connection_id, const Ticker& ticker) = 0;
 };
 

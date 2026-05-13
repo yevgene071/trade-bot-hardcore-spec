@@ -188,6 +188,24 @@ std::optional<int64_t> NewsCalendar::minutes_to_next_news(
     return std::nullopt;
 }
 
+std::optional<int64_t> NewsCalendar::minutes_since_latest_event(
+    std::chrono::system_clock::time_point now) const {
+    std::shared_ptr<const std::vector<Event>> snap;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        snap = events_;
+    }
+    if (!snap || snap->empty()) {
+        return std::nullopt;
+    }
+    // Find the event with the maximum ts_utc (latest scheduled event, past or future)
+    auto latest_it = std::max_element(snap->begin(), snap->end(),
+        [](const Event& a, const Event& b) { return a.ts_utc < b.ts_utc; });
+    const auto delta = std::chrono::duration_cast<std::chrono::minutes>(
+        now - latest_it->ts_utc);
+    return std::max<int64_t>(0, delta.count());
+}
+
 size_t NewsCalendar::size() const {
     std::lock_guard<std::mutex> lk(mtx_);
     return events_ ? events_->size() : 0;

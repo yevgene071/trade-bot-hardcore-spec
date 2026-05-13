@@ -49,7 +49,8 @@ public:
             int cur_cluster_id = next_cluster_id++;
             points[i].cluster_id = cur_cluster_id;
 
-            queue.clear();
+            std::vector<size_t> queue;
+            queue.reserve(points.size());
             current_gen++; // New generation for this cluster expansion
 
             for (auto it = range.first; it != range.second; ++it) {

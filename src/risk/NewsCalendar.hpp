@@ -64,6 +64,11 @@ public:
         std::chrono::system_clock::time_point now,
         const Ticker&                         ticker) const;
 
+    /// Minutes since the most recent event (past or future) across all tickers.
+    /// Used to detect stale calendars. Returns nullopt if calendar is empty.
+    std::optional<int64_t> minutes_since_latest_event(
+        std::chrono::system_clock::time_point now) const;
+
     /// Total events currently loaded (for diagnostics / tests).
     size_t size() const;
 

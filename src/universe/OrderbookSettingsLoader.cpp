@@ -1,6 +1,7 @@
 #include "OrderbookSettingsLoader.hpp"
 #include "transport/MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
+#include "utils/UrlEncoder.hpp"
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -17,7 +18,7 @@ OrderbookSettingsLoader::OrderbookSettingsLoader(IHttpClient& http,
 std::optional<OrderbookSettings> OrderbookSettingsLoader::fetch(const Ticker& ticker) {
     std::stringstream ss;
     ss << base_url_ << "/api/connections/" << connection_id_ << "/orderbook-settings"
-       << "?Ticker=" << ticker;
+       << "?Ticker=" << url_encode(ticker);
 
     try {
         auto resp = http_.get(ss.str());

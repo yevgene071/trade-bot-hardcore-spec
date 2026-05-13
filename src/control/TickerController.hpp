@@ -3,6 +3,7 @@
 #include "marketdata/OrderBook.hpp"
 #include "marketdata/TradeStream.hpp"
 #include "features/FeatureExtractor.hpp"
+#include "features/ChartHistory.hpp"
 #include "signals/DensityDetector.hpp"
 #include "signals/IcebergDetector.hpp"
 #include "signals/TapeAnalyzer.hpp"
@@ -50,13 +51,15 @@ struct TickerController : public IMarketDataListener {
         
         detectors.push_back(std::make_unique<DensityDetector>(ticker, bus, *book, universe));
         detectors.push_back(std::make_unique<IcebergDetector>(ticker, bus, *book, universe));
-        detectors.push_back(std::make_unique<TapeAnalyzer>(ticker, bus, *book, *stream));
+        detectors.push_back(std::make_unique<TapeAnalyzer>(ticker, bus, *book, *stream, universe));
         
         auto ld = std::make_unique<LevelDetector>(ticker, bus, *book, cluster_mgr);
-        const auto* ld_ptr = ld.get();
+        auto* ld_ptr = ld.get();
         detectors.push_back(std::move(ld));
         
-        detectors.push_back(std::make_unique<ApproachAnalyzer>(ticker, bus, *book, *ld_ptr));
+        auto aa = std::make_unique<ApproachAnalyzer>(ticker, bus, *book, *ld_ptr);
+        ld_ptr->set_approach_analyzer(aa.get());
+        detectors.push_back(std::move(aa));
 
         if (leader_tracker && leader_ticker) {
             auto ls = std::make_unique<LeaderSignal>(ticker, *leader_ticker, bus, *leader_tracker);
@@ -67,6 +70,7 @@ struct TickerController : public IMarketDataListener {
 
     void on_leader_frame(const FeatureFrame& frame) {
         std::lock_guard lock(mtx_);
+        last_leader_frame_ = frame;
         if (leader_detector) {
             leader_detector->on_leader_frame(frame);
         }
@@ -124,22 +128,47 @@ struct TickerController : public IMarketDataListener {
         }
 
         last_frame_ = extractor->extract(now);
+        
+        if (last_leader_frame_.mid > 0) {
+            last_frame_.leader_change_1s = last_leader_frame_.price_change_1s;
+            last_frame_.leader_change_5s = last_leader_frame_.price_change_5s;
+        }
+
         for (auto& d : detectors) d->on_frame(last_frame_);
         
         dirty_flags_ = 0;
         last_extract_ = now;
+
+        // DS-08: Push to chart history ring buffer for dashboard
+        chart_history_.push(last_frame_);
+
         return last_frame_;
     }
 
+    /// DS-08: Return a snapshot of the chart history (last 300 points).
+    [[nodiscard]] std::vector<ChartPoint> chart_snapshot() const {
+        std::lock_guard lock(mtx_);
+        return chart_history_.snapshot();
+    }
+
+    /// DS-09: Return top N levels from the order book.
+    [[nodiscard]] std::pair<std::vector<ObLevel>, std::vector<ObLevel>>
+    ob_snapshot(int n_levels) const {
+        std::lock_guard lock(mtx_);
+        return book->get_top_levels(n_levels);
+    }
+
 private:
-    std::mutex mtx_;
+    mutable std::mutex mtx_;
     enum DirtyFlags {
         DirtyBook   = 1 << 0,
         DirtyTrades = 1 << 1
     };
     uint8_t dirty_flags_ = DirtyBook | DirtyTrades; // start dirty
     FeatureFrame last_frame_;
+    FeatureFrame last_leader_frame_;
     std::chrono::system_clock::time_point last_extract_;
+    ChartHistory chart_history_;
 };
 
 } // namespace trade_bot

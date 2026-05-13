@@ -25,7 +25,7 @@ std::vector<std::string> LogRingBuffer::recent(std::size_t n) const {
     return {buf_.begin() + static_cast<std::ptrdiff_t>(start), buf_.end()};
 }
 
-void Logger::init(const std::string& log_path) {
+void Logger::init(const std::string& log_path, const std::string& level) {
     auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     console_sink->set_pattern("%^[%Y-%m-%d %H:%M:%S.%e] [%l] [%s:%#]%$ %v");
 
@@ -39,12 +39,14 @@ void Logger::init(const std::string& log_path) {
 
     s_logger = std::make_shared<spdlog::logger>("trade_bot", sinks.begin(), sinks.end());
 
-    #ifdef NDEBUG
-        s_logger->set_level(spdlog::level::info);
-    #else
-        s_logger->set_level(spdlog::level::trace);
-    #endif
-
+    spdlog::level::level_enum lvl = spdlog::level::info;
+    if (level == "trace") lvl = spdlog::level::trace;
+    else if (level == "debug") lvl = spdlog::level::debug;
+    else if (level == "warn") lvl = spdlog::level::warn;
+    else if (level == "error") lvl = spdlog::level::err;
+    else if (level == "critical") lvl = spdlog::level::critical;
+    
+    s_logger->set_level(lvl);
     s_logger->flush_on(spdlog::level::warn);
     spdlog::set_default_logger(s_logger);
 }

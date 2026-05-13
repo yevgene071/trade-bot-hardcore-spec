@@ -8,13 +8,14 @@
 #include <map>
 #include <unordered_map>
 #include <vector>
+#include <mutex>
 
 namespace trade_bot {
 
 /**
  * T3-PAPER: Emulated executor for paper trading.
  */
-class PaperExecutor : public IExecutor, public IMarketDataListener {
+class PaperExecutor : public IExecutor {
 public:
     struct Config {
         double slippage_bps{1.0};
@@ -26,6 +27,7 @@ public:
     void submit(const TradePlan& plan) override;
     void cancel_all(const Ticker& ticker) override;
     void inject_recovered_trades(const std::vector<ActiveTrade>& trades) override;
+    void close_trade(const Ticker& ticker, const FixedString<32>& reason) override;
 
     // IMarketDataListener
     void on_trade(const Ticker& ticker, const Trade& trade) override;
@@ -64,7 +66,7 @@ public:
 private:
     const std::map<Ticker, const OrderBook*>& books_;
     Config cfg_;
-
+    mutable std::mutex mutex_;  // guards closed_trades_ (simultaneous close_trade + pop_closed_trades)
     std::vector<TradePlan>  pending_entries_;
     std::map<Ticker, Position> positions_;
     std::vector<ClosedTrade>   closed_trades_;

@@ -16,12 +16,16 @@ namespace trade_bot {
 /**
  * T4-EXECUTOR: Live order management.
  */
-class LiveExecutor : public IExecutor, public IMarketDataListener {
+class LiveExecutor : public IExecutor {
 public:
     struct Config {
         double min_partial_fill_ratio{0.5};
         int    exchange_error_streak_limit{5};
         std::chrono::milliseconds balance_reservation_timeout{1000};
+        // R15: Entry Slippage Control
+        double max_entry_slippage_bps{5.0};
+        // R14: Single Position Loss Kill
+        double max_single_position_loss_pct{1.5};
     };
 
     LiveExecutor(int connection_id, IOrderGateway& gateway, MarketDataFeed& feed, Config cfg);
@@ -33,6 +37,7 @@ public:
     void inject_recovered_trades(const std::vector<ActiveTrade>& trades) override;
     std::vector<ActiveTrade> get_active_trades() const override;
     std::vector<ClosedTrade> pop_closed_trades() override;
+    void close_trade(const Ticker& ticker, const FixedString<32>& reason) override;
 
     // IMarketDataListener
     void on_trade(const Ticker&, const Trade&) override {}
@@ -54,6 +59,8 @@ public:
 private:
     void handle_reconciled_(const ReconcileResult& res);
     void place_stops_(ActiveTrade& trade);
+    void emergency_close_trade_(ActiveTrade& trade);
+    void record_emergency_close_(const ActiveTrade& trade, const FixedString<32>& reason);
     void update_balance_reservation_(double amount, bool add);
 
     int connection_id_;

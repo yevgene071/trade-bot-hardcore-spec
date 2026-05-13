@@ -2,6 +2,7 @@
 #include "signals/SignalBus.hpp"
 #include "marketdata/OrderBook.hpp"
 #include "marketdata/TradeStream.hpp"
+#include "universe/TickerUniverse.hpp"
 #include "logger/Logger.hpp"
 #include <gtest/gtest.h>
 
@@ -10,6 +11,8 @@ using namespace trade_bot;
 class TapeAnalyzerTest : public ::testing::Test {
 protected:
     void SetUp() override { Logger::init(); }
+
+    TickerUniverse universe_;
     
     FeatureFrame make_frame(Ticker t, std::chrono::system_clock::time_point ts) {
         FeatureFrame f;
@@ -25,7 +28,7 @@ TEST_F(TapeAnalyzerTest, DetectsTapeBurst) {
     OrderBook book{"BTCUSDT", 0.01, 1e-6};
     TradeStream stream{"BTCUSDT", 1.0, 0.3466}; // half-life 2s
     
-    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream);
+    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream, universe_);
     
     int signals = 0;
     bus.subscribe([&signals](const Signal& s){
@@ -59,7 +62,7 @@ TEST_F(TapeAnalyzerTest, DetectsTapeFade) {
     
     TapeAnalyzer::Config cfg;
     cfg.fade_cusum_h = 2.0; // sensitive for test
-    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream, cfg);
+    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream, universe_, cfg);
     
     int signals = 0;
     bus.subscribe([&signals](const Signal& s){
@@ -97,7 +100,7 @@ TEST_F(TapeAnalyzerTest, DetectsTapeDistribution) {
     TapeAnalyzer::Config cfg;
     cfg.distribution_max_range_bps = 20.0;
     cfg.distribution_min_volume_usd = 500'000.0;
-    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream, cfg);
+    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream, universe_, cfg);
 
     int distribution_signals = 0;
     bus.subscribe([&](const Signal& s) {
@@ -142,7 +145,7 @@ TEST_F(TapeAnalyzerTest, DetectsTapeFlush) {
     cfg.flush_min_size_usd = 100000.0;
     cfg.flush_min_move_bps = 1.0; // sensitive
     
-    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream, cfg);
+    TapeAnalyzer analyzer("BTCUSDT", bus, book, stream, universe_, cfg);
     
     int signals = 0;
     bus.subscribe([&signals](const Signal& s){

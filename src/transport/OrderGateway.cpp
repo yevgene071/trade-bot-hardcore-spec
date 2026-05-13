@@ -1,9 +1,29 @@
 #include "OrderGateway.hpp"
 #include "MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
+#include "utils/UrlEncoder.hpp"
 #include <nlohmann/json.hpp>
+#include <cctype>
 
 namespace trade_bot {
+
+namespace {
+    // Case-insensitive array lookup: checks exact key, then with flipped first-letter case.
+    // This handles MetaScalp API returning both "Tickers" and "tickers" variants.
+    const nlohmann::json* find_array(const nlohmann::json& j, const std::string& key) {
+        if (j.is_array()) return &j;
+        if (j.contains(key) && j[key].is_array()) return &j[key];
+        std::string alt = key;
+        if (!alt.empty()) {
+            if (std::isupper(static_cast<unsigned char>(alt[0]))) alt[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(alt[0])));
+            else alt[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(alt[0])));
+            if (j.contains(alt) && j[alt].is_array()) return &j[alt];
+        }
+        return nullptr;
+    }
+}
+
+
 
 OrderGateway::OrderGateway(std::shared_ptr<IHttpClient> http_client)
     : m_http_client(std::move(http_client)) {}
@@ -16,12 +36,7 @@ std::vector<ConnectionInfo> OrderGateway::get_connections() {
     }
     
     auto j = nlohmann::json::parse(response.body);
-    const nlohmann::json* arr = nullptr;
-    if (j.is_array()) {
-        arr = &j;
-    } else if (j.contains("connections") && j["connections"].is_array()) {
-        arr = &j["connections"];
-    }
+    const nlohmann::json* arr = find_array(j, "Connections");
 
     std::vector<ConnectionInfo> result;
     if (arr) {
@@ -51,12 +66,7 @@ std::vector<TickerInfo> OrderGateway::get_tickers(int connection_id, bool refres
     }
     
     auto j = nlohmann::json::parse(response.body);
-    const nlohmann::json* arr = nullptr;
-    if (j.is_array()) {
-        arr = &j;
-    } else if (j.contains("tickers") && j["tickers"].is_array()) {
-        arr = &j["tickers"];
-    }
+    const nlohmann::json* arr = find_array(j, "Tickers");
 
     std::vector<TickerInfo> result;
     if (arr) {
@@ -70,19 +80,14 @@ std::vector<TickerInfo> OrderGateway::get_tickers(int connection_id, bool refres
 
 std::vector<RestOrder> OrderGateway::get_open_orders(int connection_id, const Ticker& ticker) {
     std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
-                      std::to_string(connection_id) + "/orders?Ticker=" + ticker;
+                      std::to_string(connection_id) + "/orders?Ticker=" + url_encode(ticker);
     auto response = m_http_client->get(url);
     if (response.status != 200) {
         throw CodecError("Failed to get orders: status " + std::to_string(response.status));
     }
     
     auto j = nlohmann::json::parse(response.body);
-    const nlohmann::json* arr = nullptr;
-    if (j.is_array()) {
-        arr = &j;
-    } else if (j.contains("orders") && j["orders"].is_array()) {
-        arr = &j["orders"];
-    }
+    const nlohmann::json* arr = find_array(j, "Orders");
 
     std::vector<RestOrder> result;
     if (arr) {
@@ -103,12 +108,7 @@ std::vector<PositionUpdate> OrderGateway::get_positions(int connection_id) {
     }
     
     auto j = nlohmann::json::parse(response.body);
-    const nlohmann::json* arr = nullptr;
-    if (j.is_array()) {
-        arr = &j;
-    } else if (j.contains("positions") && j["positions"].is_array()) {
-        arr = &j["positions"];
-    }
+    const nlohmann::json* arr = find_array(j, "Positions");
 
     std::vector<PositionUpdate> result;
     if (arr) {
@@ -149,11 +149,13 @@ PlaceOrderResult OrderGateway::place_order(int connection_id, const PlaceOrderRe
     return MetaScalpCodec::parse_place_order_result(nlohmann::json::parse(response.body));
 }
 
-void OrderGateway::cancel_order(int connection_id, int64_t order_id) {
+void OrderGateway::cancel_order(int connection_id, int64_t order_id, const Ticker& ticker) {
     std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
                       std::to_string(connection_id) + "/orders/cancel";
     nlohmann::json body;
+    body["Ticker"] = ticker;
     body["OrderId"] = order_id;
+    body["Type"] = 0;  // 0 = cancel regardless of order type
     
     auto response = m_http_client->post(url, body.dump());
     if (response.status != 200) {

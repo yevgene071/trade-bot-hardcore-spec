@@ -6,10 +6,12 @@ json-schema-validator/2.3.0
 spdlog/1.13.0
 tomlplusplus/3.4.0
 abseil/20230802.1
-gtest/1.14.0
 hdrhistogram-c/0.11.8
 xsimd/13.0.0
 concurrentqueue/1.0.5
+
+[test_requires]
+gtest/1.14.0
 benchmark/1.8.3
 
 [generators]

@@ -4,10 +4,10 @@
 #include "SignalBus.hpp"
 #include "marketdata/OrderBook.hpp"
 #include "universe/TickerUniverse.hpp"
+#include "utils/CircularBuffer.hpp"
 
 #include <absl/container/flat_hash_map.h>
 #include <chrono>
-#include <deque>
 #include <optional>
 
 namespace trade_bot {
@@ -97,9 +97,9 @@ private:
         Side   side;
     };
 
-    std::deque<TradeEvent> trade_history_;
-    std::deque<BookEvent>  book_history_;
-    static constexpr size_t kMaxHistory = 100;
+    static constexpr size_t kMaxHistory = 1024;
+    CircularBuffer<TradeEvent, kMaxHistory> trade_history_;
+    CircularBuffer<BookEvent,  kMaxHistory> book_history_;
     std::chrono::system_clock::time_point last_prune_;
 
     // T4-PERF: Persistent maps for temporary volume calculation to avoid allocations (#159)

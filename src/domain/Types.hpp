@@ -110,7 +110,8 @@ struct RestOrder {
 struct PlaceOrderResult {
     std::string status;
     std::string client_id;
-    double execution_time_ms;
+    int64_t     order_id{0};
+    double      execution_time_ms;
 
     bool operator==(const PlaceOrderResult&) const = default;
 };
@@ -124,6 +125,7 @@ struct PositionUpdate {
     double avg_price;
     double avg_price_fix;
     double avg_price_dyn;
+    double price_increment{0.0};
     PositionStatus status;
 
     bool operator==(const PositionUpdate&) const = default;

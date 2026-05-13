@@ -48,6 +48,7 @@ struct ReconcileResult {
     ReconcileOutcome           outcome;
     int64_t                    local_order_id;
     std::optional<int64_t>     server_order_id;
+    std::optional<OrderIntent> intent;   // original intent, populated for side/size matching
     std::optional<std::string> note;
 };
 

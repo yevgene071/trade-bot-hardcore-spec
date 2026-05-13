@@ -6,6 +6,7 @@
 #include "marketdata/TradeStream.hpp"
 #include "numeric/Cusum.hpp"
 #include "numeric/Ema.hpp"
+#include "universe/TickerUniverse.hpp"
 
 #include <chrono>
 
@@ -38,12 +39,14 @@ public:
                 SignalBus& bus,
                 const OrderBook& book,
                 const TradeStream& stream,
+                const TickerUniverse& universe,
                 Config cfg);
 
     TapeAnalyzer(Ticker ticker,
                 SignalBus& bus,
                 const OrderBook& book,
-                const TradeStream& stream);
+                const TradeStream& stream,
+                const TickerUniverse& universe);
 
     void on_frame(const FeatureFrame& frame) override;
     void on_trade(const Trade& trade) override;
@@ -54,6 +57,7 @@ private:
     SignalBus&      bus_;
     const OrderBook& book_;
     const TradeStream& stream_;
+    const TickerUniverse& universe_;
     Config          cfg_;
 
     Ema<double>     background_intensity_; // mu

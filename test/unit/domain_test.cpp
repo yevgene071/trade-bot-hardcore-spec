@@ -30,7 +30,7 @@ TEST(DomainTypesTest, OrderUpdateEquality) {
 }
 
 TEST(DomainTypesTest, PositionUpdate) {
-    PositionUpdate pos{1, 456, "ETHUSDT", Side::Sell, 2.0, 2500.0, 2500.0, 2500.0, PositionStatus::Open};
+    PositionUpdate pos{1, 456, "ETHUSDT", Side::Sell, 2.0, 2500.0, 2500.0, 2500.0, 0.01, PositionStatus::Open};
     EXPECT_EQ(pos.ticker, "ETHUSDT");
     EXPECT_EQ(pos.avg_price_fix, 2500.0);
 }

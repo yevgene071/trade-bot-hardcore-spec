@@ -5,6 +5,7 @@
 
 #include <unordered_map>
 #include <vector>
+#include <mutex>
 
 namespace trade_bot {
 
@@ -21,12 +22,14 @@ struct StrategyContext {
     std::vector<Signal> signal_history;
 
     void update(const FeatureFrame& frame) {
+        std::lock_guard<std::mutex> lock(mtx_);
         last_frame = frame;
     }
 
     static constexpr std::size_t kMaxHistorySize = 1024;
 
     void update(const Signal& signal) {
+        std::lock_guard<std::mutex> lock(mtx_);
         recent_signals[signal.kind] = signal;
         signal_history.push_back(signal);
 
@@ -52,11 +55,14 @@ struct StrategyContext {
     }
 
     bool has_recent_signal(SignalKind kind, std::chrono::seconds max_age) const {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto it = recent_signals.find(kind);
         if (it == recent_signals.end()) return false;
         const auto now = std::chrono::system_clock::now();
         return (now - it->second.timestamp) <= max_age;
     }
+
+    mutable std::mutex mtx_;
 
 private:
     size_t history_head_offset_ = 0;

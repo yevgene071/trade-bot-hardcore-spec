@@ -9,7 +9,7 @@ version = "0.0.1"
 name = "trade_bot_hardcore"
 
 [logger]
-level = "info" # trace, debug, info, warn, error, critical
+level = "trace" # trace, debug, info, warn, error, critical
 path = "logs/trade_bot.log"
 
 [network]
@@ -35,6 +35,7 @@ max_entry_slippage_bps = 5
 max_position_value_pct = 10.0
 # R3: parallel trades
 max_concurrent_positions = 3
+max_positions_per_ticker = 1
 # R9: leverage
 max_leverage = 5.0
 margin_safety_ratio = 0.8
@@ -100,7 +101,7 @@ sticky_duration_ms = 2000
 fake_threshold_ms = 300
 sticky_min_trade_ms = 5000
 eating_window_ms = 3000
-eating_ratio_threshold = 0.5
+eating_ratio_threshold = 0.4
 eating_min_prints = 5
 eating_cooloff_ms = 1000
 
@@ -153,7 +154,6 @@ slow_min_distance_bps = 30
 slow_min_pullbacks = 3
 slow_min_duration = 120
 consolidation_range_bps = 10
-consolidation_min_volume_usd = 100000.0
 pullback_min_bps = 5
 
 [signals.leader]
@@ -177,6 +177,8 @@ stop_buffer_bps = 5
 stop_anchor_max_bps = 15
 affinity_threshold = 0.6
 affinity_stable_min = 5
+# Post-entry invalidation (STRATEGIES.md § 1.7)
+burst_contra_exit_sec = 5       # TapeBurst contra → close within this window after entry
 
 [strategies.breakout]
 tp1_size_ratio = 0.5
@@ -186,6 +188,13 @@ post_entry_grace_sec = 5
 min_follow_through_bps = 10
 affinity_threshold = 0.55
 affinity_stable_min = 5
+min_tape_aggression = 0.2
+min_relative_volume = 1.2
+max_resistance_cluster_ratio = 0.8
+# Post-entry invalidation (STRATEGIES.md § 2.7)
+fade_contra_exit_sec = 5         # TapeFade on our side → close within this window after entry
+leader_contra_exit_sec = 5       # LeaderMove contra → close within this window after entry
+leader_exit_contra_pct = 0.15    # |lag_pct| threshold for leader contra exit
 
 [strategies.leaderlag]
 tp1_size_ratio = 0.6
@@ -193,6 +202,10 @@ no_progress_timeout_sec = 15
 stop_distance_bps = 8
 affinity_threshold = 0.5
 affinity_stable_min = 5
+# Post-entry invalidation (STRATEGIES.md § 3.7)
+correlation_exit_threshold = 0.3   # exit if correlation drops below this
+leader_exit_reversal_bps = 5.0     # exit if leader reverses more than this
+swing_lookback_ticks = 30          # ticks for local extremum stop placement
 
 [strategies.flush]
 tp1_size_ratio = 0.7
@@ -208,23 +221,32 @@ deny_patterns          = ["*UP*", "*DOWN*", "*BULL*", "*BEAR*", "*1000*"]
 require_trading_allowed = true
 max_pool_size          = 30
 pool_refresh_min       = 30
-# Operator-guaranteed tickers (bypass warmup requirement).
-# Once warmup is implemented this list can be cleared and the bot
-# will self-select the best tickers by the criteria below.
-manual_allow           = [
-    "BTC_USDT", "ETH_USDT", "BNB_USDT", "SOL_USDT", "XRP_USDT",
-    "DOGE_USDT", "ADA_USDT", "AVAX_USDT", "LINK_USDT", "DOT_USDT",
-    "LTC_USDT", "NEAR_USDT", "APT_USDT", "ARB_USDT", "OP_USDT",
-    "SUI_USDT", "INJ_USDT", "TRX_USDT", "FIL_USDT", "ATOM_USDT"
-]
 
-# Dynamic pool filter (active once warmup stats are collected):
-# Skip top-N highest-volume tickers — they're too efficient for scalping.
-# Target mid-caps where density/level patterns are more pronounced.
+# Dynamic pool filter (active once warmup stats are collected).
+# Coins are selected SOLELY by the MetaScalp screener (ScreenerNewCoin).
+# No manual_allow — the screener is the single source of truth.
+# Exchange volume multiplier is auto-detected from connection name:
+#   MEXC → 0.1x, Bybit → 0.5x, Binance/other → 1.0x
+# Set exchange_volume_multiplier to override auto-detection.
+#   e.g., exchange_volume_multiplier = 0.08 for a very-low-volume exchange.
 exclude_top_n_by_volume = 10
-min_volume_24h_usd      = 10000000   # 10M (lower than spec default 50M to include more mid-caps)
+min_volume_24h_usd      = 10000000   # 10M (before exchange multiplier)
 max_avg_spread_bps      = 15
 warmup_sec              = 600
+# exchange_volume_multiplier = 1.0   # uncomment to override auto-detection
+
+[universe.dynamic_thresholds]
+# Per-coin dynamic threshold scaling for signal detectors.
+# When enabled, min_size_usd / min_volume_usd thresholds are scaled
+# proportionally to each coin's 24h volume relative to the reference.
+#   BTC ($30B vol) → thresholds scaled UP (~1.5-5x)
+#   TON ($100M vol) → thresholds scaled DOWN (~0.15-0.5x)
+# Uses sqrt compression to keep extremes from dominating.
+enabled = true
+reference_volume_24h_usd = 500000000   # 500M USD — "standard" coin reference
+min_scale_factor = 0.15               # floor (15% of config default)
+max_scale_factor = 5.0                # ceiling (500% of config default)
+floor_ratio = 0.10                    # absolute floor: calibrated threshold ≥ 10% of config default
 
 [universe.affinity]
 # Settings for TickerUniverse
@@ -245,7 +267,6 @@ max_avg_spread_bps = 4.0
 min_volatility_1min_bps = 8.0
 min_density_events_per_hour = 3
 min_eating_events_per_hour = 1
-min_follow_through_rate_7d = 0.35
 min_breakout_events_per_day = 5
 
 [universe.affinity.leaderlag]
@@ -264,3 +285,12 @@ max_avg_spread_bps = 6.0
 min_flush_events_per_day = 3
 flush_return_rate_7d = 0.60
 liquidation_availability = true
+
+[dashboard]
+bind_address  = "127.0.0.1"
+port          = 8080
+auth_token    = ""        # set to a long random string to enable LAN exposure
+
+[metrics]
+bind_address  = "127.0.0.1"
+port          = 9090

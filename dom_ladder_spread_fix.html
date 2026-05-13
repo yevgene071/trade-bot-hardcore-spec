@@ -1,0 +1,368 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#03050a;color:#e8edf5;font-family:'JetBrains Mono',monospace;font-size:11px}
+.wrap{display:grid;grid-template-columns:300px 1fr;gap:8px;padding:8px;height:620px}
+
+.ob-panel{background:#060912;border:1px solid rgba(255,255,255,0.07);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+.ob-head{padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.06);flex-shrink:0}
+.ob-ticker-row{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.ob-t{padding:2px 8px;border-radius:16px;border:1px solid rgba(255,255,255,0.08);background:#0a0e1a;color:#7b859c;font-size:9.5px;font-weight:700;cursor:pointer;transition:all .12s}
+.ob-t:hover{border-color:#6366f1;color:#e8edf5}
+.ob-t.active{background:#6366f1;color:#fff;border-color:#6366f1}
+.ob-kpis{display:flex;gap:4px}
+.ob-kpi{flex:1;background:#0a0e1a;border-radius:5px;padding:3px 5px;text-align:center}
+.ob-kpi-l{font-size:7px;color:#7b859c;text-transform:uppercase;letter-spacing:.05em}
+.ob-kpi-v{font-size:10px;font-weight:700;margin-top:1px}
+
+/* Ladder container — scrollable, relative для mid-line */
+.ladder-wrap{flex:1;overflow-y:auto;position:relative;overflow-x:hidden}
+.ladder-wrap::-webkit-scrollbar{width:3px}
+.ladder-wrap::-webkit-scrollbar-thumb{background:#1a2338;border-radius:2px}
+
+/* Каждая строка — три колонки: [ask bar | price | bid bar] */
+.lvl{display:grid;grid-template-columns:1fr 62px 1fr;position:relative;cursor:default;transition:background .06s}
+.lvl:hover{background:rgba(255,255,255,0.012)}
+.lvl.spread-row{opacity:.45}
+
+/* Ask side — бар растёт влево от цены */
+.a-side{display:flex;align-items:center;justify-content:flex-end;position:relative;overflow:hidden}
+.a-fill{position:absolute;top:1px;bottom:1px;right:0;border-radius:2px 0 0 2px;background:rgba(239,68,68,0.16);transition:width .22s ease}
+.a-lbl{position:relative;z-index:1;font-size:9px;font-weight:700;color:#f87171;padding-right:5px;white-space:nowrap}
+.lvl.big-ask .a-fill{background:rgba(239,68,68,0.30)}
+.lvl.big-ask .a-lbl{color:#ff5f5f;font-size:10px}
+
+/* Bid side — бар растёт вправо от цены */
+.b-side{display:flex;align-items:center;position:relative;overflow:hidden}
+.b-fill{position:absolute;top:1px;bottom:1px;left:0;border-radius:0 2px 2px 0;background:rgba(16,185,129,0.16);transition:width .22s ease}
+.b-lbl{position:relative;z-index:1;font-size:9px;font-weight:700;color:#34d399;padding-left:5px;white-space:nowrap}
+.lvl.big-bid .b-fill{background:rgba(16,185,129,0.30)}
+.lvl.big-bid .b-lbl{color:#2ecc81;font-size:10px}
+
+/* Price cell */
+.p-cell{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:#7b859c;border-left:1px solid rgba(255,255,255,0.04);border-right:1px solid rgba(255,255,255,0.04);background:#07101e;flex-shrink:0;white-space:nowrap;letter-spacing:.01em}
+.lvl.ask-lvl .p-cell{color:#cd7575}
+.lvl.bid-lvl .p-cell{color:#5eb88a}
+.lvl.spread-row .p-cell{color:#2a3348;font-size:9.5px;background:#050a14}
+
+/* Mid price line — absolute внутри ladder-wrap */
+#mid-line{position:absolute;left:0;right:0;height:1px;background:rgba(99,102,241,0.6);z-index:20;pointer-events:none;transition:top .18s cubic-bezier(.4,0,.2,1)}
+#mid-line::before{content:'';position:absolute;left:0;right:0;top:-3px;height:7px;background:rgba(99,102,241,0.06)}
+#mid-tag{position:absolute;right:2px;background:#6366f1;color:#fff;font-size:8.5px;font-weight:700;padding:1px 5px;border-radius:3px;white-space:nowrap;z-index:21;pointer-events:none;transform:translateY(-50%);transition:top .18s cubic-bezier(.4,0,.2,1)}
+
+/* Chart panel */
+.chart-panel{background:#060912;border:1px solid rgba(255,255,255,0.07);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+.chart-head{padding:7px 12px;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;gap:8px;flex-shrink:0}
+.c-pill{background:#6366f1;color:#fff;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px}
+.tf-row{display:flex;gap:3px}
+.tf-b{padding:2px 7px;border-radius:12px;border:1px solid rgba(255,255,255,0.08);background:transparent;color:#7b859c;font-size:9px;font-weight:700;cursor:pointer;transition:all .12s;font-family:'JetBrains Mono',monospace}
+.tf-b:hover{border-color:#6366f1;color:#e8edf5}
+.tf-b.active{background:#6366f1;color:#fff;border-color:#6366f1}
+.c-price{font-size:15px;font-weight:700;margin-left:auto}
+.c-pct{font-size:9.5px;padding:2px 6px;border-radius:4px;font-weight:600}
+.up{color:#34d399;background:rgba(16,185,129,0.1)}
+.dn{color:#f87171;background:rgba(239,68,68,0.1)}
+.chart-body{flex:1;position:relative}
+.chart-body canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+</style>
+
+<div class="wrap">
+  <!-- ORDER BOOK -->
+  <div class="ob-panel">
+    <div class="ob-head">
+      <div class="ob-ticker-row" id="ob-tickers">
+        <span class="ob-t active" onclick="selT(this,'BTC_USDT')">BTC</span>
+        <span class="ob-t" onclick="selT(this,'ETH_USDT')">ETH</span>
+        <span class="ob-t" onclick="selT(this,'SOL_USDT')">SOL</span>
+        <span class="ob-t" onclick="selT(this,'TON_USDT')">TON</span>
+        <span class="ob-t" onclick="selT(this,'WIF_USDT')">WIF</span>
+      </div>
+      <div class="ob-kpis">
+        <div class="ob-kpi"><div class="ob-kpi-l">Ticker</div><div class="ob-kpi-v" id="kpi-name" style="color:#6366f1;font-size:9px">BTC_USDT</div></div>
+        <div class="ob-kpi"><div class="ob-kpi-l">Spread</div><div class="ob-kpi-v" id="kpi-spread" style="color:#f59e0b">—</div></div>
+        <div class="ob-kpi"><div class="ob-kpi-l">Ticks</div><div class="ob-kpi-v" id="kpi-sticks" style="color:#c0c7d4">—</div></div>
+        <div class="ob-kpi"><div class="ob-kpi-l">Imb</div><div class="ob-kpi-v" id="kpi-imb">—</div></div>
+      </div>
+    </div>
+    <div class="ladder-wrap" id="ladder-wrap">
+      <div id="mid-line"></div>
+      <div id="mid-tag"></div>
+      <div id="ladder"></div>
+    </div>
+  </div>
+
+  <!-- CHART -->
+  <div class="chart-panel">
+    <div class="chart-head">
+      <span class="c-pill" id="chart-name">BTC_USDT</span>
+      <div class="tf-row">
+        <button class="tf-b active" onclick="setTF(this,1)">1m</button>
+        <button class="tf-b" onclick="setTF(this,5)">5m</button>
+        <button class="tf-b" onclick="setTF(this,15)">15m</button>
+        <button class="tf-b" onclick="setTF(this,60)">1h</button>
+      </div>
+      <span class="c-price" id="chart-last">—</span>
+      <span class="c-pct up" id="chart-pct">—</span>
+    </div>
+    <div class="chart-body" id="chart-body">
+      <canvas id="chart-canvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+const TICK={BTC_USDT:.5,ETH_USDT:.01,SOL_USDT:.01,TON_USDT:.001,WIF_USDT:.001};
+const DEC={BTC_USDT:1,ETH_USDT:2,SOL_USDT:2,TON_USDT:3,WIF_USDT:3};
+const VOLS={BTC_USDT:.6,ETH_USDT:.9,SOL_USDT:1.3,TON_USDT:1.6,WIF_USDT:2.1};
+const MIDS={BTC_USDT:43127.5,ETH_USDT:2287.3,SOL_USDT:98.45,TON_USDT:2.283,WIF_USDT:2.847};
+
+let _ticker='BTC_USDT', _mid=43127.5, _tf=1, _candles=[], _hover=null;
+const ROW_H=18;
+
+function fmtSz(v){return v>=1000?(v/1000).toFixed(1)+'K':v>=1?v.toFixed(2):v.toFixed(3)}
+
+/* ─── Генерация стакана ─── */
+function genOB(mid,ticker){
+  const tick=TICK[ticker]||.001;
+  // Спред: случайно 2..6 тиков — меняется на каждом апдейте
+  const sticks=2+Math.floor(Math.random()*5);
+  const bestAsk=Math.round((mid+sticks*tick/2)/tick)*tick;
+  const bestBid=Math.round((mid-sticks*tick/2)/tick)*tick;
+  const n=14, asks=[], bids=[];
+  for(let i=0;i<n;i++){
+    const sz=parseFloat(((Math.random()*7+.4)*(1/(i*.22+1))*(Math.random()<.1?4.5:1)).toFixed(3));
+    asks.push({price:+(bestAsk+i*tick).toFixed(DEC[ticker]),size:sz});
+    const sz2=parseFloat(((Math.random()*7+.4)*(1/(i*.22+1))*(Math.random()<.1?4.5:1)).toFixed(3));
+    bids.push({price:+(bestBid-i*tick).toFixed(DEC[ticker]),size:sz2});
+  }
+  return{asks,bids,bestAsk,bestBid,mid,sticks,spread:+(bestAsk-bestBid).toFixed(DEC[ticker])};
+}
+
+/* ─── Рендер ladder ─── */
+function renderLadder(ob){
+  const ticker=_ticker, dec=DEC[ticker], tick=TICK[ticker];
+  const maxSz=Math.max(...ob.asks.map(a=>a.size),...ob.bids.map(b=>b.size),.1);
+  const BIG=maxSz*.52;
+  let html='';
+
+  // Аски: от самого дальнего (верх экрана) до best ask
+  const asksTop=[...ob.asks].reverse();
+  asksTop.forEach(a=>{
+    const pct=Math.min(100,a.size/maxSz*100).toFixed(0);
+    const big=a.size>=BIG;
+    html+=`<div class="lvl ask-lvl${big?' big-ask':''}" style="height:${ROW_H}px">
+      <div class="a-side"><div class="a-fill" style="width:${pct}%"></div><span class="a-lbl">${fmtSz(a.size)}</span></div>
+      <div class="p-cell" style="height:${ROW_H}px">${a.price.toFixed(dec)}</div>
+      <div></div></div>`;
+  });
+
+  // Спред: пустые строки, по одной на каждый промежуточный тик
+  const spreadRows=ob.sticks-1; // тиков в спреде минус два крайних
+  for(let i=0;i<spreadRows;i++){
+    const sp=+(ob.bestAsk-(i+1)*tick).toFixed(dec);
+    html+=`<div class="lvl spread-row" style="height:${ROW_H}px">
+      <div></div>
+      <div class="p-cell" style="height:${ROW_H}px">${sp.toFixed(dec)}</div>
+      <div></div></div>`;
+  }
+
+  // Биды: от best bid вниз
+  ob.bids.forEach(b=>{
+    const pct=Math.min(100,b.size/maxSz*100).toFixed(0);
+    const big=b.size>=BIG;
+    html+=`<div class="lvl bid-lvl${big?' big-bid':''}" style="height:${ROW_H}px">
+      <div></div>
+      <div class="p-cell" style="height:${ROW_H}px">${b.price.toFixed(dec)}</div>
+      <div class="b-side"><div class="b-fill" style="width:${pct}%"></div><span class="b-lbl">${fmtSz(b.size)}</span></div></div>`;
+  });
+
+  document.getElementById('ladder').innerHTML=html;
+
+  // ── Mid-line: точная Y-позиция по цене ──
+  // Зона спреда: от нижнего края best-ask-row до верхнего края best-bid-row
+  const askRowCount=ob.asks.length;                      // кол-во ask строк (вверху)
+  const spreadZoneTopY=askRowCount*ROW_H;                // Y начала спред-зоны
+  const spreadZoneBotY=(askRowCount+spreadRows)*ROW_H;   // Y конца спред-зоны (перед best bid)
+  // mid Y = interpolate: bestAsk→spreadZoneTopY, bestBid→spreadZoneBotY+ROW_H
+  const midFrac=(ob.bestAsk-ob.mid)/(ob.bestAsk-ob.bestBid);
+  const midY=spreadZoneTopY+midFrac*(spreadZoneBotY+ROW_H-spreadZoneTopY);
+
+  const ml=document.getElementById('mid-line');
+  const mt=document.getElementById('mid-tag');
+  ml.style.top=midY+'px';
+  mt.style.top=midY+'px';
+  mt.textContent=ob.mid.toFixed(dec);
+
+  // Авто-скролл к mid
+  const wrap=document.getElementById('ladder-wrap');
+  const target=midY-wrap.clientHeight/2;
+  wrap.scrollTop=target;
+
+  // KPI
+  const imb=(ob.bids[0].size-ob.asks[0].size)/(ob.bids[0].size+ob.asks[0].size);
+  document.getElementById('kpi-spread').textContent=ob.spread.toFixed(dec);
+  document.getElementById('kpi-sticks').textContent=ob.sticks+' tk';
+  document.getElementById('kpi-imb').textContent=(imb>=0?'+':'')+imb.toFixed(2);
+  document.getElementById('kpi-imb').style.color=imb>.1?'#34d399':imb<-.1?'#f87171':'#7b859c';
+}
+
+/* ─── Свечи ─── */
+function genCandles(base,n){
+  let p=base; const cs=[]; const now=Date.now(); const ms=_tf*60000;
+  const vol=VOLS[_ticker]||1;
+  for(let i=0;i<n;i++){
+    const o=p; let h=o,l=o,c=o;
+    for(let j=0;j<10;j++){const m=o*(Math.random()-.5)*.0014*vol;c+=m;h=Math.max(h,c);l=Math.min(l,c);}
+    p=c; const v=(Math.abs(h-l)/o)*900*(.3+Math.random()*.7);
+    cs.push({ts:now-(n-i)*ms,open:o,high:h,low:l,close:c,vol:v});
+  }
+  return cs;
+}
+
+function drawChart(){
+  const body=document.getElementById('chart-body');
+  const canvas=document.getElementById('chart-canvas');
+  const W=body.clientWidth,H=body.clientHeight;
+  if(W<=0||H<=0)return;
+  const dpr=window.devicePixelRatio||1;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  const ctx=canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  const cs=_candles; if(cs.length<2)return;
+  const dec=DEC[_ticker];
+  const pad={top:14,right:56,bottom:50,left:4};
+  const volH=28;
+  const pw=W-pad.left-pad.right,ph=H-pad.top-pad.bottom-volH-4;
+  const prices=cs.flatMap(c=>[c.high,c.low]);
+  let mn=Math.min(...prices),mx=Math.max(...prices);
+  const rng=(mx-mn)||1; mn-=rng*.04;mx+=rng*.04;
+  const pR=mx-mn;
+  const cw=Math.max(1.5,pw/cs.length*.72);
+  const toX=i=>pad.left+(i/(cs.length-1))*pw;
+  const toY=v=>pad.top+ph-((v-mn)/pR)*ph;
+
+  // Grid
+  for(let i=0;i<=5;i++){
+    const y=pad.top+(i/5)*ph;
+    ctx.strokeStyle='rgba(255,255,255,0.035)';ctx.lineWidth=.5;
+    ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
+    const v=mx-(pR*i/5);
+    ctx.fillStyle='#3a4459';ctx.font='7.5px JetBrains Mono,monospace';ctx.textAlign='left';
+    ctx.fillText(v.toFixed(dec),W-pad.right+3,y+3);
+  }
+
+  // Candles
+  cs.forEach((c,i)=>{
+    const x=toX(i),isUp=c.close>=c.open,hov=_hover===i;
+    ctx.strokeStyle=isUp?'rgba(16,185,129,0.55)':'rgba(239,68,68,0.55)';
+    ctx.lineWidth=hov?1.8:1;
+    ctx.beginPath();ctx.moveTo(x,toY(c.high));ctx.lineTo(x,toY(c.low));ctx.stroke();
+    const bt=toY(Math.max(c.open,c.close)),bb=toY(Math.min(c.open,c.close));
+    ctx.fillStyle=isUp?'rgba(16,185,129,0.82)':'rgba(239,68,68,0.82)';
+    ctx.fillRect(x-cw/2,bt,cw,Math.max(1.5,bb-bt));
+  });
+
+  // Last price
+  const last=cs[cs.length-1].close,ly=toY(last),isUp=last>=cs[0].open;
+  ctx.strokeStyle=isUp?'rgba(16,185,129,0.4)':'rgba(239,68,68,0.4)';
+  ctx.lineWidth=1;ctx.setLineDash([4,5]);
+  ctx.beginPath();ctx.moveTo(pad.left,ly);ctx.lineTo(W-pad.right,ly);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle=isUp?'#10b981':'#ef4444';
+  ctx.beginPath();ctx.roundRect(W-pad.right+1,ly-8,pad.right-3,16,3);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='bold 8.5px JetBrains Mono,monospace';ctx.textAlign='center';
+  ctx.fillText(last.toFixed(dec),W-pad.right+1+(pad.right-3)/2,ly+3.5);
+
+  // Hover crosshair
+  if(_hover!==null&&_hover>=0&&_hover<cs.length){
+    const hx=toX(_hover);
+    ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.lineWidth=1;ctx.setLineDash([3,4]);
+    ctx.beginPath();ctx.moveTo(hx,pad.top);ctx.lineTo(hx,pad.top+ph);ctx.stroke();
+    ctx.setLineDash([]);
+    const c=cs[_hover];
+    const info=`${new Date(c.ts).toISOString().slice(11,16)}  O:${c.open.toFixed(dec)} H:${c.high.toFixed(dec)} L:${c.low.toFixed(dec)} C:${c.close.toFixed(dec)}`;
+    ctx.font='8px JetBrains Mono,monospace';
+    const tw=ctx.measureText(info).width+12;
+    const tx=Math.min(hx+6,W-pad.right-tw-2);
+    ctx.fillStyle='rgba(10,16,30,.95)';ctx.strokeStyle='rgba(255,255,255,0.1)';ctx.lineWidth=.5;
+    ctx.beginPath();ctx.roundRect(tx,pad.top+2,tw,15,3);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#b0bac9';ctx.textAlign='left';ctx.fillText(info,tx+6,pad.top+11.5);
+  }
+
+  // Volume
+  const maxVol=Math.max(...cs.map(c=>c.vol));
+  const vBase=H-pad.bottom-1;
+  cs.forEach((c,i)=>{
+    const x=toX(i),vh=(c.vol/maxVol)*volH,isUp=c.close>=c.open;
+    ctx.fillStyle=_hover===i?(isUp?'rgba(16,185,129,0.5)':'rgba(239,68,68,0.5)'):(isUp?'rgba(16,185,129,0.2)':'rgba(239,68,68,0.2)');
+    ctx.fillRect(x-cw/2,vBase-vh,cw,vh);
+  });
+  ctx.fillStyle='#3a4459';ctx.font='7px JetBrains Mono,monospace';ctx.textAlign='left';
+  ctx.fillText('VOL',W-pad.right+3,H-pad.bottom+4);
+
+  // Time axis
+  const step=Math.max(1,Math.floor(cs.length/8));
+  ctx.fillStyle='#3a4459';ctx.font='7.5px JetBrains Mono,monospace';ctx.textAlign='center';
+  for(let i=0;i<cs.length;i+=step){
+    ctx.fillText(new Date(cs[i].ts).toISOString().slice(11,16),toX(i),H-pad.bottom+12);
+  }
+
+  // Header
+  const pct=((last-cs[0].open)/cs[0].open*100);
+  document.getElementById('chart-last').textContent=last.toLocaleString(undefined,{minimumFractionDigits:dec,maximumFractionDigits:dec});
+  const pe=document.getElementById('chart-pct');
+  pe.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';
+  pe.className='c-pct '+(pct>=0?'up':'dn');
+}
+
+function selT(btn,ticker){
+  document.querySelectorAll('.ob-t').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  _ticker=ticker; _mid=MIDS[ticker];
+  document.getElementById('kpi-name').textContent=ticker;
+  document.getElementById('chart-name').textContent=ticker;
+  _candles=genCandles(_mid,70);
+  drawChart();
+  renderLadder(genOB(_mid,ticker));
+}
+function setTF(btn,tf){
+  document.querySelectorAll('.tf-b').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');_tf=tf;
+  _candles=genCandles(_mid,70);drawChart();
+}
+
+document.getElementById('chart-body').addEventListener('mousemove',function(e){
+  const r=this.getBoundingClientRect(),W=r.width,pw=W-4-56;
+  const x=e.clientX-r.left-4,n=_candles.length;
+  if(n<2)return;
+  _hover=Math.max(0,Math.min(n-1,Math.round((x/pw)*(n-1))));
+  drawChart();
+});
+document.getElementById('chart-body').addEventListener('mouseleave',()=>{_hover=null;drawChart();});
+
+// ── Init + Live ──
+_candles=genCandles(_mid,70);
+drawChart();
+renderLadder(genOB(_mid,_ticker));
+
+setInterval(()=>{
+  const vol=VOLS[_ticker]||1;
+  const last=_candles[_candles.length-1];
+  const mv=_mid*(Math.random()-.5)*.0004*vol;
+  last.close=last.close+mv;
+  last.high=Math.max(last.high,last.close);
+  last.low=Math.min(last.low,last.close);
+  last.vol+=Math.random()*.2;
+  if(Math.random()<.12){
+    _mid=last.close;
+    _candles.push({ts:Date.now(),open:_mid,high:_mid,low:_mid,close:_mid,vol:.1+Math.random()*.3});
+    if(_candles.length>90)_candles.shift();
+  }else{_mid=last.close;}
+  drawChart();
+  renderLadder(genOB(_mid,_ticker));
+},550);
+
+window.addEventListener('resize',()=>drawChart());
+</script>

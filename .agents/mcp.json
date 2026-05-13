@@ -1,0 +1,77 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ]
+    },
+    "sonarqube": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--init",
+        "--pull=always",
+        "--rm",
+        "-i",
+        "-e",
+        "SONARQUBE_TOKEN",
+        "-e",
+        "SONARQUBE_ORG",
+        "mcp/sonarqube"
+      ],
+      "env": {
+        "SONARQUBE_TOKEN": "d45079c0274791bdc6ef4e3ab32ea0adc348e2a4",
+        "SONARQUBE_ORG": "yevgene071"
+      }
+    },
+    "ripgrep": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-ripgrep@latest"
+      ]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/home/yevge/trade-bot-hardcore-spec"
+      ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ],
+      "env": {
+        "CONTEXT7_API_KEY": "ctx7sk-85a3df65-74b2-4999-8792-461dff5c5b43"
+      }
+    },
+    "mem0": {
+      "command": "uvx",
+      "args": [
+        "mem0-mcp-server"
+      ],
+      "env": {
+        "MEM0_API_KEY": "m0-RPPsEz5YWOwzfGD0zvjSliZM2X5w9SWQ10Mi21WE"
+      }
+    }
+  }
+}

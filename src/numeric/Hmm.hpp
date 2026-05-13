@@ -3,6 +3,7 @@
 #include <vector>
 #include <array>
 #include <cmath>
+#include <algorithm>
 
 namespace trade_bot {
 

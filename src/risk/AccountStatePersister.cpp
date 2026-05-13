@@ -1,5 +1,6 @@
 #include "AccountStatePersister.hpp"
 #include "logger/Logger.hpp"
+#include "executor/IExecutor.hpp"
 
 #include <fstream>
 #include <filesystem>
@@ -64,6 +65,11 @@ std::optional<AccountStatePersister::PersistedData> AccountStatePersister::load(
         nlohmann::json j;
         in >> j;
 
+        if (int ver = j.value("schema_version", 0); ver != 1) {
+            LOG_ERROR("AccountStatePersister: unsupported schema_version={}, refusing to load {}", ver, path_);
+            return std::nullopt;
+        }
+
         PersistedData data;
         data.last_reset_day_utc = j.value("last_reset_day_utc", "");
         data.account_state = j["account_state"].get<AccountState>();
@@ -79,6 +85,74 @@ std::optional<AccountStatePersister::PersistedData> AccountStatePersister::load(
 }
 
 // JSON helpers
+void to_json(nlohmann::json& j, const SignalPayload& p) {
+    j = nlohmann::json{
+        {"side", p.side},
+        {"size", p.size},
+        {"size_usd", p.size_usd},
+        {"total_eaten_usd", p.total_eaten_usd},
+        {"original_size", p.original_size},
+        {"remaining_size", p.remaining_size},
+        {"eaten_ratio", p.eaten_ratio},
+        {"lag_pct", p.lag_pct},
+        {"correlation", p.correlation},
+        {"dist_bps", p.dist_bps},
+        {"delta_bps", p.delta_bps},
+        {"leader_move_pct", p.leader_move_pct},
+        {"our_move_pct", p.our_move_pct},
+        {"expected_move_pct", p.expected_move_pct},
+        {"lag_ms", p.lag_ms},
+        {"ratio", p.ratio},
+        {"intensity", p.intensity},
+        {"peak_rate", p.peak_rate},
+        {"current_rate", p.current_rate},
+        {"cusum", p.cusum},
+        {"volatility_bps", p.volatility_bps},
+        {"volume_usd_30s", p.volume_usd_30s},
+        {"max_range_bps", p.max_range_bps},
+        {"touches", p.touches},
+        {"prints", p.prints},
+        {"age_ms", p.age_ms},
+        {"refill_events", p.refill_events},
+        {"fake", p.fake},
+        {"id", p.id},
+        {"source", p.source}
+    };
+}
+
+void from_json(const nlohmann::json& j, SignalPayload& p) {
+    p.side.assign(j.value("side", ""));
+    p.size = j.value("size", 0.0);
+    p.size_usd = j.value("size_usd", 0.0);
+    p.total_eaten_usd = j.value("total_eaten_usd", 0.0);
+    p.original_size = j.value("original_size", 0.0);
+    p.remaining_size = j.value("remaining_size", 0.0);
+    p.eaten_ratio = j.value("eaten_ratio", 0.0);
+    p.lag_pct = j.value("lag_pct", 0.0);
+    p.correlation = j.value("correlation", 0.0);
+    p.dist_bps = j.value("dist_bps", 0.0);
+    p.delta_bps = j.value("delta_bps", 0.0);
+    p.leader_move_pct = j.value("leader_move_pct", 0.0);
+    p.our_move_pct = j.value("our_move_pct", 0.0);
+    p.expected_move_pct = j.value("expected_move_pct", 0.0);
+    p.lag_ms = j.value("lag_ms", 0.0);
+    p.ratio = j.value("ratio", 0.0);
+    p.intensity = j.value("intensity", 0.0);
+    p.peak_rate = j.value("peak_rate", 0.0);
+    p.current_rate = j.value("current_rate", 0.0);
+    p.cusum = j.value("cusum", 0.0);
+    p.volatility_bps = j.value("volatility_bps", 0.0);
+    p.volume_usd_30s = j.value("volume_usd_30s", 0.0);
+    p.max_range_bps = j.value("max_range_bps", 0.0);
+    p.touches = j.value("touches", 0);
+    p.prints = j.value("prints", 0);
+    p.age_ms = j.value("age_ms", 0);
+    p.refill_events = j.value("refill_events", 0);
+    p.fake = j.value("fake", false);
+    p.id.assign(j.value("id", ""));
+    p.source.assign(j.value("source", ""));
+}
+
 void to_json(nlohmann::json& j, const AccountState& s) {
     j = nlohmann::json{
         {"equity_usd", s.equity_usd},
@@ -120,7 +194,7 @@ void from_json(const nlohmann::json& j, Signal& s) {
     s.ticker = j.at("ticker").get<Ticker>();
     s.price = j.at("price").get<double>();
     s.confidence = j.at("confidence").get<double>();
-    s.payload = j.at("payload");
+    s.payload = j.at("payload").get<SignalPayload>();
 }
 
 void to_json(nlohmann::json& j, const TradePlan& p) {
@@ -150,9 +224,29 @@ void from_json(const nlohmann::json& j, TradePlan& p) {
     p.tp1_size_ratio = j.at("tp1_size_ratio").get<double>();
     p.size_coin = j.at("size_coin").get<double>();
     p.risk_usd = j.at("risk_usd").get<double>();
-    p.strategy_name = j.at("strategy_name").get<std::string>();
-    p.reason = j.at("reason").get<std::string>();
+    p.strategy_name = j.at("strategy_name").get<FixedString<32>>();
+    p.reason = j.at("reason").get<FixedString<128>>();
     p.evidence = j.at("evidence").get<std::vector<Signal>>();
+}
+
+void to_json(nlohmann::json& j, const IExecutor::ClosedTrade& t) {
+    j = nlohmann::json{
+        {"plan", t.plan},
+        {"entry_price", t.entry_price},
+        {"exit_price", t.exit_price},
+        {"size_filled", t.size_filled},
+        {"pnl_usd", t.pnl_usd},
+        {"reason", t.reason}
+    };
+}
+
+void from_json(const nlohmann::json& j, IExecutor::ClosedTrade& t) {
+    t.plan = j.at("plan").get<TradePlan>();
+    t.entry_price = j.at("entry_price").get<double>();
+    t.exit_price = j.at("exit_price").get<double>();
+    t.size_filled = j.at("size_filled").get<double>();
+    t.pnl_usd = j.at("pnl_usd").get<double>();
+    t.reason = j.at("reason").get<FixedString<32>>();
 }
 
 void to_json(nlohmann::json& j, const ActiveTrade& t) {

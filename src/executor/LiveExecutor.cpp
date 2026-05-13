@@ -153,7 +153,9 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
         // ---- Phase 2: first-time match — server tells us OrderId only via
         // WS, so we have to claim the id on first sight by side+type+size.
         const bool side_eq        = upd.side == trade.plan.side;
-        const bool size_close     = std::abs(trade.plan.size_coin - upd.size) < kSizeEps;
+        // T4-PERF: [H-1] Use relative epsilon to avoid precision drift issues (#160)
+        const bool size_close     = std::abs(trade.plan.size_coin - upd.size) < 
+                                    (std::max(trade.plan.size_coin, upd.size) * 1e-4);
 
         const bool fresh_entry =
             !match_by_entry && !match_by_stop && !match_by_tp1 && !match_by_tp2 &&
@@ -180,6 +182,20 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
 
         // FOUND THE MATCHING TRADE — Process it and stop searching (#129)
         if (upd.status == OrderStatus::Open) {
+            // T0-BUGFIX: Partial fills may arrive with Open status (#204).
+            // Place stops on first partial fill; update size on every partial fill.
+            if (is_entry && upd.filled_size > 0) {
+                if (trade.state != TradeState::Open) {
+                    trade.state     = TradeState::Open;
+                    trade.opened_at = upd.time;
+                    LOG_INFO("LiveExecutor: entry PARTIALLY FILLED for {} @ {} (filled {} / plan {})",
+                             upd.ticker, upd.filled_price, upd.filled_size, trade.plan.size_coin);
+                    place_stops_(trade);
+                }
+                // Track accumulated fill size — final Closed fill re-places stops with correct total
+                trade.executed_size   = upd.filled_size;
+                trade.avg_entry_price = upd.filled_price;
+            }
             return; // acknowledged, id captured above
         }
         
@@ -213,9 +229,32 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
             trade.opened_at       = upd.time;
             LOG_INFO("LiveExecutor: entry FILLED for {} @ {}",
                      upd.ticker, upd.filled_price);
+
+            // R15: Entry Slippage Control
+            double entry_slippage_bps = std::abs(trade.avg_entry_price - trade.plan.entry_price) / trade.plan.entry_price * 10000.0;
+            if (entry_slippage_bps > cfg_.max_entry_slippage_bps) {
+                LOG_WARN("LiveExecutor: entry slippage {:.1f} bps > max {:.1f} bps for {} — emergency closing",
+                         entry_slippage_bps, cfg_.max_entry_slippage_bps, upd.ticker);
+                // Emergency close via opposite market/limit order
+                PlaceOrderRequest emergency;
+                emergency.ticker      = trade.plan.ticker;
+                emergency.side        = trade.plan.side == Side::Buy ? Side::Sell : Side::Buy;
+                emergency.price       = 0.0;  // market
+                emergency.size        = upd.filled_size;
+                emergency.type        = OrderType::Market;
+                emergency.reduce_only = true;
+                try {
+                    gateway_.place_order(connection_id_, emergency);
+                } catch (const std::exception& e) {
+                    LOG_ERROR("LiveExecutor: emergency close for {} failed: {}", upd.ticker, e.what());
+                }
+                trade.state = TradeState::Closed;
+                return;
+            }
+
             MetricsRegistry::instance().counter_inc(
                 "trade_bot_trades_total",
-                {{"ticker", upd.ticker}, {"strategy", trade.plan.strategy_name}});
+                {{"ticker", upd.ticker}, {"strategy", std::string(trade.plan.strategy_name)}});
             place_stops_(trade);
         } else if (is_tp1 && !trade.tp1_filled) {
             // T4-EXECUTOR spec: on TP1 fill, cancel current SL and re-place
@@ -225,7 +264,7 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
                      upd.ticker, upd.filled_price, trade.avg_price_fix);
             if (trade.stop_order_id != 0) {
                 try {
-                    gateway_.cancel_order(connection_id_, trade.stop_order_id);
+                    gateway_.cancel_order(connection_id_, trade.stop_order_id, upd.ticker);
                 } catch (const std::exception& e) {
                     LOG_WARN("LiveExecutor: cancel old SL id={} failed: {}",
                              trade.stop_order_id, e.what());
@@ -264,12 +303,13 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
             } else {
                 ct.pnl_usd = (ct.entry_price - ct.exit_price) * ct.size_filled;
             }
-            ct.reason = is_stop ? "StopLoss" : (is_tp2 ? "TP2" : "TP1");
+            ct.reason = is_stop ? FixedString<32>("StopLoss") 
+                      : (is_tp2 ? FixedString<32>("TP2") 
+                                : (trade.tp1_filled ? FixedString<32>("TP1_Remainder") : FixedString<32>("TP1")));
             closed_trades_.push_back(ct);
         }
         return; // Done with this update
     }
-}
 }
 
 void LiveExecutor::on_position_update(const PositionUpdate& upd) {
@@ -305,7 +345,24 @@ void LiveExecutor::tick(std::chrono::system_clock::time_point now) {
     // Snapshot the active ticker set under the lock — release before any
     // calls into reconciliator (which calls back into the gateway via the
     // injected fetcher and would otherwise contend with order_update).
+    // ── Phase 1: Collect emergency close actions under the lock ──
+    // Then release the lock before any HTTP calls to avoid blocking
+    // market-data processing. The gateway (REST calls) can take 50-500ms.
+    struct CloseAction {
+        Ticker              ticker;
+        Side                side;           // direction to close (opposite of position)
+        double              size;
+        FixedString<32>     reason;
+        int64_t             stop_order_id;  // 0 = none to cancel
+        int64_t             tp1_order_id;
+        double              avg_entry_price;
+        double              est_exit_price; // estimated exit from mark price
+        TradePlan           plan;
+        double              executed_size;
+    };
+    std::vector<CloseAction> close_actions;
     std::vector<Ticker> tickers_snap;
+
     {
         std::lock_guard lock(mutex_);
         if (reserved_balance_usd_ > 0 &&
@@ -314,8 +371,139 @@ void LiveExecutor::tick(std::chrono::system_clock::time_point now) {
                      reserved_balance_usd_);
             reserved_balance_usd_ = 0.0;
         }
+
+        // ── Post-entry invalidation (STRATEGIES.md § 0.4, § 1.7, § 2.7, § 3.7) ──
+        for (auto& [ticker, trades] : trades_) {
+            for (auto& trade : trades) {
+                if (trade.state != TradeState::Open) continue;
+                if (trade.executed_size <= 0 || trade.avg_entry_price <= 0) continue;
+                auto mit = mark_prices_.find(ticker);
+                if (mit == mark_prices_.end() || mit->second <= 0) continue;
+                const double mark = mit->second;
+                const double elapsed_sec = std::chrono::duration<double>(now - trade.opened_at).count();
+
+                auto build_close = [&](const FixedString<32>& reason_name) -> CloseAction {
+                    // Estimate exit price from exchange mark (same logic as record_emergency_close_)
+                    double est_exit = 0.0;
+                    auto mit = mark_prices_.find(trade.plan.ticker);
+                    if (mit != mark_prices_.end() && mit->second > 0.0) {
+                        est_exit = mit->second;
+                    } else {
+                        est_exit = trade.avg_entry_price;
+                    }
+                    return CloseAction{
+                        .ticker         = trade.plan.ticker,
+                        .side           = trade.plan.side == Side::Buy ? Side::Sell : Side::Buy,
+                        .size           = trade.executed_size,
+                        .reason         = reason_name,
+                        .stop_order_id  = trade.stop_order_id,
+                        .tp1_order_id   = trade.tp1_order_id,
+                        .avg_entry_price = trade.avg_entry_price,
+                        .est_exit_price = est_exit,
+                        .plan           = trade.plan,
+                        .executed_size  = trade.executed_size
+                    };
+                };
+
+                // no_progress_timeout_sec (§ 0.4): close if price hasn't moved in our favour
+                if (elapsed_sec > trade.plan.no_progress_timeout_sec) {
+                    bool no_progress = false;
+                    if (trade.plan.side == Side::Buy && mark <= trade.avg_entry_price * 1.0001) {
+                        no_progress = true;
+                    } else if (trade.plan.side == Side::Sell && mark >= trade.avg_entry_price * 0.9999) {
+                        no_progress = true;
+                    }
+                    if (no_progress) {
+                        LOG_WARN("LiveExecutor: no_progress_timeout ({:.0f}s) for {} {} — closing by market",
+                                 trade.plan.no_progress_timeout_sec,
+                                 ticker, trade.plan.side == Side::Buy ? "LONG" : "SHORT");
+                        close_actions.push_back(build_close(FixedString<32>("NoProgress")));
+                        trade.state = TradeState::Closed;
+                        continue;
+                    }
+                }
+
+                // min_follow_through_bps / post_entry_grace_sec (§ 2.7)
+                if (elapsed_sec > trade.plan.post_entry_grace_sec &&
+                    trade.plan.min_follow_through_bps > 0.0) {
+                    const double move_bps =
+                        (trade.plan.side == Side::Buy)
+                        ? (mark - trade.avg_entry_price) / trade.avg_entry_price * kBpsBase
+                        : (trade.avg_entry_price - mark) / trade.avg_entry_price * kBpsBase;
+                    if (move_bps < trade.plan.min_follow_through_bps) {
+                        LOG_WARN("LiveExecutor: follow-through {:.1f} bps < min {:.1f} bps for {} {} — closing by market",
+                                 move_bps, trade.plan.min_follow_through_bps,
+                                 ticker, trade.plan.side == Side::Buy ? "LONG" : "SHORT");
+                        close_actions.push_back(build_close(FixedString<32>("FollowThrough")));
+                        trade.state = TradeState::Closed;
+                        continue;
+                    }
+                }
+
+                // R14: Single Position Loss Kill
+                double loss_pct;
+                if (trade.plan.side == Side::Buy) {
+                    loss_pct = (trade.avg_entry_price - mark) / trade.avg_entry_price * 100.0;
+                } else {
+                    loss_pct = (mark - trade.avg_entry_price) / trade.avg_entry_price * 100.0;
+                }
+                if (loss_pct > cfg_.max_single_position_loss_pct) {
+                    LOG_WARN("LiveExecutor: R14 single position loss {:.2f}% > max {:.2f}% for {} — emergency closing",
+                             loss_pct, cfg_.max_single_position_loss_pct, ticker);
+                    close_actions.push_back(build_close(FixedString<32>("R14")));
+                    trade.state = TradeState::Closed;
+                }
+            }
+        }
+
         tickers_snap.reserve(trades_.size());
         for (const auto& [t, _] : trades_) tickers_snap.push_back(t);
+    }
+
+    // ── Phase 2: Execute close actions OUTSIDE the lock ──
+    // HTTP calls (gateway_.place_order) do not hold mutex_, preventing
+    // starvation of market-data callbacks and other executor operations.
+    for (auto& act : close_actions) {
+        // Cancel existing SL/TP orders
+        if (act.stop_order_id != 0) {
+            try { gateway_.cancel_order(connection_id_, act.stop_order_id, act.ticker); }
+            catch (...) {}
+        }
+        if (act.tp1_order_id != 0) {
+            try { gateway_.cancel_order(connection_id_, act.tp1_order_id, act.ticker); }
+            catch (...) {}
+        }
+
+        // Place market close order
+        PlaceOrderRequest emergency;
+        emergency.ticker      = act.ticker;
+        emergency.side        = act.side;
+        emergency.price       = 0.0;  // market
+        emergency.size        = act.size;
+        emergency.type        = OrderType::Market;
+        emergency.reduce_only = true;
+        try {
+            gateway_.place_order(connection_id_, emergency);
+        } catch (const std::exception& e) {
+            LOG_ERROR("LiveExecutor: emergency close for {} failed: {}", act.ticker, e.what());
+        }
+
+        // Record the closed trade (re-acquire lock briefly)
+        // Use estimated exit price from mark for immediate PnL tracking;
+        // actual fill arrives asynchronously via on_order_update.
+        {
+            std::lock_guard lock(mutex_);
+            ClosedTrade ct;
+            ct.plan = act.plan;
+            ct.entry_price = act.avg_entry_price;
+            ct.exit_price = act.est_exit_price;
+            ct.size_filled = act.executed_size;
+            ct.pnl_usd = (act.plan.side == Side::Buy)
+                ? (act.est_exit_price - act.avg_entry_price) * act.executed_size
+                : (act.avg_entry_price - act.est_exit_price) * act.executed_size;
+            ct.reason = act.reason;
+            closed_trades_.push_back(ct);
+        }
     }
 
     // Drive the reconciliator. Without this, any trade that landed in
@@ -350,14 +538,24 @@ void LiveExecutor::handle_reconciled_(const ReconcileResult& res) {
 
     std::lock_guard lock(mutex_);
     for (auto& [ticker, trades] : trades_) {
+        if (!res.intent.has_value()) {
+            LOG_WARN("LiveExecutor: reconciled result has no intent — skipping");
+            return;
+        }
         for (auto& trade : trades) {
             if (trade.state != TradeState::SubmitUnknown) continue;
+            // Match by ticker+side+price+size, not just ticker.
             // The reconciliator key is the local intent's local_order_id,
             // which we stored as 0 (unknown) in the SubmitUnknown trade.
-            // Match by ticker+side+price+size; OrderReconciliator already
-            // honours per-side / per-type tolerances when finding the
-            // server order, so reaching this point implies the trade
-            // belongs to this result.
+            // OrderReconciliator already honours per-side / per-type
+            // tolerances when finding the server order, so reaching this
+            // point implies the trade belongs to this result.
+            // T0-BUGFIX: Also match by side and size to avoid mis-assigning
+            // resolved orders to wrong trades in the same ticker list.
+            if (res.intent->side != trade.plan.side) continue;
+            if (std::abs(res.intent->size - trade.plan.size_coin) >
+                std::max(res.intent->size, trade.plan.size_coin) * 1e-4) continue;
+
             if (res.outcome == ReconcileOutcome::Resolved) {
                 if (res.server_order_id) trade.entry_order_id = *res.server_order_id;
                 trade.state = TradeState::PendingEntry;
@@ -370,14 +568,126 @@ void LiveExecutor::handle_reconciled_(const ReconcileResult& res) {
                     alert_cb_("SubmitUnknown timed out on " + ticker +
                               " — manual ack needed");
                 }
+                // T1-BUGFIX: Release balance reservation on SubmitUnknown timeout (#204).
+                // Without this, reserved_balance_usd_ stays locked forever if balance
+                // updates keep flowing, preventing all future trades.
+                double reservation = trade.plan.size_coin * trade.plan.entry_price;
+                reserved_balance_usd_ = std::max(0.0, reserved_balance_usd_ - reservation);
                 trade.state = TradeState::Closed;
+                // Record failed submission — zero prices since trade never filled
+                record_emergency_close_(trade, FixedString<32>("SubmitUnknownTimeout"));
+                // Override price fields: trade never filled, so exit/entry prices are 0
+                if (!closed_trades_.empty()) {
+                    auto& ct = closed_trades_.back();
+                    ct.entry_price = 0.0;
+                    ct.exit_price = 0.0;
+                    ct.size_filled = 0.0;
+                }
             }
             return;   // one result per call
         }
     }
 }
 
+void LiveExecutor::close_trade(const Ticker& ticker, const FixedString<32>& reason) {
+    std::lock_guard lock(mutex_);
+    LOG_WARN("LiveExecutor: strategy-requested close for {}: {}", ticker, reason);
+    auto it = trades_.find(ticker);
+    if (it == trades_.end()) return;
+
+    for (auto& trade : it->second) {
+        if (trade.state != TradeState::Open) continue;
+        if (trade.executed_size <= 0) continue;
+
+        emergency_close_trade_(trade);
+        record_emergency_close_(trade, reason);
+    }
+}
+
+void LiveExecutor::record_emergency_close_(const ActiveTrade& trade, const FixedString<32>& reason) {
+    // Estimate exit price from exchange mark price for PnL calculation.
+    // The actual fill price arrives asynchronously via on_order_update, but
+    // we need a ClosedTrade immediately for journal/equity tracking.
+    double est_exit = 0.0;
+    auto mit = mark_prices_.find(trade.plan.ticker);
+    if (mit != mark_prices_.end() && mit->second > 0.0) {
+        est_exit = mit->second;
+    } else {
+        est_exit = trade.avg_entry_price;  // fallback — zero PnL estimate
+    }
+
+    ClosedTrade ct;
+    ct.plan = trade.plan;
+    ct.entry_price = trade.avg_entry_price;
+    ct.exit_price = est_exit;
+    ct.size_filled = trade.executed_size;
+    ct.pnl_usd = (trade.plan.side == Side::Buy)
+        ? (est_exit - trade.avg_entry_price) * trade.executed_size
+        : (trade.avg_entry_price - est_exit) * trade.executed_size;
+    ct.reason = reason;
+    closed_trades_.push_back(ct);
+}
+
+void LiveExecutor::emergency_close_trade_(ActiveTrade& trade) {
+    // Cancel existing SL/TP orders
+    if (trade.stop_order_id != 0) {
+        try { gateway_.cancel_order(connection_id_, trade.stop_order_id, trade.plan.ticker); }
+        catch (...) {}
+        trade.stop_order_id = 0;
+    }
+    if (trade.tp1_order_id != 0) {
+        try { gateway_.cancel_order(connection_id_, trade.tp1_order_id, trade.plan.ticker); }
+        catch (...) {}
+        trade.tp1_order_id = 0;
+    }
+
+    // Place market close
+    PlaceOrderRequest emergency;
+    emergency.ticker      = trade.plan.ticker;
+    emergency.side        = trade.plan.side == Side::Buy ? Side::Sell : Side::Buy;
+    emergency.price       = 0.0;  // market
+    emergency.size        = trade.executed_size;
+    emergency.type        = OrderType::Market;
+    emergency.reduce_only = true;
+    try {
+        gateway_.place_order(connection_id_, emergency);
+        trade.state = TradeState::Closed;
+    } catch (const std::exception& e) {
+        LOG_ERROR("LiveExecutor: emergency close for {} failed: {}", trade.plan.ticker, e.what());
+    }
+}
+
 void LiveExecutor::place_stops_(ActiveTrade& trade) {
+    // Guard: only place stops when the trade is in Open state.
+    // Prevents re-entrancy from on_order_update() racing with emergency
+    // close or cancellation that already closed the trade.
+    if (trade.state != TradeState::Open) {
+        LOG_DEBUG("LiveExecutor: skipping place_stops_ for {} — trade state is not Open ({})",
+                  trade.plan.ticker, static_cast<int>(trade.state));
+        return;
+    }
+
+    // T1-BUGFIX: Cancel old SL/TP before re-placing to avoid orphaned exchange orders
+    // on partial entry fills or re-arms (e.g., BE-stop after TP1).
+    if (trade.stop_order_id != 0) {
+        try {
+            gateway_.cancel_order(connection_id_, trade.stop_order_id, trade.plan.ticker);
+        } catch (const std::exception& e) {
+            LOG_WARN("LiveExecutor: cancel old SL id={} before re-place failed: {}",
+                     trade.stop_order_id, e.what());
+        }
+        trade.stop_order_id = 0;
+    }
+    if (trade.tp1_order_id != 0) {
+        try {
+            gateway_.cancel_order(connection_id_, trade.tp1_order_id, trade.plan.ticker);
+        } catch (const std::exception& e) {
+            LOG_WARN("LiveExecutor: cancel old TP1 id={} before re-place failed: {}",
+                     trade.tp1_order_id, e.what());
+        }
+        trade.tp1_order_id = 0;
+    }
+
     // Place Stop Loss
     PlaceOrderRequest sl;
     sl.ticker = trade.plan.ticker;
@@ -393,6 +703,9 @@ void LiveExecutor::place_stops_(ActiveTrade& trade) {
         LOG_INFO("LiveExecutor: placed StopLoss for {} @ {} (id={})", sl.ticker, sl.price, trade.stop_order_id);
     } catch (const std::exception& e) {
         LOG_ERROR("LiveExecutor: failed to place SL for {}: {}", sl.ticker, e.what());
+        if (alert_cb_) {
+            alert_cb_("CRITICAL: SL placement failed for " + sl.ticker + ": " + e.what());
+        }
     }
 
     // Place TP1 if exists
@@ -412,6 +725,9 @@ void LiveExecutor::place_stops_(ActiveTrade& trade) {
                 LOG_INFO("LiveExecutor: placed TP1 for {} @ {} (id={})", tp.ticker, tp.price, trade.tp1_order_id);
             } catch (const std::exception& e) {
                  LOG_ERROR("LiveExecutor: failed to place TP1 for {}: {}", tp.ticker, e.what());
+                 if (alert_cb_) {
+                     alert_cb_("CRITICAL: TP1 placement failed for " + tp.ticker + ": " + e.what());
+                 }
             }
         } else {
             LOG_WARN("LiveExecutor: TP1 size is zero for {} (executed_size={}), skipping", 

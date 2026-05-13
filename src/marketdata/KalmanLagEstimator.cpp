@@ -1,4 +1,6 @@
 #include "KalmanLagEstimator.hpp"
+#include <cmath>
+#include <algorithm>
 
 namespace trade_bot {
 

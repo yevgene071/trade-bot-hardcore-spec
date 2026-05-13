@@ -16,7 +16,7 @@ public:
     MOCK_METHOD(std::vector<PositionUpdate>, get_positions, (int), (override));
     MOCK_METHOD(BalanceUpdate, get_balance, (int), (override));
     MOCK_METHOD(PlaceOrderResult, place_order, (int, const PlaceOrderRequest&), (override));
-    MOCK_METHOD(void, cancel_order, (int, int64_t), (override));
+    MOCK_METHOD(void, cancel_order, (int, int64_t, const Ticker&), (override));
     MOCK_METHOD(void, cancel_all_orders, (int, const Ticker&), (override));
 };
 
@@ -35,7 +35,7 @@ TEST(StartupRecoveryTest, RecoversCleanState) {
     persister.save(data);
     
     std::vector<PositionUpdate> positions;
-    positions.push_back({ 1, 100, "BTCUSDT", Side::Buy, 1.0, 50000.0, 50000.0, 50000.0, PositionStatus::Open });
+    positions.push_back({ 1, 100, "BTCUSDT", Side::Buy, 1.0, 50000.0, 50000.0, 50000.0, 0.01, PositionStatus::Open });
     EXPECT_CALL(gateway, get_positions(1)).WillOnce(Return(positions));
     
     EXPECT_CALL(gateway, get_open_orders(1, "BTCUSDT")).WillOnce(Return(std::vector<RestOrder>{}));
@@ -60,7 +60,7 @@ TEST(StartupRecoveryTest, DetectsDrift) {
     // No persisted trades
     
     std::vector<PositionUpdate> positions;
-    positions.push_back({ 1, 100, "BTCUSDT", Side::Buy, 1.0, 50000.0, 50000.0, 50000.0, PositionStatus::Open });
+    positions.push_back({ 1, 100, "BTCUSDT", Side::Buy, 1.0, 50000.0, 50000.0, 50000.0, 0.01, PositionStatus::Open });
     EXPECT_CALL(gateway, get_positions(1)).WillOnce(Return(positions));
     EXPECT_CALL(gateway, get_open_orders(1, "BTCUSDT")).WillOnce(Return(std::vector<RestOrder>{}));
 

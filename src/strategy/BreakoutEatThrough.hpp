@@ -28,6 +28,11 @@ public:
         double max_resistance_cluster_ratio{0.7}; // Max ratio of resistance clusters vs our entry density
 
         std::chrono::seconds entry_timeout{10};
+
+        // Post-entry invalidation (STRATEGIES.md § 2.7)
+        std::chrono::seconds fade_contra_exit_sec{5};         // TapeFade on our side within this window → close
+        std::chrono::seconds leader_contra_exit_sec{5};       // LeaderMove contra within this window → close
+        double leader_exit_contra_pct{0.15};                  // |lag_pct| > 0.15% contra → close
     };
 
     BreakoutEatThrough(Ticker ticker, TickerInfo info, const Config& cfg);
@@ -39,6 +44,16 @@ public:
     void on_frame(const FeatureFrame& frame) override;
     void on_signal(const Signal& signal) override;
     std::optional<TradePlan> tick(std::chrono::system_clock::time_point now) override;
+    StrategyState get_state() const override;
+
+    bool has_active_plan() const override { return active_plan_.has_value(); }
+
+    // Post-entry invalidation (STRATEGIES.md § 2.7)
+    void on_plan_accepted(const TradePlan& plan) override;
+    void reset_active_plan() override;
+    std::optional<FixedString<32>> check_close_conditions(const FeatureFrame& latest_frame) override;
+
+    int priority() const override { return 2; }
 
 private:
     Ticker          ticker_;
@@ -48,6 +63,7 @@ private:
     StrategyContext ctx_;
     
     std::optional<TradePlan> active_plan_;
+    std::optional<TradePlan> active_trade_info_;
 };
 
 } // namespace trade_bot

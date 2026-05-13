@@ -6,8 +6,8 @@
 #include "signals/LevelDetector.hpp"
 #include "numeric/Hmm.hpp"
 #include "numeric/ZigZag.hpp"
+#include "utils/CircularBuffer.hpp"
 
-#include <deque>
 #include <vector>
 
 namespace trade_bot {
@@ -60,7 +60,7 @@ private:
     const LevelDetector& level_detector_;
     Config          cfg_;
 
-    std::deque<std::pair<std::chrono::system_clock::time_point, double>> history_;
+    CircularBuffer<std::pair<std::chrono::system_clock::time_point, double>, 512> history_;
     
     ApproachHmm     hmm_;
 };

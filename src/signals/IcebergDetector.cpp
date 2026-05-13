@@ -14,33 +14,33 @@ IcebergDetector::IcebergDetector(Ticker ticker,
                                  const OrderBook& book,
                                  const TickerUniverse& universe,
                                  const Config& cfg)
-    : ticker_(std::move(ticker)), bus_(bus), book_(book), universe_(universe), cfg_(cfg) {}
+    : ticker_(std::move(ticker))
+    , bus_(bus)
+    , book_(book)
+    , universe_(universe)
+    , cfg_(cfg)
+    , last_prune_(std::chrono::system_clock::now()) {}
 
 IcebergDetector::IcebergDetector(Ticker ticker,
-                               SignalBus& bus,
-                               const OrderBook& book,
-                               const TickerUniverse& universe)
+                                 SignalBus& bus,
+                                 const OrderBook& book,
+                                 const TickerUniverse& universe)
     : IcebergDetector(std::move(ticker), bus, book, universe, Config{}) {}
 
 void IcebergDetector::on_frame(const FeatureFrame& frame) {
+    if (this == nullptr) [[unlikely]] return;
     if (frame.ticker != ticker_) return;
 
-    // Prune history
-    auto now = frame.timestamp;
-    while (!trade_history_.empty() && (now - trade_history_.front().ts) > cfg_.event_join_window) {
-        trade_history_.pop_front();
-    }
-
     // T4-LIFECYCLE: Prune stale level stats to prevent memory bloat (#142)
-    if (now - last_prune_ > std::chrono::minutes(1)) {
+    auto now = frame.timestamp;
+    if (!levels_.empty() && (now - last_prune_ > std::chrono::minutes(1))) {
         for (auto it = levels_.begin(); it != levels_.end(); ) {
             if (now - it->second.last_refill > std::chrono::minutes(5)) {
-                it = levels_.erase(it);
+                levels_.erase(it++);
             } else {
                 ++it;
             }
         }
-        
         // Also prune last_sizes
         if (last_sizes_.size() > 1000) {
             last_sizes_.clear(); // aggressive reset
@@ -52,7 +52,6 @@ void IcebergDetector::on_frame(const FeatureFrame& frame) {
 void IcebergDetector::on_trade(const Trade& trade) {
     // Assumption: all trades passed to this detector instance are for ticker_
     trade_history_.push_back({trade.timestamp, trade.price, trade.size, trade.side});
-    if (trade_history_.size() > kMaxHistory) trade_history_.pop_front();
 }
 
 void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
@@ -65,7 +64,8 @@ void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
     buy_vol_by_tick_.clear();
     sell_vol_by_tick_.clear();
 
-    for (const auto& t : trade_history_) {
+    for (size_t i = 0; i < trade_history_.size(); ++i) {
+        const auto& t = trade_history_[i];
         auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - t.ts);
         if (std::abs(delta.count()) > cfg_.event_join_window.count()) continue;
         const auto ttick = PriceTick::from_price(t.price, price_inc);
@@ -134,9 +134,10 @@ void IcebergDetector::process_refill_(double price, Side side, double trade_size
         should_emit = (stats.refill_count >= cfg_.evidence_count_min);
     }
 
-    // Additional condition: total consumed volume
+    // Additional condition: total consumed volume vs per-coin calibrated threshold.
     if (should_emit && !stats.emitted) {
-        if (stats.total_eaten_vol * price >= cfg_.iceberg_min_size_usd) {
+        double min_usd = universe_.calibrated_min_size_usd(ticker_, cfg_.iceberg_min_size_usd);
+        if (stats.total_eaten_vol * price >= min_usd) {
             stats.emitted = true;
             
             Signal s {
@@ -145,10 +146,10 @@ void IcebergDetector::process_refill_(double price, Side side, double trade_size
                 .ticker = ticker_,
                 .price = price,
                 .confidence = stats.posterior,
-                .payload = nlohmann::json{
-                    {"side", side == Side::Buy ? "Bid" : "Ask"},
-                    {"total_eaten_usd", stats.total_eaten_vol * price},
-                    {"refill_events", stats.refill_count}
+                .payload = {
+                    .side = side == Side::Buy ? "Bid" : "Ask",
+                    .total_eaten_usd = stats.total_eaten_vol * price,
+                    .refill_events = stats.refill_count
                 }
             };
             bus_.publish(s);

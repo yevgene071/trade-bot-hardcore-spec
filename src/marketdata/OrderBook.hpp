@@ -13,6 +13,14 @@
 namespace trade_bot {
 
 /**
+ * Lightweight order book level for dashboard display.
+ */
+struct ObLevel {
+    double price{0.0};
+    double size{0.0};
+};
+
+/**
  * T1-ORDERBOOK: local replica of the limit order book for a single ticker.
  *
  * Keys are fixed-point `PriceTick` values (PriceIncrement-scaled int64_t)
@@ -74,6 +82,14 @@ public:
      * Returns true if the number of differing levels (price or size) is <= max_diff.
      */
     [[nodiscard]] bool is_consistent(const OrderBookSnapshot& snap, int max_diff = 3) const noexcept;
+
+    /**
+     * Returns the top N levels of each side as ObLevel vectors.
+     * Bids are returned in descending price order (best first).
+     * Asks are returned in ascending price order (best first).
+     */
+    [[nodiscard]] std::pair<std::vector<ObLevel>, std::vector<ObLevel>>
+    get_top_levels(int n) const noexcept;
 
 private:
     using BidMap = absl::btree_map<PriceTick, SizeFix, std::greater<PriceTick>>;

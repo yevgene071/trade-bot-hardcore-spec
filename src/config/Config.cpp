@@ -13,7 +13,6 @@ void Config::load(const std::string& path) {
 
     try {
         s_data = toml::parse_file(path);
-        LOG_INFO("Config loaded from {}", path);
         validate();
     } catch (const toml::parse_error& err) {
         throw ConfigError("Failed to parse config: " + std::string(err.description()));
@@ -48,8 +47,6 @@ void Config::validate() {
     if (has("clock.check_interval_sec"))  get<int64_t>("clock.check_interval_sec");
     if (has("clock.warn_drift_ms"))       get<int64_t>("clock.warn_drift_ms");
     if (has("clock.max_clock_drift_ms"))  get<int64_t>("clock.max_clock_drift_ms");
-
-    LOG_INFO("Config validation successful");
 }
 
 toml::node_view<toml::node> Config::find_node(std::string_view dotted_path) {

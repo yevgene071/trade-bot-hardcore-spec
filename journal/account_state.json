@@ -1,0 +1,19 @@
+{
+  "account_state": {
+    "active_positions": 0,
+    "active_tickers": [],
+    "equity_usd": 10011.551841241308,
+    "finres_day_start_result_usd": 0.0,
+    "free_balance_usd": 10011.551841241308,
+    "kill_switch_triggered": false,
+    "realized_pnl_today_usd": 0.0,
+    "starting_equity_usd": 10011.551841241308,
+    "unrealized_pnl_usd": 0.0
+  },
+  "active_trades": [],
+  "kill_switch_reason": "",
+  "kill_switch_triggered": false,
+  "last_persist_ts_utc": 1778681774,
+  "last_reset_day_utc": "2026-05-13",
+  "schema_version": 1
+}

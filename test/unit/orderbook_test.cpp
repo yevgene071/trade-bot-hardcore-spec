@@ -151,7 +151,102 @@ TEST_F(OrderBookTest, ApplyUpdateBatchWorks) {
     EXPECT_EQ(ob.ask_levels(), 3 + 4);
 }
 
-TEST_F(OrderBookTest, SanityCheckDetectsGap) {
+TEST_F(OrderBookTest, DeleteEmptyLevelsOnZeroSize) {
+    auto ob = make();
+    ob.apply_snapshot(make_snapshot());
+
+    // Initial state: 3 bids, 3 asks
+    EXPECT_EQ(ob.bid_levels(), 3u);
+    EXPECT_EQ(ob.ask_levels(), 3u);
+
+    // Delete one bid and one ask with size=0
+    ob.apply_update(make_update({
+        {99.99, 0.0, Side::Buy},
+        {100.01, 0.0, Side::Sell}
+    }));
+
+    EXPECT_EQ(ob.bid_levels(), 2u);
+    EXPECT_EQ(ob.ask_levels(), 2u);
+    EXPECT_DOUBLE_EQ(*ob.best_bid(), 99.98);
+    EXPECT_DOUBLE_EQ(*ob.best_ask(), 100.02);
+}
+
+TEST_F(OrderBookTest, GetTopLevelsReturnsCorrectOrderAndCount) {
+    auto ob = make();
+
+    // Build a book with 25 levels each side
+    OrderBookSnapshot snap{};
+    snap.ticker = "BTCUSDT";
+    for (int i = 0; i < 25; ++i) {
+        snap.bids.push_back({100.00 - 0.01 * i, 1.0 + 0.1 * i, Side::Buy});
+        snap.asks.push_back({100.00 + 0.01 * i, 1.0 + 0.1 * i, Side::Sell});
+    }
+    snap.ts = std::chrono::system_clock::now();
+    ob.apply_snapshot(snap);
+
+    // get_top_levels(20) — DS-03 criterion
+    auto [bids, asks] = ob.get_top_levels(20);
+    EXPECT_EQ(bids.size(), 20u);
+    EXPECT_EQ(asks.size(), 20u);
+
+    // Bids must be in descending price order (best first)
+    for (std::size_t i = 1; i < bids.size(); ++i) {
+        EXPECT_GT(bids[i - 1].price, bids[i].price)
+            << "Bids must be descending: " << bids[i-1].price << " > " << bids[i].price;
+    }
+    // First bid is highest (best)
+    EXPECT_DOUBLE_EQ(bids[0].price, 100.00);
+    EXPECT_DOUBLE_EQ(bids[0].size, 1.0);
+
+    // Asks must be in ascending price order (best first)
+    for (std::size_t i = 1; i < asks.size(); ++i) {
+        EXPECT_LT(asks[i - 1].price, asks[i].price)
+            << "Asks must be ascending: " << asks[i-1].price << " < " << asks[i].price;
+    }
+    // First ask is lowest (best)
+    EXPECT_DOUBLE_EQ(asks[0].price, 100.00);
+    EXPECT_DOUBLE_EQ(asks[0].size, 1.0);
+}
+
+TEST_F(OrderBookTest, GetTopLevelsOnSmallBookReturnsAllLevels) {
+    auto ob = make();
+    ob.apply_snapshot(make_snapshot());
+
+    // Only 3 levels per side — asking for 20 should return all 3
+    auto [bids, asks] = ob.get_top_levels(20);
+    EXPECT_EQ(bids.size(), 3u);
+    EXPECT_EQ(asks.size(), 3u);
+
+    // Verify bid order
+    EXPECT_DOUBLE_EQ(bids[0].price, 99.99);
+    EXPECT_DOUBLE_EQ(bids[1].price, 99.98);
+    EXPECT_DOUBLE_EQ(bids[2].price, 99.97);
+
+    // Verify ask order
+    EXPECT_DOUBLE_EQ(asks[0].price, 100.01);
+    EXPECT_DOUBLE_EQ(asks[1].price, 100.02);
+    EXPECT_DOUBLE_EQ(asks[2].price, 100.03);
+}
+
+TEST_F(OrderBookTest, GetTopLevelsZeroReturnsEmpty) {
+    auto ob = make();
+    ob.apply_snapshot(make_snapshot());
+
+    auto [bids, asks] = ob.get_top_levels(0);
+    EXPECT_TRUE(bids.empty());
+    EXPECT_TRUE(asks.empty());
+}
+
+TEST_F(OrderBookTest, GetTopLevelsNegativeReturnsEmpty) {
+    auto ob = make();
+    ob.apply_snapshot(make_snapshot());
+
+    auto [bids, asks] = ob.get_top_levels(-5);
+    EXPECT_TRUE(bids.empty());
+    EXPECT_TRUE(asks.empty());
+}
+
+TEST_F(OrderBookTest, IsConsistentDetectsMissingUpdates) {
     auto ob = make();
     auto snap = make_snapshot();
     ob.apply_snapshot(snap);

@@ -52,6 +52,8 @@ public:
     virtual void start();
     virtual void stop();
 
+    virtual bool is_connected() const { return m_ws_client && m_ws_client->is_connected(); }
+
     /// Returns the latest funding data for the ticker, or nullopt if not yet received.
     std::optional<FundingData> get_funding(const Ticker& ticker) const;
 

@@ -67,7 +67,7 @@ TEST_F(DensityDetectorTest, DetectsFakeDensityRemoval) {
     int fake_signals = 0;
     bus.subscribe([&fake_signals](const Signal& s){
         if (s.kind == SignalKind::DensityRemoved) {
-            if (s.payload.value("fake", false)) fake_signals++;
+            if (s.payload.fake) fake_signals++;
         }
     });
     

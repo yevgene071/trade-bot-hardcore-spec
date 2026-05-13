@@ -17,6 +17,9 @@ public:
 
     ~HdrHistogram() {
         if (histogram_) {
+            if (histogram_->counts) {
+                free(histogram_->counts);
+            }
             free(histogram_);
         }
     }

@@ -11,7 +11,8 @@ protected:
 };
 
 TEST_F(LeaderLagStrategyTest, GeneratesLongPlanOnPositiveLag) {
-    LeaderLag strategy("ALTUSDT");
+    TickerInfo info{"ALTUSDT", "ALT", "USDT", true, 0.01, 1e-6, 0.0, 0.0};
+    LeaderLag strategy("ALTUSDT", info);
     auto now = std::chrono::system_clock::now();
     
     FeatureFrame frame{};
@@ -24,7 +25,7 @@ TEST_F(LeaderLagStrategyTest, GeneratesLongPlanOnPositiveLag) {
     
     Signal s{
         SignalKind::LeaderMove, now, "ALTUSDT", 100.0, 0.8,
-        {{"lag_pct", 0.25}, {"correlation", 0.8}}
+        {.lag_pct = 0.25, .correlation = 0.8}
     };
     strategy.on_signal(s);
     
@@ -37,12 +38,13 @@ TEST_F(LeaderLagStrategyTest, GeneratesLongPlanOnPositiveLag) {
 }
 
 TEST_F(LeaderLagStrategyTest, NoPlanOnLowCorrelation) {
-    LeaderLag strategy("ALTUSDT");
+    TickerInfo info{"ALTUSDT", "ALT", "USDT", true, 0.01, 1e-6, 0.0, 0.0};
+    LeaderLag strategy("ALTUSDT", info);
     auto now = std::chrono::system_clock::now();
     
     Signal s{
         SignalKind::LeaderMove, now, "ALTUSDT", 100.0, 0.8,
-        {{"lag_pct", 0.25}, {"correlation", 0.4}} // low
+        {.lag_pct = 0.25, .correlation = 0.4} // low
     };
     strategy.on_signal(s);
     

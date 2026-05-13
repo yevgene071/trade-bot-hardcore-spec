@@ -1,4 +1,5 @@
 #include "LevelDetector.hpp"
+#include "ApproachAnalyzer.hpp"
 #include "logger/Logger.hpp"
 
 #include <cmath>
@@ -47,9 +48,6 @@ void LevelDetector::on_book_update(const OrderBookUpdate& /*update*/) {
 
 void LevelDetector::update_extremes_(const FeatureFrame& frame) {
     mid_history_.push_back({frame.timestamp, frame.mid});
-    while (!mid_history_.empty() && (frame.timestamp - mid_history_.front().first) > cfg_.lookback) {
-        mid_history_.pop_front();
-    }
 
     // Multi-scale extremes: short ~1s (hw=5), medium ~5s (hw=25), long ~15s (hw=75) at 10 Hz.
     // Each scale checks a different lag point — no same-point overlap within one call.
@@ -77,18 +75,21 @@ void LevelDetector::update_extremes_(const FeatureFrame& frame) {
 
             if (magnitude_bps >= cfg_.min_reversal_bps) {
                 auto ts = mid_history_[i].first;
-                auto it = std::lower_bound(extremes_.begin(), extremes_.end(), ts,
-                    [](const Extreme& e, const auto& t) { return e.ts < t; });
-                if (it == extremes_.end() || it->ts != ts) {
-                    extremes_.insert(it, {cur, ts, is_max});
+                
+                bool found = false;
+                for (int k = static_cast<int>(extremes_.size()) - 1; k >= 0; --k) {
+                    if (extremes_[k].ts == ts) {
+                        found = true;
+                        break;
+                    }
+                    if (extremes_[k].ts < ts) break; // Ordered by ts
+                }
+                
+                if (!found) {
+                     extremes_.push_back({cur, ts, is_max});
                 }
             }
         }
-    }
-
-    // Fix for #145: Prune extremes history to stay within lookback
-    while (!extremes_.empty() && (frame.timestamp - extremes_.front().ts) > cfg_.lookback) {
-        extremes_.pop_front();
     }
 }
 
@@ -98,7 +99,9 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
     }
 
     std::vector<double> prices(extremes_.size());
-    std::transform(extremes_.begin(), extremes_.end(), prices.begin(), [](const auto& e) { return e.price; });
+    for (size_t i = 0; i < extremes_.size(); ++i) {
+        prices[i] = extremes_[i].price;
+    }
 
     double mid = book_.mid().value_or(0.0);
     if (mid == 0.0 && !mid_history_.empty()) mid = mid_history_.back().second;
@@ -125,11 +128,6 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
     double h = Kde::silverman_bandwidth(kde_data) * cfg_.kde_smoothness;
 
     // ---- Pass 1: per-cluster centroid + raw KDE density. ----
-    // We collect raw kde_val for every cluster first so we can normalize the
-    // resulting kde_score against the maximum density observed THIS rebuild.
-    // Replaces the previous magic constant (kde_val * 100.0), which produced
-    // either always-saturated or always-near-zero scores depending on the
-    // ticker's absolute volume scale.  Fixes #117.
     struct Pending {
         double                                centroid;
         std::size_t                           cluster_size;
@@ -139,7 +137,7 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
     // Precompute sorted (price, ts) for O(logE) range queries inside the cluster loop
     std::vector<std::pair<double, std::chrono::system_clock::time_point>> sorted_extremes;
     sorted_extremes.reserve(extremes_.size());
-    for (const auto& e : extremes_) sorted_extremes.emplace_back(e.price, e.ts);
+    for (size_t i = 0; i < extremes_.size(); ++i) sorted_extremes.emplace_back(extremes_[i].price, extremes_[i].ts);
     std::sort(sorted_extremes.begin(), sorted_extremes.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
 
@@ -206,16 +204,28 @@ void LevelDetector::check_approaches_(const FeatureFrame& frame) {
         
         if (std::abs(dist_bps) <= cfg_.approach_trigger_bps) {
             if (current_approaches_.find(tick) == current_approaches_.end()) {
+                SignalPayload payload;
+                payload.dist_bps = dist_bps;
+                payload.touches = level.touches;
+                
+                if (analyzer_) {
+                    auto analysis = analyzer_->analyze(level.price, frame.timestamp);
+                    payload.speed_bps = analysis.speed_bps_sec;
+                    switch (analysis.type) {
+                        case ApproachAnalyzer::ApproachType::Impulse:       payload.approach_type = "impulse"; break;
+                        case ApproachAnalyzer::ApproachType::Slow:          payload.approach_type = "slow"; break;
+                        case ApproachAnalyzer::ApproachType::Consolidation: payload.approach_type = "consolidation"; break;
+                        default:                                            payload.approach_type = "unknown"; break;
+                    }
+                }
+
                 Signal s {
                     .kind = SignalKind::LevelApproach,
                     .timestamp = frame.timestamp,
                     .ticker = ticker_,
                     .price = level.price,
                     .confidence = level.confidence,
-                    .payload = nlohmann::json{
-                        {"dist_bps", dist_bps},
-                        {"touches", level.touches}
-                    }
+                    .payload = payload
                 };
                 bus_.publish(s);
                 current_approaches_[tick] = {level.price, frame.timestamp};

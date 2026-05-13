@@ -61,7 +61,7 @@ funding_blackout_pre_sec = 30
 funding_blackout_post_sec = 30
 # Other
 allow_hedge = false
-whitelist_tickers = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+whitelist_tickers = []
 exchange_error_streak = 5
 ws_reconnect_timeout_sec = 15
 ws_loss_poll_interval_ms = 500
@@ -153,7 +153,6 @@ slow_min_distance_bps = 30
 slow_min_pullbacks = 3
 slow_min_duration = 120
 consolidation_range_bps = 10
-consolidation_min_volume_usd = 100000.0
 pullback_min_bps = 5
 
 [signals.leader]
@@ -177,6 +176,8 @@ stop_buffer_bps = 5
 stop_anchor_max_bps = 15
 affinity_threshold = 0.6
 affinity_stable_min = 5
+# Post-entry invalidation (STRATEGIES.md § 1.7)
+burst_contra_exit_sec = 5       # TapeBurst contra → close within this window after entry
 
 [strategies.breakout]
 tp1_size_ratio = 0.5
@@ -186,6 +187,10 @@ post_entry_grace_sec = 5
 min_follow_through_bps = 10
 affinity_threshold = 0.55
 affinity_stable_min = 5
+# Post-entry invalidation (STRATEGIES.md § 2.7)
+fade_contra_exit_sec = 5         # TapeFade on our side → close within this window after entry
+leader_contra_exit_sec = 5       # LeaderMove contra → close within this window after entry
+leader_exit_contra_pct = 0.15    # |lag_pct| threshold for leader contra exit
 
 [strategies.leaderlag]
 tp1_size_ratio = 0.6
@@ -193,6 +198,10 @@ no_progress_timeout_sec = 15
 stop_distance_bps = 8
 affinity_threshold = 0.5
 affinity_stable_min = 5
+# Post-entry invalidation (STRATEGIES.md § 3.7)
+correlation_exit_threshold = 0.3   # exit if correlation drops below this
+leader_exit_reversal_bps = 5.0     # exit if leader reverses more than this
+swing_lookback_ticks = 30          # ticks for local extremum stop placement
 
 [strategies.flush]
 tp1_size_ratio = 0.7
@@ -202,6 +211,27 @@ affinity_threshold = 0.4
 affinity_stable_min = 5
 
 [universe]
+[universe.pool]
+allow_patterns         = ["*USDT"]
+deny_patterns          = ["*UP*", "*DOWN*", "*BULL*", "*BEAR*", "*1000*"]
+max_pool_size          = 30
+# Coins are selected SOLELY by the MetaScalp screener.
+# Exchange volume multiplier is auto-detected: MEXC → 0.1x, Bybit → 0.5x.
+# Set exchange_volume_multiplier to override auto-detection.
+min_volume_24h_usd      = 100000000.0
+max_avg_spread_bps      = 3.0
+# exchange_volume_multiplier = 1.0   # uncomment to override auto-detection
+
+[universe.dynamic_thresholds]
+# Per-coin dynamic threshold scaling for signal detectors.
+# When enabled, min_size_usd / min_volume_usd thresholds are scaled
+# proportionally to each coin's 24h volume relative to the reference.
+enabled = true
+reference_volume_24h_usd = 500000000
+min_scale_factor = 0.15
+max_scale_factor = 5.0
+floor_ratio = 0.10
+
 [universe.affinity]
 # Settings for TickerUniverse
 affinity_stable_min = 5

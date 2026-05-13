@@ -99,7 +99,7 @@ void OrderBook::apply_update_batch(const std::vector<PriceLevel>& changes) {
 
         auto update_map = [&](auto& map, const std::vector<std::pair<PriceTick, SizeFix>>& work) {
             for (const auto& [tick, size] : work) {
-                if (size.value > 0) map.insert_or_assign(tick, size);
+                if (size.raw > 0) map.insert_or_assign(tick, size);
                 else map.erase(tick);
             }
         };
@@ -215,6 +215,34 @@ double OrderBook::volume_at_range(double lo, double hi) const noexcept {
 
 std::size_t OrderBook::bid_levels() const noexcept { return bids_.size(); }
 std::size_t OrderBook::ask_levels() const noexcept { return asks_.size(); }
+
+std::pair<std::vector<ObLevel>, std::vector<ObLevel>>
+OrderBook::get_top_levels(int n) const noexcept {
+    std::vector<ObLevel> bids, asks;
+    if (n <= 0) return {bids, asks};
+
+    bids.reserve(static_cast<std::size_t>(n));
+    int count = 0;
+    for (const auto& [tick, sz] : bids_) {
+        bids.push_back(ObLevel{
+            tick.to_price(price_increment_),
+            static_cast<double>(sz.raw) * size_increment_
+        });
+        if (++count >= n) break;
+    }
+
+    asks.reserve(static_cast<std::size_t>(n));
+    count = 0;
+    for (const auto& [tick, sz] : asks_) {
+        asks.push_back(ObLevel{
+            tick.to_price(price_increment_),
+            static_cast<double>(sz.raw) * size_increment_
+        });
+        if (++count >= n) break;
+    }
+
+    return {std::move(bids), std::move(asks)};
+}
 
 bool OrderBook::is_consistent(const OrderBookSnapshot& snap, int max_diff) const noexcept {
     int diffs = 0;

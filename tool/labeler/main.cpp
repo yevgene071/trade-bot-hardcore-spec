@@ -135,7 +135,7 @@ int main(int argc, char* argv[]) {
 
     auto density  = std::make_unique<trade_bot::DensityDetector>(ticker, bus, book, universe);
     auto iceberg  = std::make_unique<trade_bot::IcebergDetector>(ticker, bus, book, universe);
-    auto tape     = std::make_unique<trade_bot::TapeAnalyzer>(ticker, bus, book, stream);
+    auto tape     = std::make_unique<trade_bot::TapeAnalyzer>(ticker, bus, book, stream, universe);
     auto level    = std::make_unique<trade_bot::LevelDetector>(ticker, bus, book, cluster_mgr);
     auto approach = std::make_unique<trade_bot::ApproachAnalyzer>(ticker, bus, book, *level);
 
@@ -231,8 +231,12 @@ int main(int argc, char* argv[]) {
                       << " @ " << s.ticker
                       << "  price=" << s.price
                       << "  conf=" << s.confidence << "\033[0m\n";
-            if (!s.payload.is_null() && !s.payload.empty())
-                std::cout << "  payload: " << s.payload.dump() << "\n";
+            
+            if (s.payload.size > 0 || !s.payload.side.empty()) {
+                std::cout << "  payload: side=" << s.payload.side.c_str() 
+                          << " size=" << s.payload.size 
+                          << " ratio=" << s.payload.eaten_ratio << "\n";
+            }
             std::cout << "  > ";
             std::cout.flush();
 

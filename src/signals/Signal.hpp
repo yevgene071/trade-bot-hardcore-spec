@@ -1,10 +1,10 @@
 #pragma once
 
 #include "domain/Types.hpp"
-#include <nlohmann/json.hpp>
+#include "utils/FixedString.hpp"
 #include <chrono>
 #include <functional>
-#include <string>
+#include <optional>
 
 namespace trade_bot {
 
@@ -24,13 +24,54 @@ enum class SignalKind {
     LeaderMove           // поводырь двинулся, а мы — нет
 };
 
+/**
+ * T4-PERF: SignalPayload is now a POD-like struct instead of nlohmann::json.
+ * This eliminates heap allocations in the hot path (on_frame/on_trade).
+ */
+struct SignalPayload {
+    FixedString<8>  side = "";         // "Bid", "Ask", "Buy", "Sell"
+    double          size = 0.0;
+    double          size_usd = 0.0;
+    double          total_eaten_usd = 0.0;
+    double          original_size = 0.0;
+    double          remaining_size = 0.0;
+    double          eaten_ratio = 0.0;
+    double          lag_pct = 0.0;
+    double          correlation = 0.0;
+    double          dist_bps = 0.0;
+    double          delta_bps = 0.0;
+    double          leader_move_pct = 0.0;
+    double          our_move_pct = 0.0;
+    double          expected_move_pct = 0.0;
+    double          lag_ms = 0.0;
+    double          ratio = 0.0;
+    double          intensity = 0.0;
+    double          peak_rate = 0.0;
+    double          current_rate = 0.0;
+    double          cusum = 0.0;
+    double          volatility_bps = 0.0;
+    double          volume_usd_30s = 0.0;
+    double          max_range_bps = 0.0;
+    double          speed_bps = 0.0;
+    FixedString<16> approach_type = "";
+    int             touches = 0;
+    int             prints = 0;
+    int             age_ms = 0;
+    int             refill_events = 0;
+    bool            fake = false;
+    FixedString<16> id = "";
+    FixedString<16> source = "";
+
+    bool operator==(const SignalPayload&) const = default;
+};
+
 struct Signal {
     SignalKind kind;
     std::chrono::system_clock::time_point timestamp;
     Ticker ticker;
     double price;                // цена, к которой привязан сигнал
     double confidence;           // [0, 1], внутренняя уверенность детектора
-    nlohmann::json payload;      // детали (размер плотности, окно расчёта...)
+    SignalPayload payload;       // детали (размер плотности, окно расчёта...)
 
     bool operator==(const Signal&) const = default;
 };

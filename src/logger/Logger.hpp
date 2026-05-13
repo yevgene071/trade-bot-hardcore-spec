@@ -30,7 +30,7 @@ private:
 
 class Logger {
 public:
-    static void init(const std::string& log_path = "logs/trade_bot.log");
+    static void init(const std::string& log_path = "logs/trade_bot.log", const std::string& level = "info");
     static std::shared_ptr<spdlog::logger> get() { return s_logger; }
     static std::shared_ptr<LogRingBuffer>  ring()  { return s_ring; }
 

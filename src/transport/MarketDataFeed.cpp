@@ -20,7 +20,13 @@ static std::string to_ms(const std::string& t) {
 }
 
 static std::string from_ms(const std::string& t) {
-    return t;  // internal format == MetaScalp format (both BTC_USDT)
+    if (t.find('_') != std::string::npos) return t;
+    for (const char* q : {"USDT", "USDC", "BTC", "ETH", "BNB", "BUSD"}) {
+        std::size_t qlen = std::strlen(q);
+        if (t.size() > qlen && t.substr(t.size() - qlen) == q)
+            return t.substr(0, t.size() - qlen) + "_" + q;
+    }
+    return t;
 }
 
 MarketDataFeed::MarketDataFeed(std::shared_ptr<IWsClient> ws_client, int connection_id)
@@ -100,8 +106,14 @@ void MarketDataFeed::subscribe_ticker(const Ticker& ticker) {
                 {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}}}
             }.dump());
         };
+        auto send_ob_sub = [&]() {
+            m_ws_client->send(nlohmann::json{
+                {"Type", "orderbook_subscribe"},
+                {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}, {"DepthLevels", 50}, {"DepthPercent", 0.5}}}
+            }.dump());
+        };
         send_sub("trade_subscribe");
-        send_sub("orderbook_subscribe");
+        send_ob_sub();
         send_sub("funding_subscribe");
         send_sub("mark_price_subscribe");
     }
@@ -181,8 +193,14 @@ void MarketDataFeed::resubscribe_all() {
                 {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}}}
             }.dump());
         };
+        auto send_ob_sub = [&]() {
+            m_ws_client->send(nlohmann::json{
+                {"Type", "orderbook_subscribe"},
+                {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}, {"DepthLevels", 50}, {"DepthPercent", 0.5}}}
+            }.dump());
+        };
         send_sub("trade_subscribe");
-        send_sub("orderbook_subscribe");
+        send_ob_sub();
         send_sub("funding_subscribe");
         send_sub("mark_price_subscribe");
     }
@@ -284,9 +302,9 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
                 LOG_DEBUG("Funding update {}: rate={:.6f}", ticker, fd.rate);
             }
         } else if (type == "mark_price_update") {
-            // lowercase fields per MetaScalp API (observed in testing)
-            Ticker ticker = from_ms(data.value("ticker", ""));
-            double mp = data.value("markPrice", 0.0);
+            // PascalCase fields per MetaScalp API contract
+            Ticker ticker = from_ms(MetaScalpCodec::get_val<std::string>(data, "Ticker", ""));
+            double mp = MetaScalpCodec::get_val<double>(data, "MarkPrice", 0.0);
             if (!ticker.empty() && mp > 0.0) {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 m_mark_price_cache[ticker] = mp;

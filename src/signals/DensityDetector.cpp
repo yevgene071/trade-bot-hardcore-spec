@@ -70,10 +70,13 @@ void DensityDetector::on_trade(const Trade& trade) {
                 .ticker = ticker_,
                 .price = trade.price,
                 .confidence = std::min(1.0, eaten_ratio),
-                .payload = nlohmann::json{
-                    {"side", meta.side == Side::Buy ? "Bid" : "Ask"},
-                    {"eaten_ratio", eaten_ratio},
-                    {"prints", meta.print_count}
+                .payload = {
+                    .side = meta.side == Side::Buy ? "Bid" : "Ask",
+                    .size = meta.initial_size - meta.eaten_volume,
+                    .original_size = meta.initial_size,
+                    .remaining_size = meta.initial_size - meta.eaten_volume,
+                    .eaten_ratio = eaten_ratio,
+                    .prints = meta.print_count
                 }
             };
             bus_.publish(s);
@@ -136,7 +139,7 @@ void DensityDetector::on_book_update(const OrderBookUpdate& update) {
                         .ticker = ticker_,
                         .price = level.price,
                         .confidence = 1.0,
-                        .payload = nlohmann::json{{"fake", true}, {"age_ms", age.count()}}
+                        .payload = {.age_ms = static_cast<int>(age.count()), .fake = true}
                     };
                     bus_.publish(s);
                 }
@@ -147,6 +150,9 @@ void DensityDetector::on_book_update(const OrderBookUpdate& update) {
 }
 
 void DensityDetector::check_sticky_levels_(std::chrono::system_clock::time_point now) {
+    // absl::flat_hash_map::begin() segfaults with ASan when the map is empty
+    // (null ctrl_ pointer in generation tracking). Guard against that.
+    if (tracked_.empty()) return;
     for (auto& [tick, meta] : tracked_) {
         if (meta.emitted) continue;
 
@@ -160,11 +166,7 @@ void DensityDetector::check_sticky_levels_(std::chrono::system_clock::time_point
                 .ticker = ticker_,
                 .price = tick.to_price(book_.price_increment()),
                 .confidence = 1.0,
-                .payload = nlohmann::json{
-                    {"side", meta.side == Side::Buy ? "Bid" : "Ask"},
-                    {"size", meta.initial_size},
-                    {"age_ms", age.count()}
-                }
+                .payload = {.side = meta.side == Side::Buy ? "Bid" : "Ask", .size = meta.initial_size, .age_ms = static_cast<int>(age.count())}
             };
             bus_.publish(s);
         }

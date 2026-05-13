@@ -15,7 +15,7 @@ public:
     MOCK_METHOD(std::vector<PositionUpdate>, get_positions, (int), (override));
     MOCK_METHOD(BalanceUpdate, get_balance, (int), (override));
     MOCK_METHOD(PlaceOrderResult, place_order, (int, const PlaceOrderRequest&), (override));
-    MOCK_METHOD(void, cancel_order, (int, int64_t), (override));
+    MOCK_METHOD(void, cancel_order, (int, int64_t, const Ticker&), (override));
     MOCK_METHOD(void, cancel_all_orders, (int, const Ticker&), (override));
 };
 
@@ -61,7 +61,7 @@ TEST_F(ExecutorStateMachineTest, EntryToOpenOnFill) {
     plan.tp1_price = 52000.0;
     plan.tp1_size_ratio = 0.5;
     
-    EXPECT_CALL(gateway, place_order(1, _)).WillOnce(Return(PlaceOrderResult{"Success", "cid1", 10.0}));
+    EXPECT_CALL(gateway, place_order(1, _)).WillOnce(Return(PlaceOrderResult{"Success", "cid1", 10L, 0.0}));
     
     executor.submit(plan);
     
@@ -80,8 +80,8 @@ TEST_F(ExecutorStateMachineTest, EntryToOpenOnFill) {
     upd.time = std::chrono::system_clock::now();
     
     // Fill should trigger stops placement (StopLoss and TakeProfit)
-    EXPECT_CALL(gateway, place_order(1, Field(&PlaceOrderRequest::type, OrderType::StopLoss))).WillOnce(Return(PlaceOrderResult{"Success", "sl1", 5.0}));
-    EXPECT_CALL(gateway, place_order(1, Field(&PlaceOrderRequest::type, OrderType::TakeProfit))).WillOnce(Return(PlaceOrderResult{"Success", "tp1", 5.0}));
+    EXPECT_CALL(gateway, place_order(1, Field(&PlaceOrderRequest::type, OrderType::StopLoss))).WillOnce(Return(PlaceOrderResult{"Success", "sl1", 5L, 0.0}));
+    EXPECT_CALL(gateway, place_order(1, Field(&PlaceOrderRequest::type, OrderType::TakeProfit))).WillOnce(Return(PlaceOrderResult{"Success", "tp1", 5L, 0.0}));
     
     executor.on_order_update(upd);
     

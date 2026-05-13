@@ -8,64 +8,86 @@
 - CMake 3.22+
 - Система сборки Ninja (`sudo apt install ninja-build`)
 - Conan 2.0+
+- Python 3 (для эмбеддинга dashboard HTML)
 
 ---
 
-## Сборка через пресеты (Рекомендуется)
-
-В проекте настроены пресеты в `CMakePresets.json`. Сборка проходит в три этапа: установка зависимостей, конфигурация и сама компиляция.
-
-### 1. Release (Максимальная производительность)
-Используйте этот вариант для работы робота.
+## Быстрый старт (скрипты)
 
 ```bash
-# 1. Установка зависимостей через Conan
+# Production-сборка одной командой
+./scripts/build.sh
+
+# Debug + тесты
+./scripts/build.sh debug --tests
+
+# Очистка
+./scripts/build.sh clean
+
+# Запуск тестов
+./scripts/test.sh
+
+# Конкретные тесты
+./scripts/test.sh --filter orderbook
+```
+
+Подробнее: `./scripts/build.sh --help`, `./scripts/test.sh --help`
+
+---
+
+## Ручная сборка через пресеты
+
+Если нужно больше контроля, используйте пресеты напрямую.
+
+### Release (Максимальная производительность)
+
+```bash
 conan install . --output-folder=build/release --build=missing -s build_type=Release
-
-# 2. Конфигурация CMake
 cmake --preset release
-
-# 3. Сборка
 cmake --build --preset release -j$(nproc)
 ```
-**Бинарный файл:** `build/release/bin/trade_bot`
 
-### 2. Debug (Для разработки и отладки)
-Включает санитайзеры (ASan, UBSan) и отладочную информацию.
+Бинарный файл: `build/release/bin/trade_bot`
+compile_commands.json: `build/release/compile_commands.json`
+
+### Debug (ASan + UBSan)
 
 ```bash
-# 1. Установка зависимостей через Conan
 conan install . --output-folder=build/debug --build=missing -s build_type=Debug
-
-# 2. Конфигурация CMake
 cmake --preset debug
-
-# 3. Сборка
 cmake --build --preset debug -j$(nproc)
 ```
-**Бинарный файл:** `build/debug/bin/trade_bot`
+
+Бинарный файл: `build/debug/bin/trade_bot`
+
+### Тесты через CTest
+
+```bash
+ctest --test-dir build/debug --output-on-failure
+# или с фильтром:
+ctest --test-dir build/debug --output-on-failure -R orderbook
+```
+
+---
+
+## Режимы сборки
+
+| Режим    | AVX2 | LTO | Оптимизации              | Санитайзеры |
+|----------|------|-----|--------------------------|-------------|
+| Release  | ✓    | ✓   | -O3 -march=native        | —           |
+| Debug    | ✓    | —   | -O0                      | ASan + UBSan|
 
 ---
 
 ## Возможные проблемы
 
 ### Ошибка: Could not find toolchain file
-Если CMake ругается на отсутствие `conan_toolchain.cmake`, значит шаг `conan install` не был выполнен или был выполнен для другой директории. Убедитесь, что `--output-folder` в команде conan совпадает с ожидаемым путем в пресете.
+Если CMake ругается на отсутствие `conan_toolchain.cmake`, запустите `conan install` для нужного режима сборки.
 
 ### Ошибка: Could not find build program corresponding to "Ninja"
 Установите Ninja:
 - **Ubuntu/Debian:** `sudo apt install ninja-build`
 - **MacOS:** `brew install ninja`
-- **Windows:** `choco install ninja`
 
----
-
-## Запуск тестов
-
-```bash
-# Через CTest
-ctest --test-dir build/debug --output-on-failure
-
-# Или через рабочий процесс (workflow)
-cmake --workflow --preset debug
-```
+### GCC/Clang version too old
+Требуется GCC ≥ 13 или Clang ≥ 17. Сборка прервётся с понятным сообщением об ошибке.

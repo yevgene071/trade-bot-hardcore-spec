@@ -3,6 +3,7 @@
 #include "IDetector.hpp"
 #include "SignalBus.hpp"
 #include "marketdata/LeaderTracker.hpp"
+#include "utils/CircularBuffer.hpp"
 #include <chrono>
 
 namespace trade_bot {
@@ -44,8 +45,8 @@ private:
     const LeaderTracker& tracker_;
     Config          cfg_;
 
-    std::deque<std::pair<std::chrono::system_clock::time_point, double>> leader_history_;
-    std::deque<std::pair<std::chrono::system_clock::time_point, double>> our_history_;
+    CircularBuffer<std::pair<std::chrono::system_clock::time_point, double>, 128> leader_history_;
+    CircularBuffer<std::pair<std::chrono::system_clock::time_point, double>, 128> our_history_;
 };
 
 } // namespace trade_bot

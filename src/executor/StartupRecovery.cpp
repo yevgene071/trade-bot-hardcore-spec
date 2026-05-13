@@ -1,11 +1,15 @@
 #include "StartupRecovery.hpp"
 #include "logger/Logger.hpp"
+#include "numeric/PriceUtils.hpp"
 #include <cmath>
 #include <algorithm>
 #include <set>
 #include <map>
 
 namespace trade_bot {
+
+StartupRecovery::StartupRecovery(int connection_id, IOrderGateway& gateway, AccountStatePersister& persister)
+    : StartupRecovery(connection_id, gateway, persister, Config{}) {}
 
 StartupRecovery::StartupRecovery(int connection_id, IOrderGateway& gateway, AccountStatePersister& persister, const Config& cfg)
     : connection_id_(connection_id), gateway_(gateway), persister_(persister), cfg_(cfg) {}
@@ -73,14 +77,16 @@ StartupRecovery::Result StartupRecovery::run() {
                 // Emergency stop
                 double stop_dist = pit->avg_price * cfg_.max_recovery_stop_bps / 10000.0;
                 trade.plan.stop_price = pit->avg_price + (pit->side == Side::Buy ? -stop_dist : stop_dist);
+                trade.plan.stop_price = round_to_tick(trade.plan.stop_price, pit->price_increment);
                 
                 // Fix for #131: Actually place the emergency stop on the exchange
                 PlaceOrderRequest req;
                 req.ticker = ticker;
                 req.side = (pit->side == Side::Buy ? Side::Sell : Side::Buy); // Opposite to close
-                req.type = OrderType::Stop;
+                req.type = OrderType::StopLoss;
                 req.price = trade.plan.stop_price;
                 req.size = trade.plan.size_coin;
+                req.reduce_only = true;
                 
                 try {
                     auto sres = gateway_.place_order(connection_id_, req);
@@ -127,7 +133,7 @@ StartupRecovery::Result StartupRecovery::run() {
                 });
             if (!is_used && cfg_.orphan_cancel_policy == "cancel") {
                 res.log_entries.push_back("Cancelling orphan order " + std::to_string(o.id) + " for " + ticker);
-                gateway_.cancel_order(connection_id_, o.id);
+                gateway_.cancel_order(connection_id_, o.id, ticker);
             }
         }
     }

@@ -26,23 +26,30 @@ bool TickerUniverse::passes_filter_(const Ticker& ticker, double& out_volume) co
     out_volume = 0.0;
     if (!filters_.accepts(ticker)) return false;
 
-    // manual_allow bypasses dynamic gates (operator override).
-    const bool manual_override = std::find(cfg_.filters.manual_allow.begin(),
-                                           cfg_.filters.manual_allow.end(), ticker)
-                                 != cfg_.filters.manual_allow.end();
-
     std::optional<TickerStats> s;
     if (stats_lookup_) s = stats_lookup_(ticker);
 
+    // Screener-approved coins bypass the dynamic stats gate — they enter
+    // the pool immediately and warm up via live market data.
     const bool screener_override = screener_approved_.count(ticker) > 0;
-
-    if (manual_override || screener_override) {
+    if (screener_override) {
         if (s) out_volume = s->volume_24h_usd;
         return true;
     }
 
-    if (!s) return false;                                     // no stats → not yet warmed up
-    if (s->volume_24h_usd < cfg_.min_volume_24h_usd) return false;
+    // Exchange-aware volume threshold: scale by exchange multiplier.
+    double vol_threshold = cfg_.min_volume_24h_usd * cfg_.exchange_volume_multiplier;
+
+    if (!s) {
+        // Bug #2: For non-screener coins, no stats means they can't pass filter yet.
+        // But for ANY coin without stats we should still allow them into the pool
+        // if they passed static filters — otherwise the pool never warms up.
+        // Return true here and let the affinity lambdas gate on real volume/spread
+        // when stats eventually arrive. The volume-based ordering will still
+        // prioritize coins that do have stats.
+        return true;
+    }
+    if (s->volume_24h_usd < vol_threshold) return false;
     if (s->avg_spread_bps > cfg_.max_avg_spread_bps) return false;
     out_volume = s->volume_24h_usd;
     return true;
@@ -80,6 +87,9 @@ void TickerUniverse::refresh_pool(const std::vector<Ticker>& available) {
             ++it;
         }
     }
+
+    // Recompute per-coin scale factors for dynamic thresholds.
+    refresh_scale_factors();
 }
 
 void TickerUniverse::refresh_affinity() {
@@ -141,23 +151,26 @@ void TickerUniverse::on_screener_new_coin(const Ticker& ticker) {
     if (screener_approved_.insert(ticker).second) {
         LOG_INFO("[Universe] Screener: {} approved, rebuilding pool ({} screener coins)",
                  ticker, screener_approved_.size());
+        // Rebuild pool from all static-filtered candidates, gated by
+        // screener_approved_ only (no manual_allow — the screener IS the
+        // sole authority on which coins to trade).
         std::vector<Ticker> pool_candidates;
         pool_candidates.reserve(all_candidates_.size());
         for (const auto& t : all_candidates_) {
-            if (screener_approved_.count(t) ||
-                std::find(cfg_.filters.manual_allow.begin(),
-                          cfg_.filters.manual_allow.end(), t)
-                != cfg_.filters.manual_allow.end()) {
+            if (screener_approved_.count(t)) {
                 pool_candidates.push_back(t);
             }
         }
-        // add manual_allow that might not be in all_candidates_
-        for (const auto& t : cfg_.filters.manual_allow) {
-            if (std::find(pool_candidates.begin(), pool_candidates.end(), t) == pool_candidates.end())
+        // Also include any screener coins that weren't in the initial
+        // all_candidates_ fetch (e.g. just listed on exchange).
+        for (const auto& t : screener_approved_) {
+            if (std::find(pool_candidates.begin(), pool_candidates.end(), t) == pool_candidates.end()) {
                 pool_candidates.push_back(t);
+            }
         }
         refresh_pool(pool_candidates);
         refresh_affinity();
+        // refresh_scale_factors() already called inside refresh_pool().
     }
 }
 
@@ -172,9 +185,15 @@ void TickerUniverse::update_orderbook_settings(const OrderbookSettings& settings
 
 double TickerUniverse::density_min_size_usd(const Ticker& ticker,
                                             double config_default) const {
+    // Base calibrated value (volume scale factor + exchange multiplier + floor).
+    double base = calibrated_min_size_usd(ticker, config_default);
     auto it = large_amounts_.find(ticker);
-    if (it == large_amounts_.end()) return config_default;
-    return std::max(config_default, it->second);
+    if (it != large_amounts_.end()) {
+        // MetaScalp per-ticker large_amount_usd also gets exchange scaling.
+        double calibrated_large = it->second * cfg_.exchange_volume_multiplier;
+        return std::max(base, calibrated_large);
+    }
+    return base;
 }
 
 bool TickerUniverse::is_boosted(const Ticker& ticker,
@@ -192,6 +211,56 @@ std::optional<TickerMeta> TickerUniverse::meta(const Ticker& ticker) const {
     auto it = meta_cache_.find(ticker);
     if (it == meta_cache_.end()) return std::nullopt;
     return it->second;
+}
+
+double TickerUniverse::volume_scale_factor(const Ticker& ticker) const {
+    if (!cfg_.dynamic_thresholds_enabled) return 1.0;
+
+    // Check cache first.
+    auto it = scale_factors_.find(ticker);
+    if (it != scale_factors_.end()) return it->second;
+
+    // Compute on-the-fly from stats.
+    std::optional<TickerStats> s;
+    if (stats_lookup_) s = stats_lookup_(ticker);
+    if (!s || s->volume_24h_usd <= 0.0) return 1.0;
+
+    const double ref = cfg_.dynamic_thresholds_reference_volume;
+    if (ref <= 0.0) return 1.0;
+
+    double raw = s->volume_24h_usd / ref;
+    // Compress with sqrt so extremes don't dominate, then clamp.
+    double compressed = std::sqrt(raw);
+    return std::clamp(compressed,
+                      cfg_.dynamic_thresholds_min_scale,
+                      cfg_.dynamic_thresholds_max_scale);
+}
+
+double TickerUniverse::calibrated_min_size_usd(const Ticker& ticker,
+                                                double config_default) const {
+    // Per-coin dynamic scale (volume-based).
+    double scale = volume_scale_factor(ticker);
+    // Exchange-wide multiplier (e.g. MEXC 0.1x).
+    double calibrated = config_default * scale * cfg_.exchange_volume_multiplier;
+    // Never go below configurable floor ratio of config default.
+    return std::max(calibrated, config_default * cfg_.dynamic_thresholds_floor_ratio);
+}
+
+void TickerUniverse::refresh_scale_factors() {
+    scale_factors_.clear();
+    if (!cfg_.dynamic_thresholds_enabled) return;
+
+    for (const auto& ticker : active_) {
+        double sf = volume_scale_factor(ticker);
+        scale_factors_[ticker] = sf;
+    }
+
+    // Also cache for screener-approved coins not yet in pool.
+    for (const auto& ticker : screener_approved_) {
+        if (!scale_factors_.contains(ticker)) {
+            scale_factors_[ticker] = volume_scale_factor(ticker);
+        }
+    }
 }
 
 }  // namespace trade_bot

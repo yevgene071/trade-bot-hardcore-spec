@@ -182,6 +182,7 @@ PlaceOrderResult MetaScalpCodec::parse_place_order_result(const nlohmann::json& 
     return PlaceOrderResult {
         .status = get_val<std::string>(j, "Status", ""),
         .client_id = get_val<std::string>(j, fields::kClientId, ""),
+        .order_id = get_val<int64_t>(j, fields::kOrderId, 0L),
         .execution_time_ms = get_val<double>(j, fields::kExecutionTimeMs, 0.0)
     };
 }
@@ -199,6 +200,7 @@ PositionUpdate MetaScalpCodec::parse_position_update(const nlohmann::json& j) {
         .avg_price = get_val<double>(j, fields::kAvgPrice, 0.0),
         .avg_price_fix = get_val<double>(j, fields::kAvgPriceFix, 0.0),
         .avg_price_dyn = get_val<double>(j, fields::kAvgPriceDyn, 0.0),
+        .price_increment = get_val<double>(j, fields::kPriceIncrement, 0.0),
         .status = parse_position_status(get_val<nlohmann::json>(j, fields::kStatus, nlohmann::json()))
     };
 }
@@ -352,8 +354,9 @@ ConnectionInfo MetaScalpCodec::parse_connection_info(const nlohmann::json& j) {
 }
 
 TickerInfo MetaScalpCodec::parse_ticker_info(const nlohmann::json& j) {
+    Ticker raw_name = get_val<std::string>(j, fields::kName, "");
     return TickerInfo {
-        .name = get_val<std::string>(j, fields::kName, ""),
+        .name = normalize_ticker(raw_name),
         .base_asset = get_val<std::string>(j, fields::kBaseAsset, ""),
         .quote_asset = get_val<std::string>(j, fields::kQuoteAsset, ""),
         .is_trading_allowed = get_val<bool>(j, fields::kIsTradingAllowed, true),
@@ -362,6 +365,17 @@ TickerInfo MetaScalpCodec::parse_ticker_info(const nlohmann::json& j) {
         .min_size = get_val<double>(j, fields::kMinSize, 0.0),
         .max_size = get_val<double>(j, fields::kMaxSize, 0.0)
     };
+}
+
+Ticker MetaScalpCodec::normalize_ticker(const Ticker& raw) {
+    if (raw.find('_') != std::string::npos) return raw;
+    for (const char* q : {"USDT", "USDC", "BTC", "ETH", "BNB", "BUSD"}) {
+        std::size_t qlen = std::strlen(q);
+        if (raw.size() > qlen && raw.substr(raw.size() - qlen) == q) {
+            return raw.substr(0, raw.size() - qlen) + "_" + q;
+        }
+    }
+    return raw;
 }
 
 FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
@@ -396,15 +410,62 @@ FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
 }
 
 Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
+    NotificationKind kind = NotificationKind::Trade;
+    std::string type_str = get_val<std::string>(j, fields::kType, "");
+    if (!type_str.empty()) {
+        kind = parse_notification_type(type_str);
+    } else {
+        // Fallback: try reading as integer (backward compat with old tests)
+        kind = static_cast<NotificationKind>(get_val<int>(j, fields::kKind, 0));
+    }
+
+    std::string ticker_raw = get_val<std::string>(j, fields::kTicker, "");
+    // Normalize ticker (e.g. BTCUSDT -> BTC_USDT) for consistency with internal universe
+    Ticker ticker = normalize_ticker(ticker_raw);
+
     return Notification {
-        .kind = static_cast<NotificationKind>(get_val<int>(j, fields::kKind, 0)),
+        .kind = kind,
         .exchange_id = get_val<int>(j, fields::kExchangeId, 0),
-        .market_type = get_val<int>(j, fields::kMarketType, 0),
-        .ticker = get_val<std::string>(j, fields::kTicker, ""),
+        .market_type = parse_market_type(get_val<nlohmann::json>(j, fields::kMarketType, nlohmann::json())),
+        .ticker = ticker,
         .price = get_val<double>(j, fields::kPrice, 0.0),
         .size = get_val<double>(j, fields::kSize, 0.0),
         .timestamp = parse_timestamp(get_val<std::string>(j, fields::kDate, ""))
     };
+}
+
+NotificationKind MetaScalpCodec::parse_notification_type(const std::string& s) {
+    std::string type = s;
+    std::transform(type.begin(), type.end(), type.begin(), [](unsigned char c){ return std::tolower(c); });
+
+    if (type == "trade")               return NotificationKind::Trade;
+    if (type == "signallevel")         return NotificationKind::SignalLevel;
+    if (type == "bigorderbookamount")  return NotificationKind::BigOrderBookAmount;
+    if (type == "bigorderbookamount2") return NotificationKind::BigOrderBookAmount2;
+    if (type == "bigtick")             return NotificationKind::BigTick;
+    if (type == "screenernewcoin" || type == "screener") return NotificationKind::ScreenerNewCoin;
+    // Unknown type — fall back to Trade (safe default, ignored in routing)
+    return NotificationKind::Trade;
+}
+
+int MetaScalpCodec::parse_market_type(const nlohmann::json& v) {
+    if (v.is_number()) {
+        return v.get<int>();
+    }
+    if (v.is_string()) {
+        std::string s = v.get<std::string>();
+        if (s == "Spot")            return 0;
+        if (s == "Futures")         return 1;
+        if (s == "UsdtFutures")     return 2;
+        if (s == "CoinFutures")    return 3;
+        if (s == "InverseFutures") return 4;
+        if (s == "UsdtPerpetual")  return 5;
+        if (s == "UsdcPerpetual")  return 6;
+        if (s == "Margin")         return 7;
+        if (s == "Options")        return 8;
+        if (s == "Stock")          return 9;
+    }
+    return 0;
 }
 
 SignalLevel MetaScalpCodec::parse_signal_level(const nlohmann::json& j) {
@@ -434,6 +495,10 @@ SignalLevelTriggered MetaScalpCodec::parse_signal_level_triggered(const nlohmann
 }
 
 ClusterSnapshot MetaScalpCodec::parse_cluster_snapshot(const nlohmann::json& j) {
+    check_required(j, fields::kTicker);
+    check_required(j, fields::kTimeFrame);
+    check_required(j, fields::kItems);
+
     std::vector<ClusterItem> items;
     std::string key = fields::kItems;
     const nlohmann::json* ja_ptr = nullptr;

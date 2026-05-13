@@ -81,7 +81,16 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
+    // R4b: Per-ticker position limit
+    int ticker_count = static_cast<int>(std::count(state.active_tickers.begin(), state.active_tickers.end(), plan.ticker));
+    if (ticker_count >= cfg_.max_positions_per_ticker) {
+        d.reason = RejectReason::DuplicatePosition;
+        d.details = "Per-ticker limit reached for " + plan.ticker + ": " + std::to_string(ticker_count) + "/" + std::to_string(cfg_.max_positions_per_ticker);
+        return d;
+    }
+
     // R5. Universe — accept if ticker is in the active pool, boosted, or explicitly whitelisted.
+    // Additionally check strategy-specific affinity (ARCHITECTURE.md § 2.11).
     {
         const auto& active = universe_.active();
         const bool in_pool = std::find(active.begin(), active.end(), plan.ticker) != active.end();
@@ -92,6 +101,14 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         if (!in_pool && !boosted && !listed) {
             d.reason  = RejectReason::NotInUniverse;
             d.details = "Ticker not in tradable universe or whitelist: " + plan.ticker;
+            return d;
+        }
+
+        // Strategy-specific affinity: ticker must be enabled for this strategy.
+        // Per ARCHITECTURE.md § 2.11 — TickerUniverse::is_tradable_by().
+        if (!boosted && !listed && !universe_.is_strategy_enabled(plan.ticker, std::string(plan.strategy_name))) {
+            d.reason  = RejectReason::NotInUniverse;
+            d.details = "Ticker " + plan.ticker + " not enabled for strategy " + std::string(plan.strategy_name);
             return d;
         }
     }
@@ -117,6 +134,11 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         d.reason = RejectReason::StopTooWide;
         d.details = "Stop too wide: " + std::to_string(stop_dist_bps) + " bps";
         return d;
+    }
+
+    if (stop_dist_bps > cfg_.warn_stop_bps) {
+        LOG_WARN("RiskManager: stop distance {:.1f} bps > warn threshold {:.1f} bps for {}",
+                 stop_dist_bps, cfg_.warn_stop_bps, plan.ticker);
     }
 
     // R7. TP validation
@@ -164,19 +186,11 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     double risk_usd_target = state.equity_usd * cfg_.max_per_trade_risk_pct / 100.0;
     double size_coin = risk_usd_target / (plan.entry_price * stop_dist_bps / 10000.0);
 
-    double max_val_usd = state.equity_usd * cfg_.max_position_value_pct / 100.0;
-    if (size_coin * plan.entry_price > max_val_usd) {
-        size_coin = max_val_usd / plan.entry_price;
-    }
-
-    d.adjusted_size_coin = size_coin;
-    d.risk_usd = size_coin * plan.entry_price * stop_dist_bps / 10000.0;
-
-    // T4-RISK: Price and Size Normalization (#131)
+    // T4-RISK: Price and Size Normalization (#131) — moved position value cap AFTER normalization
+    // Round size down first, then compute risk_usd from the REAL size.
     auto meta = universe_.meta(plan.ticker).value_or(TickerMeta{0.01, 1e-6, 0.0, 0.0});
     if (meta.price_increment > 0.0 && meta.size_increment > 0.0) {
-        // Round size down to be safe
-        int64_t size_ticks = static_cast<int64_t>(std::floor(d.adjusted_size_coin / meta.size_increment + 1e-9));
+        int64_t size_ticks = static_cast<int64_t>(std::floor(size_coin / meta.size_increment + 1e-9));
         d.adjusted_size_coin = static_cast<double>(size_ticks) * meta.size_increment;
 
         // Verify min size
@@ -185,6 +199,25 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
             d.details = "Size " + std::to_string(d.adjusted_size_coin) + " < min " + std::to_string(meta.min_size);
             return d;
         }
+    } else {
+        d.adjusted_size_coin = size_coin;
+    }
+
+    // Compute risk_usd AFTER size normalization so risk reflects actual sized order.
+    // Previously risk_usd was computed from the raw size_coin before rounding down,
+    // which could overstate risk for small-sized trades.
+    d.risk_usd = d.adjusted_size_coin * plan.entry_price * stop_dist_bps / 10000.0;
+
+    // Apply position value cap AFTER risk_usd is computed from the adjusted size.
+    double max_val_usd = state.equity_usd * cfg_.max_position_value_pct / 100.0;
+    if (d.adjusted_size_coin * plan.entry_price > max_val_usd) {
+        double capped_size = max_val_usd / plan.entry_price;
+        if (meta.size_increment > 0.0) {
+            int64_t capped_ticks = static_cast<int64_t>(std::floor(capped_size / meta.size_increment + 1e-9));
+            capped_size = static_cast<double>(capped_ticks) * meta.size_increment;
+        }
+        d.adjusted_size_coin = capped_size;
+        d.risk_usd = d.adjusted_size_coin * plan.entry_price * stop_dist_bps / 10000.0;
     }
 
     // R9. Margin
@@ -221,41 +254,66 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
-    // R13. Funding blackout — funding_times_[ticker] is the timestamp of
-    // the NEXT funding event. Block when now is in the asymmetric window
-    // [next - pre_sec, next + post_sec]. Issue #127.
+    // R12b. News calendar freshness check
+    auto mins_since = news_.minutes_since_latest_event(now);
+    if (mins_since && *mins_since > static_cast<int64_t>(cfg_.news_calendar_check_min)) {
+        LOG_WARN("RiskManager: news calendar stale — latest event is {} min old (limit {} min)",
+                 *mins_since, cfg_.news_calendar_check_min);
+        if (cfg_.news_calendar_require_fresh) {
+            d.reason = RejectReason::NewsBlackout;
+            d.details = "News calendar is stale";
+            return d;
+        }
+    }
+
+    // R13. Funding blackout — pre-window (before next funding)
     auto fit = funding_times_.find(plan.ticker);
     if (fit != funding_times_.end()) {
         const auto next_funding = fit->second;
         const auto secs_to_next =
             std::chrono::duration_cast<std::chrono::seconds>(next_funding - now).count();
-        // secs_to_next > 0 => next is in the future; <= 0 => already passed.
-        const bool in_pre  = secs_to_next > 0 &&
-                             secs_to_next <= cfg_.funding_blackout_pre_sec;
-        const bool in_post = secs_to_next <= 0 &&
-                             -secs_to_next <= cfg_.funding_blackout_post_sec;
-        if (in_pre || in_post) {
+        if (secs_to_next > 0 && secs_to_next <= cfg_.funding_blackout_pre_sec) {
             d.reason  = RejectReason::FundingBlackout;
-            d.details = in_pre ? "Funding blackout (pre-window)"
-                               : "Funding blackout (post-window)";
+            d.details = "Funding blackout (pre-window)";
+            return d;
+        }
+    }
+    // T1-BUGFIX: Post-funding blackout checked against the PREVIOUS funding
+    // timestamp (#204). Previously in_post used funding_times_ (the NEXT event),
+    // which gets overwritten immediately after funding by the WS update,
+    // making the post-window effectively non-existent.
+    auto pit = prev_funding_times_.find(plan.ticker);
+    if (pit != prev_funding_times_.end()) {
+        const auto secs_since =
+            std::chrono::duration_cast<std::chrono::seconds>(now - pit->second).count();
+        if (secs_since >= 0 && secs_since <= cfg_.funding_blackout_post_sec) {
+            d.reason  = RejectReason::FundingBlackout;
+            d.details = "Funding blackout (post-window)";
             return d;
         }
     }
 
     d.accepted = true;
+    trade_history_.push_back(std::chrono::system_clock::now());
     return d;
 }
 
 void RiskManager::update_funding_time(const Ticker& ticker,
                                       std::chrono::system_clock::time_point ts) {
     std::lock_guard lock(mtx_);
+    // T1-BUGFIX: Save the PREVIOUS funding timestamp before overwriting (#204).
+    // When MetaScalp sends the new next_funding_time right after funding,
+    // the post-window would otherwise vanish immediately (within one tick).
+    auto it = funding_times_.find(ticker);
+    if (it != funding_times_.end() && it->second != ts) {
+        prev_funding_times_[ticker] = it->second;
+    }
     funding_times_[ticker] = ts;
 }
 
 void RiskManager::record_trade_end(bool is_loss,
                                    std::chrono::system_clock::time_point ts) {
     std::lock_guard lock(mtx_);
-    trade_history_.push_back(ts);
     loss_history_.push_back({ts, is_loss});
 
     while (!loss_history_.empty() &&

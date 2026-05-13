@@ -2,15 +2,16 @@
 
 #include "strategy/TradePlan.hpp"
 #include "trading/ActiveTrade.hpp"
+#include "utils/FixedString.hpp"
+#include "transport/MarketDataFeed.hpp"
 #include <vector>
-#include <string>
 
 namespace trade_bot {
 
 /**
  * Interface for executing trade plans.
  */
-class IExecutor {
+class IExecutor : public IMarketDataListener {
 public:
     virtual ~IExecutor() = default;
 
@@ -20,7 +21,7 @@ public:
         double      exit_price{0.0};
         double      size_filled{0.0};
         double      pnl_usd{0.0};
-        std::string reason;
+        FixedString<32> reason;
     };
 
     /// Submit a new trade plan for execution.
@@ -43,6 +44,9 @@ public:
 
     /// Inject exchange mark prices for PnL calculation.
     virtual void set_mark_prices(const std::unordered_map<Ticker, double>& marks) = 0;
+
+    /// Close an active trade for the given ticker (strategy-requested invalidation).
+    virtual void close_trade(const Ticker& ticker, const FixedString<32>& reason) = 0;
 };
 
 } // namespace trade_bot

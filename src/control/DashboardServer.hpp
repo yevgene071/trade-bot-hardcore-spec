@@ -4,6 +4,9 @@
 #include "trading/ActiveTrade.hpp"
 #include "logger/TradeJournal.hpp"
 #include "signals/Signal.hpp"
+#include "strategy/IStrategy.hpp"
+#include "features/ChartHistory.hpp"
+#include "marketdata/OrderBook.hpp"
 #include "transport/DumpRecorder.hpp"
 
 #include <boost/asio/io_context.hpp>
@@ -11,6 +14,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -42,14 +46,61 @@ public:
             std::string time_str; // HH:MM:SS.mmm
         };
 
+        struct StrategyStats {
+            std::string name;
+            int         total_trades{0};
+            int         wins{0};
+            int         losses{0};
+            double      total_pnl{0.0};
+            double      best_pnl{0.0};
+            double      worst_pnl{0.0};
+        };
+
+        struct FundingInfo {
+            std::string ticker;
+            double      rate{0.0};
+            int64_t     next_funding_unix{0};
+        };
+
+        struct RiskSnapshot {
+            double margin_used_pct{0.0};
+            double exposure_pct{0.0};
+            int    total_trades_today{0};
+            int    consecutive_losses{0}; // populated by main loop from trade tracking
+            double daily_pnl_pct{0.0};
+            double current_drawdown_pct{0.0};
+        };
+
         AccountState account;
         std::vector<ActiveTrade> open_trades;
         std::vector<TradeJournal::Entry> recent_journal;
         std::map<std::string, int> signal_counts;
         std::vector<UniverseRow> universe_rows;
         std::vector<SignalEvent> recent_signals; // newest first, max 60
+        std::vector<StrategyStats> strategy_stats;
+        std::vector<FundingInfo> funding_info;
+        RiskSnapshot risk;
         bool kill_switch_active{false};
+        bool recorder_active{false};
+        std::string recorder_path;
         std::string version;
+        int64_t server_time_unix{0};
+        
+        struct ConnectionStatus {
+            bool connected{false};
+            int64_t latency_ms{0};
+            std::string connection_name;
+        } metascalp;
+
+        // DS-11: New dashboard fields
+        std::vector<StrategyState>   strategy_states;
+        std::vector<ChartPoint>      chart_history;
+        std::vector<ObLevel>         bids_top20;
+        std::vector<ObLevel>         asks_top20;
+        double                       ob_mid{0.0};
+        double                       ob_spread_bps{0.0};
+        double                       ob_imbalance{0.0};
+        Ticker                       selected_ticker;
     };
 
     /// `auth_token` is compared against the `Authorization: Bearer <token>`
@@ -73,6 +124,13 @@ public:
     /// against a session's own serializer (#120).
     void update_state(const State& state);
 
+    /// DS-10.5: Async version of update_state(). Posts serialization + broadcast
+    /// to the dashboard io_context strand so the trading loop is never blocked
+    /// by JSON serialization of large payloads (strategy_states, chart_history).
+    /// Takes State by value to allow moving from the caller and avoid a
+    /// second copy inside the posted lambda.
+    void update_state_async(State state);
+
     // Wire a DumpRecorder so the dashboard can start/stop it via HTTP.
     void set_recorder(DumpRecorder* recorder);
     bool recorder_start(const std::string& path);
@@ -91,6 +149,10 @@ public:
 
     /// Number of active WS sessions (test diagnostic).
     std::size_t session_count() const;
+
+    /// Store ticker selected by the user via dashboard UI.
+    void set_selected_ticker(std::string ticker);
+    [[nodiscard]] std::string get_selected_ticker() const noexcept;
 
 private:
     void do_accept();
@@ -111,6 +173,8 @@ private:
     // We'll store active WebSocket sessions here
     struct Session;
     std::set<std::shared_ptr<Session>> sessions_;
+
+    std::string selected_ticker_;
 };
 
 } // namespace trade_bot

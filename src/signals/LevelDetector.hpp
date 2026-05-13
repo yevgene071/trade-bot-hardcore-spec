@@ -7,13 +7,16 @@
 #include "numeric/Clustering.hpp"
 #include "numeric/Kde.hpp"
 #include "numeric/Dema.hpp"
+#include "utils/CircularBuffer.hpp"
+#include "utils/FixedString.hpp"
 
 #include <absl/container/flat_hash_map.h>
 
-#include <deque>
 #include <vector>
 
 namespace trade_bot {
+
+class ApproachAnalyzer;
 
 /**
  * T2-LEVEL: Detects horizontal support/resistance levels.
@@ -40,7 +43,7 @@ public:
         double kde_score;
         std::chrono::system_clock::time_point last_touch;
         std::chrono::system_clock::time_point created_at;
-        std::string source; // "extreme", "cluster", "both"
+        FixedString<16> source; // "extreme", "cluster", "both"
         
         double confidence;
     };
@@ -62,6 +65,8 @@ public:
 
     void rebuild();
 
+    void set_approach_analyzer(const ApproachAnalyzer* analyzer) { analyzer_ = analyzer; }
+
     [[nodiscard]] const std::vector<Level>& levels() const { return active_levels_; }
 
 private:
@@ -81,8 +86,10 @@ private:
     const ClusterSnapshotManager& cluster_mgr_;
     Config          cfg_;
 
-    std::deque<std::pair<std::chrono::system_clock::time_point, double>> mid_history_;
-    std::deque<Extreme> extremes_;
+    const ApproachAnalyzer* analyzer_{nullptr};
+
+    CircularBuffer<std::pair<std::chrono::system_clock::time_point, double>, 4096> mid_history_;
+    CircularBuffer<Extreme, 1024> extremes_;
     std::chrono::system_clock::time_point last_rebuild_{};
     
     std::vector<Level> active_levels_;

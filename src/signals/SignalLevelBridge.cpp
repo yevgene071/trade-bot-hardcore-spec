@@ -76,7 +76,10 @@ void SignalLevelBridge::on_server_trigger(int id, const Ticker& ticker, double p
         .ticker = ticker,
         .price = price,
         .confidence = 1.0,
-        .payload = nlohmann::json{{"id", id}, {"source", "server"}}
+        .payload = {
+            .id = FixedString<16>::format("%d", id),
+            .source = "server"
+        }
     };
     bus_.publish(s);
     LOG_INFO("SignalLevelBridge: server level {} triggered for {}", id, ticker);

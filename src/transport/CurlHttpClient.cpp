@@ -76,6 +76,9 @@ HttpResponse CurlHttpClient::perform_request(const std::string& url, const std::
         curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)m_timeout_ms);
 
+        // Force IPv4 for local requests to avoid IPv6 timeout issues in WSL2
+        curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+
         // Required for multithreading safety in some environments
         curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 

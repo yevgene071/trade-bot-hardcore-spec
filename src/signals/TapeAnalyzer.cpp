@@ -7,11 +7,13 @@ TapeAnalyzer::TapeAnalyzer(Ticker ticker,
                           SignalBus& bus,
                           const OrderBook& book,
                           const TradeStream& stream,
+                          const TickerUniverse& universe,
                           Config cfg)
     : ticker_(std::move(ticker))
     , bus_(bus)
     , book_(book)
     , stream_(stream)
+    , universe_(universe)
     , cfg_(cfg)
     , background_intensity_(Ema<double>::from_period(300)) // ~30s at 10Hz
 {}
@@ -19,8 +21,9 @@ TapeAnalyzer::TapeAnalyzer(Ticker ticker,
 TapeAnalyzer::TapeAnalyzer(Ticker ticker,
                           SignalBus& bus,
                           const OrderBook& book,
-                          const TradeStream& stream)
-    : TapeAnalyzer(std::move(ticker), bus, book, stream, Config{}) {}
+                          const TradeStream& stream,
+                          const TickerUniverse& universe)
+    : TapeAnalyzer(std::move(ticker), bus, book, stream, universe, Config{}) {}
 
 void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
     if (frame.ticker != ticker_) return;
@@ -65,10 +68,10 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
                 .ticker = ticker_,
                 .price = frame.mid,
                 .confidence = std::min(1.0, ratio / 10.0),
-                .payload = nlohmann::json{
-                    {"side", burst_side == Side::Buy ? "Buy" : "Sell"},
-                    {"ratio", ratio},
-                    {"intensity", current_rate}
+                .payload = {
+                    .side = burst_side == Side::Buy ? "Buy" : "Sell",
+                    .ratio = ratio,
+                    .intensity = current_rate
                 }
             };
             bus_.publish(s);
@@ -93,10 +96,10 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
                 .ticker = ticker_,
                 .price = frame.mid,
                 .confidence = 1.0,
-                .payload = nlohmann::json{
-                    {"peak_rate", peak_intensity_60s_},
-                    {"current_rate", current_rate},
-                    {"cusum", fade_cusum_.value()}
+                .payload = {
+                    .peak_rate = peak_intensity_60s_,
+                    .current_rate = current_rate,
+                    .cusum = fade_cusum_.value()
                 }
             };
             bus_.publish(s);
@@ -122,7 +125,8 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
     const double volume_usd_30s = total_vol_30s * frame.mid;
     const bool low_dispersion = frame.volatility_1min_bps > 0.0 &&
                                 frame.volatility_1min_bps <= cfg_.distribution_max_range_bps;
-    const bool sustained_volume = volume_usd_30s >= cfg_.distribution_min_volume_usd;
+    const bool sustained_volume = volume_usd_30s >= universe_.calibrated_min_size_usd(
+        ticker_, cfg_.distribution_min_volume_usd);
 
     if (low_dispersion && sustained_volume) {
         if (!distribution_signal_active_) {
@@ -132,10 +136,10 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
                 .ticker = ticker_,
                 .price = frame.mid,
                 .confidence = 1.0,
-                .payload = nlohmann::json{
-                    {"volatility_bps", frame.volatility_1min_bps},
-                    {"volume_usd_30s", volume_usd_30s},
-                    {"max_range_bps", cfg_.distribution_max_range_bps},
+                .payload = {
+                    .volatility_bps = frame.volatility_1min_bps,
+                    .volume_usd_30s = volume_usd_30s,
+                    .max_range_bps = cfg_.distribution_max_range_bps
                 }
             };
             bus_.publish(s);
@@ -154,7 +158,9 @@ void TapeAnalyzer::on_trade(const Trade& trade) {
     
     // Use q99 from T-Digest as adaptive threshold
     double adaptive_threshold = stats.q99_size * trade.price;
-    double min_threshold = std::max(cfg_.flush_min_size_usd, adaptive_threshold);
+    double min_threshold = std::max(
+        universe_.calibrated_min_size_usd(ticker_, cfg_.flush_min_size_usd),
+        adaptive_threshold);
 
     if (size_usd >= min_threshold) {
         // Check price move
@@ -168,9 +174,9 @@ void TapeAnalyzer::on_trade(const Trade& trade) {
                     .ticker = ticker_,
                     .price = trade.price,
                     .confidence = 1.0,
-                    .payload = nlohmann::json{
-                        {"size_usd", size_usd},
-                        {"delta_bps", delta_bps}
+                    .payload = {
+                        .size_usd = size_usd,
+                        .delta_bps = delta_bps
                     }
                 };
                 bus_.publish(s);

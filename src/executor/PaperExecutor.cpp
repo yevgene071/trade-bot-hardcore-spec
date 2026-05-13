@@ -19,6 +19,51 @@ void PaperExecutor::submit(const TradePlan& plan) {
              plan.ticker, plan.entry_price, plan.stop_price);
 }
 
+void PaperExecutor::close_trade(const Ticker& ticker, const FixedString<32>& reason) {
+    LOG_WARN("PaperExecutor: strategy-requested close for {}: {}", ticker, reason);
+    std::lock_guard lock(mutex_);
+    auto pit = positions_.find(ticker);
+    if (pit == positions_.end()) return;
+
+    auto& pos = pit->second;
+    auto bit = books_.find(ticker);
+    double exit_price = 0.0;
+    if (bit != books_.end()) {
+        const auto* book = bit->second;
+        double bid = book->best_bid().value_or(0.0);
+        double ask = book->best_ask().value_or(0.0);
+        if (bid > 0.0 && ask > 0.0) {
+            exit_price = (pos.plan.side == Side::Buy) ? bid : ask;
+        }
+    }
+    if (exit_price == 0.0) {
+        LOG_WARN("PaperExecutor: no book data for {} — using avg_price={} with slippage as exit (small loss)",
+                 ticker, pos.avg_price);
+        exit_price = pos.avg_price;  // fallback to entry (zero PnL)
+    }
+
+    // Apply slippage (consistent with SL/TP exits in tick())
+    double slip = exit_price * (cfg_.slippage_bps / 10000.0);
+    exit_price += (pos.plan.side == Side::Buy) ? -slip : slip;
+
+    double pnl = (pos.plan.side == Side::Buy)
+        ? (exit_price - pos.avg_price) * pos.executed_size
+        : (pos.avg_price - exit_price) * pos.executed_size;
+
+    LOG_INFO("PaperExecutor: closed {} {} at {:.4f} (slip={:.6f}) | PnL: {:.4f} | reason: {}",
+             pos.plan.side == Side::Buy ? "Long" : "Short", ticker, exit_price, slip, pnl, reason);
+
+    ClosedTrade ct;
+    ct.plan = pos.plan;
+    ct.entry_price = pos.avg_price;
+    ct.exit_price = exit_price;
+    ct.size_filled = pos.executed_size;
+    ct.pnl_usd = pnl;
+    ct.reason = reason;
+    closed_trades_.push_back(ct);
+    positions_.erase(pit);
+}
+
 void PaperExecutor::cancel_all(const Ticker& ticker) {
     pending_entries_.erase(
         std::remove_if(pending_entries_.begin(), pending_entries_.end(),
@@ -222,8 +267,17 @@ void PaperExecutor::tick(const Ticker& ticker, std::chrono::system_clock::time_p
                              reason, pos.plan.side == Side::Buy ? "Sell" : "Buy",
                              pos.plan.ticker, exit_price, pnl);
 
-                    closed_trades_.push_back({pos.plan, pos.avg_price, exit_price,
-                                              pos.executed_size, pnl, reason});
+                    {
+                        std::lock_guard lock(mutex_);
+                        ClosedTrade ct;
+                        ct.plan = pos.plan;
+                        ct.entry_price = pos.avg_price;
+                        ct.exit_price = exit_price;
+                        ct.size_filled = pos.executed_size;
+                        ct.pnl_usd = pnl;
+                        ct.reason = reason.c_str();
+                        closed_trades_.push_back(ct);
+                    }
                     positions_.erase(pit);
                 }
             }
@@ -232,6 +286,7 @@ void PaperExecutor::tick(const Ticker& ticker, std::chrono::system_clock::time_p
 }
 
 std::vector<IExecutor::ClosedTrade> PaperExecutor::pop_closed_trades() {
+    std::lock_guard lock(mutex_);
     std::vector<ClosedTrade> result;
     result.swap(closed_trades_);
     return result;

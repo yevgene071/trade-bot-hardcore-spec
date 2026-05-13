@@ -47,9 +47,6 @@ void ApproachAnalyzer::on_frame(const FeatureFrame& frame) {
     if (frame.ticker != ticker_) return;
     
     history_.push_back({frame.timestamp, frame.mid});
-    while (!history_.empty() && (frame.timestamp - history_.front().first) > cfg_.window) {
-        history_.pop_front();
-    }
 }
 
 void ApproachAnalyzer::on_trade(const Trade& /*trade*/) {}
@@ -61,12 +58,14 @@ ApproachAnalyzer::Analysis ApproachAnalyzer::analyze(double level_price,
     if (history_.size() < 10) return {ApproachType::Unknown, 0, 0, 0, 0, 0};
 
     std::vector<double> prices(history_.size());
-    std::transform(history_.begin(), history_.end(), prices.begin(), [](const auto& h) { return h.second; });
+    for (size_t i = 0; i < history_.size(); ++i) {
+        prices[i] = history_[i].second;
+    }
 
     auto peaks = ZigZag::calculate(prices, cfg_.pullback_min_bps);
     int pullbacks = static_cast<int>(std::count_if(peaks.begin(), peaks.end(), [](const auto& p) { return !p.is_high; }));
     double duration = std::chrono::duration<double>(history_.back().first - history_.front().first).count();
-    double dist_bps = std::abs(history_.back().second - history_.front().second) / history_.front().second * kBpsBase;
+    double dist_bps = std::abs(history_.back().second - history_.front().second) / history_[0].second * kBpsBase;
     double speed = dist_bps / std::max(0.1, duration);
 
     // Repeating observation 5 times effectively sharpens the posterior.

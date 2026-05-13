@@ -40,4 +40,19 @@ bool FinresHandler::is_ready(int connection_id) const {
     return it != states_.end() && it->second.initialized;
 }
 
+std::optional<FinresHandler::Snapshot> FinresHandler::get_snapshot(int connection_id) const {
+    std::lock_guard lock(mutex_);
+    auto it = states_.find(connection_id);
+    if (it != states_.end() && it->second.initialized) {
+        // MetaScalp 'result' is total account value (equity). 
+        // For simplicity, we use it for both equity and free balance until 
+        // separate BalanceUpdate/PositionUpdate logic is fully integrated.
+        return Snapshot{
+            .balance = it->second.current_result,
+            .equity = it->second.current_result
+        };
+    }
+    return std::nullopt;
+}
+
 } // namespace trade_bot

@@ -34,9 +34,9 @@ struct TickerMeta {
  * T1-UNIVERSE: pool of tickers + per-strategy affinity layer.
  *
  * Pool layer  : caller feeds available tickers (e.g. via OrderGateway), the
- *               filter chain (manual deny → manual allow → static glob
- *               patterns → dynamic stats gate) selects up to `max_pool_size`,
- *               ordered by 24h volume.
+ *               filter chain (manual deny → static glob patterns →
+ *               dynamic stats gate, with screener-approved bypass)
+ *               selects up to `max_pool_size`, ordered by 24h volume.
  *
  * Affinity layer: for each ticker in the pool and each registered strategy,
  *               an affinity score function decides whether the strategy is
@@ -64,6 +64,24 @@ public:
         double                   min_volume_24h_usd{1'000'000.0};
         double                   max_avg_spread_bps{20.0};
         std::chrono::seconds     boost_ttl{300};
+        /// Multiplier applied to min_volume_24h_usd based on exchange.
+        /// MEXC (~0.1x Binance volume) → 0.1; Binance → 1.0.
+        double                   exchange_volume_multiplier{1.0};
+
+        // ── Per-coin dynamic threshold scaling ────────────────
+        /// When true, signal-detector thresholds are scaled per-coin
+        /// based on 24h volume relative to the reference.
+        bool   dynamic_thresholds_enabled{true};
+        /// Reference 24h volume (USD) — the "standard" coin volume.
+        /// Coins with higher volume get scaled up; lower → scaled down.
+        double dynamic_thresholds_reference_volume{500'000'000.0};  // 500M
+        /// Floor / ceiling for the per-coin scale factor.
+        double dynamic_thresholds_min_scale{0.15};
+        double dynamic_thresholds_max_scale{5.0};
+        /// Absolute floor for calibrated_min_size_usd as a ratio of config_default.
+        /// Prevents thresholds from collapsing below 10% of their original value
+        /// even for the smallest coins on the lowest-volume exchanges.
+        double dynamic_thresholds_floor_ratio{0.10};
     };
 
     TickerUniverse();
@@ -75,6 +93,10 @@ public:
     }
 
     void set_stats_lookup(StatsLookup fn);
+    /// Lookup stats for a ticker using the configured stats provider.
+    std::optional<TickerStats> get_stats(const Ticker& ticker) const {
+        return stats_lookup_ ? stats_lookup_(ticker) : std::nullopt;
+    }
     void set_affinity_change_handler(AffinityChange fn);
     void register_strategy(const std::string& name, AffinityScore fn);
 
@@ -111,6 +133,22 @@ public:
     /// These are the candidates `on_screener_new_coin` will draw from.
     void seed_candidates(const std::vector<Ticker>& candidates);
 
+    // ── Per-coin dynamic threshold helpers ─────────────────
+
+    /// Returns a per-coin scale factor ∈ [cfg_.dynamic_thresholds_min_scale,
+    /// cfg_.dynamic_thresholds_max_scale] computed from the coin's 24h volume
+    /// relative to cfg_.dynamic_thresholds_reference_volume.
+    /// Returns 1.0 when dynamic thresholds are disabled or stats unavailable.
+    [[nodiscard]] double volume_scale_factor(const Ticker& ticker) const;
+
+    /// Convenience: calibrated min-size-usd for a detector, applying both
+    /// the per-coin scale factor AND the exchange volume multiplier.
+    [[nodiscard]] double calibrated_min_size_usd(const Ticker& ticker,
+                                                  double config_default) const;
+
+    /// Force-refresh scale factor cache from current stats (call after pool rebuild).
+    void refresh_scale_factors();
+
 private:
     bool passes_filter_(const Ticker& ticker, double& out_volume) const;
 
@@ -128,6 +166,9 @@ private:
 
     std::set<Ticker>                               screener_approved_;  // tickers from MetaScalp screener
     std::vector<Ticker>                            all_candidates_;     // full static-filtered list
+
+    // Per-coin cached scale factors (computed from 24h volume stats).
+    std::unordered_map<Ticker, double>             scale_factors_;
 };
 
 }  // namespace trade_bot

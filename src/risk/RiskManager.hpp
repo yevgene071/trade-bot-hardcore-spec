@@ -21,6 +21,7 @@ public:
     struct Config {
         double max_daily_loss_pct{3.0};
         int    max_concurrent_positions{3};
+        int    max_positions_per_ticker{1};
         bool   allow_hedge{false};
         
         double min_stop_bps{3.0};
@@ -43,10 +44,12 @@ public:
         int    loss_streak_cooloff_min{10};
         
         int    news_blackout_min{5};
+        int    news_calendar_check_min{60};
+        bool   news_calendar_require_fresh{false};
         int    funding_blackout_pre_sec{30};
         int    funding_blackout_post_sec{30};
         
-        std::vector<std::string> whitelist_tickers{"BTCUSDT", "ETHUSDT", "SOLUSDT"};
+        std::vector<std::string> whitelist_tickers;
     };
 
     RiskManager(const TickerUniverse& universe, 
@@ -84,6 +87,10 @@ private:
     std::deque<std::pair<std::chrono::system_clock::time_point, bool>> loss_history_;
     std::chrono::system_clock::time_point                           last_loss_streak_ts_;
     std::unordered_map<Ticker, std::chrono::system_clock::time_point> funding_times_;
+    // T1-BUGFIX: Track previous funding timestamp for post-funding blackout (#204).
+    // funding_times_ holds the NEXT event; prev_funding_times_ holds the most recent
+    // PAST event so the post-window survives the immediate WS update of next_funding_time.
+    std::unordered_map<Ticker, std::chrono::system_clock::time_point> prev_funding_times_;
 };
 
 } // namespace trade_bot

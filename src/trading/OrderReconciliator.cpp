@@ -115,6 +115,7 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(const Ticker& 
                     /*outcome=*/ReconcileOutcome::NotFoundTimeout,
                     /*local=*/p.intent.local_order_id,
                     /*server=*/std::nullopt,
+                    /*intent=*/p.intent,
                     /*note=*/std::string{"timeout after fetch errors"},
                 });
                 pending_.erase(it);
@@ -125,7 +126,7 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(const Ticker& 
             } else {
                 out.push_back(ReconcileResult{
                     /*outcome=*/ReconcileOutcome::Pending, p.intent.local_order_id,
-                    std::nullopt, std::nullopt,
+                    std::nullopt, p.intent, std::nullopt,
                 });
             }
         }
@@ -150,6 +151,7 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(const Ticker& 
                 /*outcome=*/ReconcileOutcome::Resolved,
                 /*local=*/p.intent.local_order_id,
                 /*server=*/matched,
+                /*intent=*/p.intent,
                 /*note=*/std::nullopt,
             });
             pending_.erase(it);
@@ -169,6 +171,7 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(const Ticker& 
                 /*outcome=*/ReconcileOutcome::NotFoundTimeout,
                 /*local=*/p.intent.local_order_id,
                 /*server=*/std::nullopt,
+                /*intent=*/p.intent,
                 /*note=*/std::string{"deadline exceeded; manual intervention required"},
             });
             pending_.erase(it);
@@ -188,6 +191,7 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(const Ticker& 
                 /*outcome=*/ReconcileOutcome::Pending,
                 /*local=*/p.intent.local_order_id,
                 /*server=*/std::nullopt,
+                /*intent=*/p.intent,
                 /*note=*/std::nullopt,
             });
         }

@@ -1,6 +1,7 @@
 #include "ClusterSnapshotClient.hpp"
 #include "MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
+#include "utils/UrlEncoder.hpp"
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -19,8 +20,8 @@ std::optional<ClusterSnapshot> ClusterSnapshotClient::fetch(const Ticker& ticker
                                                           int zoom_index) {
     std::stringstream ss;
     ss << base_url_ << "/api/connections/" << connection_id_ << "/cluster-snapshot"
-       << "?Ticker=" << ticker
-       << "&TimeFrame=" << timeframe
+       << "?Ticker=" << url_encode(ticker)
+       << "&TimeFrame=" << url_encode(timeframe)
        << "&ZoomIndex=" << zoom_index;
 
     try {

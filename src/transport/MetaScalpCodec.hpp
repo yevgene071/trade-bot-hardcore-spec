@@ -93,13 +93,21 @@ public:
     static Notification    parse_notification(const nlohmann::json& j);
     static SignalLevel     parse_signal_level(const nlohmann::json& j);
     static OrderbookSettings parse_orderbook_settings(const nlohmann::json& j);
+
     static FinresUpdate parse_finres_update(const nlohmann::json& j);
     static SignalLevelTriggered parse_signal_level_triggered(const nlohmann::json& j);
+    static NotificationKind parse_notification_type(const std::string& type_str);
+    static int parse_market_type(const nlohmann::json& v);
     
     static ConnectionInfo parse_connection_info(const nlohmann::json& j);
     static TickerInfo parse_ticker_info(const nlohmann::json& j);
 
+    /// Normalize ticker to underscore format (e.g. "BTCUSDT" → "BTC_USDT").
+    /// Ensures consistency between REST API ticker names and WebSocket notification tickers.
+    static Ticker normalize_ticker(const Ticker& raw);
+
     static Side parse_side(const nlohmann::json& v);
+
     static OrderType parse_order_type(const nlohmann::json& v);
     static OrderStatus parse_order_status(const nlohmann::json& v);
     static PositionStatus parse_position_status(const nlohmann::json& v);

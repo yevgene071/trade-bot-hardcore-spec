@@ -36,15 +36,47 @@ void NotificationFeed::stop() {
 
 void NotificationFeed::handle_message_(const nlohmann::json& j) {
     const std::string type = j.value("Type", "");
+
+    // notification_subscribed is just an ack — no data to process
+    if (type == "notification_subscribed") {
+        LOG_INFO("NotificationFeed: subscription confirmed");
+        return;
+    }
+
     if (type == "notification_snapshot" || type == "notification_update") {
         const auto& data = j["Data"];
-        if (data.is_array()) {
+
+        // MetaScalp sends notifications wrapped in {"Notifications": [...]} or {"notifications": [...]}
+        const nlohmann::json* notifications_ptr = nullptr;
+        if (data.is_object()) {
+            if (data.contains("Notifications")) {
+                notifications_ptr = &data["Notifications"];
+            } else if (data.contains("notifications")) {
+                notifications_ptr = &data["notifications"];
+            }
+        }
+
+        if (notifications_ptr && notifications_ptr->is_array()) {
+            for (const auto& item : *notifications_ptr) {
+                route_notification_(MetaScalpCodec::parse_notification(item));
+            }
+        } else if (data.is_object() && !notifications_ptr) {
+            // Fallback: bare notification object directly in Data (backward compat)
+            route_notification_(MetaScalpCodec::parse_notification(data));
+        } else if (data.is_array()) {
+            // Some APIs may send a bare array — handle for compatibility
             for (const auto& item : data) {
                 route_notification_(MetaScalpCodec::parse_notification(item));
             }
         } else {
-            route_notification_(MetaScalpCodec::parse_notification(data));
+            LOG_WARN("NotificationFeed: unexpected {} data format: {}", type, data.dump(0));
         }
+        return;
+    }
+
+    // Ignore heartbeat/pong/other messages silently (they're frequent)
+    if (type != "pong" && type != "heartbeat") {
+        LOG_DEBUG("NotificationFeed: unhandled message type: {}", type);
     }
 }
 
@@ -70,6 +102,7 @@ void NotificationFeed::route_notification_(const Notification& n) {
             universe_.on_big_amount(n.ticker, n.size * n.price, n.timestamp);
             break;
         case NotificationKind::ScreenerNewCoin:
+            LOG_INFO("[Universe] NotificationFeed: ScreenerNewCoin for {}", n.ticker);
             universe_.on_screener_new_coin(n.ticker);
             break;
         default:
