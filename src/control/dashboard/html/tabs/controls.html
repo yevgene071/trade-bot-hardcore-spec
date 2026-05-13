@@ -1,0 +1,32 @@
+<!-- CONTROLS TAB -->
+<div class="tab-content" id="tab-controls">
+  <div class="scrollable">
+    <div class="card"><div class="card-head"><h3>Dump Recorder</h3></div>
+      <div class="card-body">
+        <div class="ctrl-group" style="margin-bottom:10px;">
+          <input class="ctrl-input" id="rec-filename" placeholder="dump_name" style="width:160px;">
+          <button class="ctrl-btn primary" id="rec-start-btn" onclick="startRecorder()">&#x25B6; Start</button>
+          <button class="ctrl-btn danger" id="rec-stop-btn" onclick="stopRecorder()" disabled>&#x25A0; Stop</button>
+          <span id="rec-status" style="font-size:11px;color:var(--muted);">Idle</span>
+        </div>
+        <div id="rec-path" style="font-family:var(--mono);font-size:11px;color:var(--subtle);"></div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><h3>Connections</h3></div>
+        <div class="card-body">
+          <div style="display:flex;flex-direction:column;gap:4px;font-size:10px;">
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">MetaScalp:</span><span id="cfg-ms-conn">—</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Latency:</span><span id="cfg-ms-lat">—</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Mode:</span><span id="cfg-mode" style="font-weight:700;">—</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Max positions:</span><span id="cfg-pos" style="font-weight:700;">3</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Version:</span><span id="cfg-version" style="font-weight:700;">—</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="card"><div class="card-head"><h3>System Logs</h3></div>
+        <div class="card-body" id="log-feed" style="max-height:200px;overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+</div>

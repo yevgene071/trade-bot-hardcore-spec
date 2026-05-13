@@ -1,0 +1,61 @@
+<!-- COMMAND TAB -->
+<div class="tab-content active" id="tab-command">
+  <div class="scrollable">
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Account</h3></div>
+        <div class="card-body">
+          <div class="kpi-grid">
+            <div class="kpi"><div class="kpi-label">Equity</div><div class="kpi-value xl" id="equity-val">$0.00</div></div>
+            <div class="kpi"><div class="kpi-label">P&amp;L Today</div><div class="kpi-value xl" id="pnl-today">$0.00</div></div>
+            <div class="kpi"><div class="kpi-label">Free Balance</div><div class="kpi-value lg" id="free-bal">$0.00</div></div>
+            <div class="kpi"><div class="kpi-label">Unrealized</div><div class="kpi-value lg" id="unreal-pnl">$0.00</div></div>
+          </div>
+          <div class="chart-container lg" id="eq-chart" style="margin-top:8px;"></div>
+          <div class="kpi-grid col4" style="margin-top:8px;">
+            <div class="kpi"><div class="kpi-label">Win Rate</div><div class="kpi-value" id="m-wr">0%</div></div>
+            <div class="kpi"><div class="kpi-label">PF</div><div class="kpi-value" id="m-pf">0.0</div></div>
+            <div class="kpi"><div class="kpi-label">Trades</div><div class="kpi-value" id="m-trades">0</div></div>
+            <div class="kpi"><div class="kpi-label">Drawdown</div><div class="kpi-value" id="max-dd">0%</div></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="card" style="flex:1;">
+          <div class="card-head"><h3>Risk Dashboard</h3></div>
+          <div class="card-body">
+            <div style="display:flex;align-items:center;gap:16px;">
+              <div class="gauge-container"><div class="gauge-ring" id="margin-gauge"></div><div class="gauge-label">Margin Used</div></div>
+              <div class="gauge-container"><div class="gauge-ring" id="exposure-gauge"></div><div class="gauge-label">Exposure</div></div>
+              <div class="gauge-container"><div class="gauge-ring" id="daily-pnl-gauge"></div><div class="gauge-label">Daily PnL</div></div>
+            </div>
+            <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+              <div class="kpi-label" style="margin-bottom:2px;">Daily Loss Limit</div>
+              <div class="progress-bar"><div class="progress-fill" id="loss-limit-bar" style="width:0%;background:var(--accent);"></div></div>
+              <div class="kpi-label" style="margin-bottom:2px;margin-top:8px;">Position Slots (0/3)</div>
+              <div class="progress-bar"><div class="progress-fill" id="pos-slots-bar" style="width:0%;background:var(--accent2);"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="flex:1;">
+          <div class="card-head"><h3>Strategy Performance</h3></div>
+          <div class="card-body" id="strat-perf-body"><div class="empty-state">No trade data yet</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>Strategy Heatmap</h3>
+        <div class="filter-row" id="hm-filters"></div>
+      </div>
+      <div class="card-body" style="padding:2px;">
+        <div class="heatmap-grid" id="heatmap-body"></div>
+        <div class="detail-panel" id="hm-detail"></div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><h3>Signal Activity</h3></div><div class="card-body" id="sig-cnt-body"></div></div>
+      <div class="card"><div class="card-head"><h3>Funding Rates</h3></div><div class="card-body" style="padding:0;"><table><thead><tr><th>Ticker</th><th>Rate</th><th>Next</th></tr></thead><tbody id="funding-tbody"></tbody></table></div></div>
+    </div>
+  </div>
+</div>

@@ -109,17 +109,30 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # ═══════════════════════════════════════════════════════════════
-# Dashboard HTML embedding (portable Python replacement for xxd)
+# Dashboard HTML pipeline
+#   1. inline_dashboard.py  : modular sources → single bundled HTML
+#      (Phase 0 of epic #236: passthrough copy; later phases will
+#       inline HTML fragments / CSS chunks / JS modules.)
+#   2. embed_html.py        : bundled HTML → C header (xxd replacement)
 # ═══════════════════════════════════════════════════════════════
-set(DASHBOARD_HTML_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard.html")
-set(DASHBOARD_HTML_H   "${CMAKE_CURRENT_BINARY_DIR}/dashboard_html.h")
-set(EMBED_HTML_PY      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_html.py")
+set(DASHBOARD_HTML_SRC      "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard/index.html")
+set(DASHBOARD_HTML_BUNDLED  "${CMAKE_CURRENT_BINARY_DIR}/dashboard.bundled.html")
+set(DASHBOARD_HTML_H        "${CMAKE_CURRENT_BINARY_DIR}/dashboard_html.h")
+set(INLINE_DASHBOARD_PY     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/inline_dashboard.py")
+set(EMBED_HTML_PY           "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_html.py")
+
+add_custom_command(
+    OUTPUT ${DASHBOARD_HTML_BUNDLED}
+    COMMAND ${Python3_EXECUTABLE} ${INLINE_DASHBOARD_PY} ${DASHBOARD_HTML_SRC} ${DASHBOARD_HTML_BUNDLED}
+    DEPENDS ${DASHBOARD_HTML_SRC} ${INLINE_DASHBOARD_PY}
+    COMMENT "Bundling dashboard → dashboard.bundled.html"
+)
 
 add_custom_command(
     OUTPUT ${DASHBOARD_HTML_H}
-    COMMAND ${Python3_EXECUTABLE} ${EMBED_HTML_PY} ${DASHBOARD_HTML_SRC} ${DASHBOARD_HTML_H}
-    DEPENDS ${DASHBOARD_HTML_SRC} ${EMBED_HTML_PY}
-    COMMENT "Embedding dashboard.html → dashboard_html.h"
+    COMMAND ${Python3_EXECUTABLE} ${EMBED_HTML_PY} ${DASHBOARD_HTML_BUNDLED} ${DASHBOARD_HTML_H}
+    DEPENDS ${DASHBOARD_HTML_BUNDLED} ${EMBED_HTML_PY}
+    COMMENT "Embedding dashboard.bundled.html → dashboard_html.h"
 )
 
 # ═══════════════════════════════════════════════════════════════

@@ -370,241 +370,26 @@ tr.pos-detail td { padding: 4px 8px; font-size: 11px; background: var(--surface)
 </style>
 </head>
 <body>
-<div id="ks-banner"><span>&#x26A0;</span> KILL-SWITCH ACTIVE — All trading suspended</div>
-<div id="toasts"></div>
+<!-- include: html/kill-switch-banner.html -->
+<!-- include: html/toast-container.html -->
 
-<header>
-  <div class="brand">
-    <div class="brand-icon"></div>
-    <span class="brand-text">TRADE BOT</span>
-    <span class="brand-sub" id="v-tag">v0.0.1</span>
-  </div>
-  <div class="header-center">
-    <div id="pnl-badge" class="pnl-badge up">$0.00</div>
-    <div class="uptime" id="uptime">00:00:00</div>
-  </div>
-  <div class="header-right">
-    <div class="status-item">
-      <div id="rec-dot" class="rec-dot" title="Dump recorder"></div>
-      <span id="rec-label" style="font-size:10px;color:var(--muted);">REC</span>
-    </div>
-    <div class="status-item"><span>MS</span><div id="ms-dot" class="dot"></div><span id="ms-label" class="mono">OFF</span></div>
-    <div class="status-item"><span>WS</span><div id="ws-dot" class="dot"></div><span id="ws-label" class="mono">OFF</span></div>
-    <div id="clock" class="mono" style="color:var(--text);font-weight:700;font-size:11px;"></div>
-  </div>
-</header>
+<!-- include: html/header.html -->
 
-<div id="tab-bar">
-  <button class="tab-btn active" data-tab="command">&#x1F3AF; Command</button>
-  <button class="tab-btn" data-tab="trading">📈 Trading</button>
-  <button class="tab-btn" data-tab="positions">💼 Positions<span id="pos-tab-badge" class="tab-badge" style="display:none;">0</span></button>
-  <button class="tab-btn" data-tab="signals">⚡ Signals<span id="sig-tab-badge" class="tab-badge" style="display:none;">0</span></button>
-  <button class="tab-btn" data-tab="universe">&#x1F310; Universe<span id="uni-tab-badge" class="tab-badge" style="display:none;">0</span></button>
-  <button class="tab-btn" data-tab="journal">&#x1F4CB; Journal<span id="jrn-tab-badge" class="tab-badge" style="display:none;">0</span></button>
-  <button class="tab-btn" data-tab="controls">&#x2699; Controls</button>
-</div>
+<!-- include: html/tab-bar.html -->
 
-<!-- COMMAND TAB -->
-<div class="tab-content active" id="tab-command">
-  <div class="scrollable">
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-head"><h3>Account</h3></div>
-        <div class="card-body">
-          <div class="kpi-grid">
-            <div class="kpi"><div class="kpi-label">Equity</div><div class="kpi-value xl" id="equity-val">$0.00</div></div>
-            <div class="kpi"><div class="kpi-label">P&amp;L Today</div><div class="kpi-value xl" id="pnl-today">$0.00</div></div>
-            <div class="kpi"><div class="kpi-label">Free Balance</div><div class="kpi-value lg" id="free-bal">$0.00</div></div>
-            <div class="kpi"><div class="kpi-label">Unrealized</div><div class="kpi-value lg" id="unreal-pnl">$0.00</div></div>
-          </div>
-          <div class="chart-container lg" id="eq-chart" style="margin-top:8px;"></div>
-          <div class="kpi-grid col4" style="margin-top:8px;">
-            <div class="kpi"><div class="kpi-label">Win Rate</div><div class="kpi-value" id="m-wr">0%</div></div>
-            <div class="kpi"><div class="kpi-label">PF</div><div class="kpi-value" id="m-pf">0.0</div></div>
-            <div class="kpi"><div class="kpi-label">Trades</div><div class="kpi-value" id="m-trades">0</div></div>
-            <div class="kpi"><div class="kpi-label">Drawdown</div><div class="kpi-value" id="max-dd">0%</div></div>
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        <div class="card" style="flex:1;">
-          <div class="card-head"><h3>Risk Dashboard</h3></div>
-          <div class="card-body">
-            <div style="display:flex;align-items:center;gap:16px;">
-              <div class="gauge-container"><div class="gauge-ring" id="margin-gauge"></div><div class="gauge-label">Margin Used</div></div>
-              <div class="gauge-container"><div class="gauge-ring" id="exposure-gauge"></div><div class="gauge-label">Exposure</div></div>
-              <div class="gauge-container"><div class="gauge-ring" id="daily-pnl-gauge"></div><div class="gauge-label">Daily PnL</div></div>
-            </div>
-            <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
-              <div class="kpi-label" style="margin-bottom:2px;">Daily Loss Limit</div>
-              <div class="progress-bar"><div class="progress-fill" id="loss-limit-bar" style="width:0%;background:var(--accent);"></div></div>
-              <div class="kpi-label" style="margin-bottom:2px;margin-top:8px;">Position Slots (0/3)</div>
-              <div class="progress-bar"><div class="progress-fill" id="pos-slots-bar" style="width:0%;background:var(--accent2);"></div></div>
-            </div>
-          </div>
-        </div>
-        <div class="card" style="flex:1;">
-          <div class="card-head"><h3>Strategy Performance</h3></div>
-          <div class="card-body" id="strat-perf-body"><div class="empty-state">No trade data yet</div></div>
-        </div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-head">
-        <h3>Strategy Heatmap</h3>
-        <div class="filter-row" id="hm-filters"></div>
-      </div>
-      <div class="card-body" style="padding:2px;">
-        <div class="heatmap-grid" id="heatmap-body"></div>
-        <div class="detail-panel" id="hm-detail"></div>
-      </div>
-    </div>
-    <div class="grid-2">
-      <div class="card"><div class="card-head"><h3>Signal Activity</h3></div><div class="card-body" id="sig-cnt-body"></div></div>
-      <div class="card"><div class="card-head"><h3>Funding Rates</h3></div><div class="card-body" style="padding:0;"><table><thead><tr><th>Ticker</th><th>Rate</th><th>Next</th></tr></thead><tbody id="funding-tbody"></tbody></table></div></div>
-    </div>
-  </div>
-</div>
+<!-- include: html/tabs/command.html -->
 
-<!-- TRADING TAB (merged Charts + Order Book) -->
-<div class="tab-content" id="tab-trading">
-  <div class="trade-grid" style="height:100%;padding:8px;">
-    <!-- Left: DOM Ladder -->
-    <div class="ladder-panel">
-      <div class="ladder-head">
-        <div class="ladder-tickers" id="trade-tickers"></div>
-        <div class="ladder-kpis">
-          <div class="ladder-kpi"><div class="ladder-kpi-l">Spread</div><div class="ladder-kpi-v" id="trade-spread-val">—</div></div>
-          <div class="ladder-kpi"><div class="ladder-kpi-l">Ticks</div><div class="ladder-kpi-v" id="trade-sticks-val">—</div></div>
-          <div class="ladder-kpi"><div class="ladder-kpi-l">Imb</div><div class="ladder-kpi-v" id="trade-imb-val">—</div></div>
-        </div>
-      </div>
-      <div class="ladder-wrap" id="trade-ladder-wrap">
-        <div id="trade-mid-line"></div>
-        <div id="trade-mid-tag"></div>
-        <div id="trade-ladder"></div>
-      </div>
-    </div>
+<!-- include: html/tabs/trading.html -->
 
-    <!-- Right: Charts -->
-    <div class="chart-panel">
-      <div class="chart-panel-head">
-        <span class="c-pill" id="trade-chart-name">BTC_USDT</span>
-        <div style="display:flex;gap:3px;" id="trade-tf-buttons">
-          <button class="tf-btn" data-tf="30">30s</button>
-          <button class="tf-btn active" data-tf="300">5m</button>
-          <button class="tf-btn" data-tf="900">15m</button>
-          <button class="tf-btn" data-tf="3600">1h</button>
-          <input class="ctrl-input" id="tf-custom" type="number" min="10" max="300" placeholder="N" title="Custom bars (10-300)" style="width:36px;font-size:9px;padding:1px 4px;">
-        </div>
-        <span class="c-price" id="trade-chart-last">—</span>
-        <span class="c-pct up" id="trade-chart-pct">—</span>
-        <span id="zoom-indicator" style="display:none;font-size:10px;color:var(--accent2);margin-left:8px;cursor:pointer;" title="Double-click chart to reset zoom">&#x1F50D; Zoomed <span id="zoom-range"></span> &#x2716;</span>
-      </div>
-      <div class="chart-panel-body" id="trade-chart-body" style="position:relative;">
-        <div id="zoom-overlay" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;cursor:crosshair;z-index:10;">
-          <div id="zoom-select" style="position:absolute;top:0;bottom:0;background:rgba(99,102,241,0.15);border-left:1px solid var(--accent);border-right:1px solid var(--accent);display:none;"></div>
-        </div>
-      </div>
-    </div>
+<!-- include: html/tabs/positions.html -->
 
-    <!-- Mini charts row -->
-    <div class="minis-row" style="grid-column:2;">
-      <div class="card" style="background:var(--surface-glass);"><div class="card-head" style="padding:3px 8px;"><h3 style="font-size:9px;">Spread</h3></div><div class="card-body" style="padding:4px;"><div class="chart-container sm" id="trade-mini-spread" style="height:50px;"></div></div></div>
-      <div class="card" style="background:var(--surface-glass);"><div class="card-head" style="padding:3px 8px;"><h3 style="font-size:9px;">Vol</h3></div><div class="card-body" style="padding:4px;"><div class="chart-container sm" id="trade-mini-vol" style="height:50px;"></div></div></div>
-      <div class="card" style="background:var(--surface-glass);"><div class="card-head" style="padding:3px 8px;"><h3 style="font-size:9px;">Aggr</h3></div><div class="card-body" style="padding:4px;"><div class="chart-container sm" id="trade-mini-agg" style="height:50px;"></div></div></div>
-      <div class="card" style="background:var(--surface-glass);"><div class="card-head" style="padding:3px 8px;"><h3 style="font-size:9px;">Corr</h3></div><div class="card-body" style="padding:4px;"><div class="chart-container sm" id="trade-mini-corr" style="height:50px;"></div></div></div>
-    </div>
-  </div>
-</div>
+<!-- include: html/tabs/signals.html -->
 
-<!-- POSITIONS TAB -->
-<div class="tab-content" id="tab-positions">
-  <div class="scrollable">
-    <div class="card" style="flex:1;">
-      <div class="card-head"><h3>Active Positions</h3><span id="pos-count" class="mono" style="color:var(--accent);font-weight:800;font-size:12px;">0</span></div>
-      <div class="card-body" style="padding:0;">
-        <table><thead><tr><th>Ticker</th><th>Side</th><th>Entry</th><th>Mark</th><th>Stop</th><th>TP1</th><th>PnL</th><th>Progress</th></tr></thead><tbody id="pos-body"></tbody></table>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-head"><h3>Live Signal Stream</h3><span id="sig-stream-count" style="font-size:11px;color:var(--subtle);">0</span></div>
-      <div class="card-body feed" id="sig-feed" style="max-height:200px;"></div>
-    </div>
-  </div>
-</div>
+<!-- include: html/tabs/universe.html -->
 
-<!-- SIGNALS TAB -->
-<div class="tab-content" id="tab-signals">
-  <div class="scrollable">
-    <div class="card" style="flex:1;">
-      <div class="card-head"><h3>Signal Stream</h3><div class="filter-row" id="sig-filter-row"></div></div>
-      <div class="card-body feed" id="sig-feed-full"></div>
-    </div>
-  </div>
-</div>
+<!-- include: html/tabs/journal.html -->
 
-<!-- UNIVERSE TAB -->
-<div class="tab-content" id="tab-universe">
-  <div class="scrollable">
-    <div class="card" style="flex:1;">
-      <div class="card-head"><h3>Ticker Universe</h3><div class="filter-row" id="uni-filter-row"></div></div>
-      <div class="card-body" style="padding:0;">
-        <table><thead><tr><th>Ticker</th><th>Mark</th><th>Strategies</th></tr></thead><tbody id="uni-body"></tbody></table>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- JOURNAL TAB -->
-<div class="tab-content" id="tab-journal">
-  <div class="scrollable">
-    <div style="display:flex;gap:8px;margin-bottom:4px;">
-      <select id="jrn-strat-filter" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;"><option value="">All strategies</option></select>
-      <button class="ctrl-btn success" onclick="exportCSV()" style="font-size:10px;padding:2px 8px;">&#x2913; CSV</button>
-    </div>
-    <div class="chart-container md" id="jrn-pnl-chart" style="margin-bottom:8px;"></div>
-    <div class="card" style="flex:1;">
-      <div class="card-head"><h3>Trade Journal</h3><span id="jrn-count" style="font-size:11px;color:var(--subtle);">0</span></div>
-      <div class="card-body" style="padding:0;">
-        <table><thead><tr><th>Time</th><th>Ticker</th><th>Side</th><th>Strategy</th><th>PnL</th><th>Exit Price</th><th>Reason</th></tr></thead><tbody id="jrn-body"></tbody></table>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- CONTROLS TAB -->
-<div class="tab-content" id="tab-controls">
-  <div class="scrollable">
-    <div class="card"><div class="card-head"><h3>Dump Recorder</h3></div>
-      <div class="card-body">
-        <div class="ctrl-group" style="margin-bottom:10px;">
-          <input class="ctrl-input" id="rec-filename" placeholder="dump_name" style="width:160px;">
-          <button class="ctrl-btn primary" id="rec-start-btn" onclick="startRecorder()">&#x25B6; Start</button>
-          <button class="ctrl-btn danger" id="rec-stop-btn" onclick="stopRecorder()" disabled>&#x25A0; Stop</button>
-          <span id="rec-status" style="font-size:11px;color:var(--muted);">Idle</span>
-        </div>
-        <div id="rec-path" style="font-family:var(--mono);font-size:11px;color:var(--subtle);"></div>
-      </div>
-    </div>
-    <div class="grid-2">
-      <div class="card"><div class="card-head"><h3>Connections</h3></div>
-        <div class="card-body">
-          <div style="display:flex;flex-direction:column;gap:4px;font-size:10px;">
-            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">MetaScalp:</span><span id="cfg-ms-conn">—</span></div>
-            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Latency:</span><span id="cfg-ms-lat">—</span></div>
-            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Mode:</span><span id="cfg-mode" style="font-weight:700;">—</span></div>
-            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Max positions:</span><span id="cfg-pos" style="font-weight:700;">3</span></div>
-            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Version:</span><span id="cfg-version" style="font-weight:700;">—</span></div>
-          </div>
-        </div>
-      </div>
-      <div class="card"><div class="card-head"><h3>System Logs</h3></div>
-        <div class="card-body" id="log-feed" style="max-height:200px;overflow-y:auto;"></div>
-      </div>
-    </div>
-  </div>
-</div>
+<!-- include: html/tabs/controls.html -->
 
 <script>
 'use strict';
