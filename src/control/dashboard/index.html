@@ -30,26 +30,10 @@
 
 <!-- include: html/tabs/controls.html -->
 
+<script src="js/main.js"></script>
+
 <script>
 'use strict';
-const $ = id => document.getElementById(id);
-let _state = null, _prevTrades = new Map(), _startTime = Date.now();
-let _selTicker = 'BTC_USDT';
-let _selTickerTime = 0; // timestamp of last user selection
-let _hmFilter = 'ALL', _tfPoints = 300, _sigFilter = '', _uniFilter = '';
-let _seenSignals = new Set(), _expandedCell = null, _expandedPos = null;
-let _groupOpen = {};
-
-let _lastChartLen = 0;
-let _lastChartLastMid = 0;
-let _lastTradingHash = '';
-let _lastSticks = 0;
-let _resizeTimer = null;
-
-// Chart zoom state
-let _chartZoom = null; // { start: idx, end: idx } or null
-let _zoomDragStart = null; // { x: px, idx: number } or null
-
 
 function updateZoomIndicator() {
   const el = $('zoom-indicator');
@@ -182,477 +166,218 @@ function initChartZoom() {
   }
 }
 
-// Incremental signal feed tracking
-let _renderedSigKeys = new Set();
-let _renderedSigFullKeys = new Set();
-let _lastSigFilter = '';
-
-const fmt$ = v => '$' + Number(v||0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-const fmtS = (v, d=2) => (v > 0 ? '+' : '') + Number(v||0).toFixed(d);
-const fmtPct = (v, d=2) => (v >= 0 ? '+' : '') + Number(v||0).toFixed(d) + '%';
-const fmtT = v => Number(v||0).toFixed(5);
-const fmtT2 = v => Number(v||0).toFixed(2);
-const fmtT4 = v => Number(v||0).toFixed(4);
-const fmtSz = v => { const n = Number(v||0); return n >= 1000 ? (n/1000).toFixed(1)+'K' : n >= 1 ? n.toFixed(1) : n.toFixed(4); };
-
-function el(tag, cls, txt) { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; }
-
-function sigClass(kind) {
-  const m = {'DensityDetected':'sig-DensityDetected','DensityRemoved':'sig-DensityRemoved','DensityEating':'sig-DensityEating','IcebergSuspected':'sig-IcebergSuspected','TapeBurst':'sig-TapeBurst','TapeFade':'sig-TapeFade','TapeFlush':'sig-TapeFlush','TapeDistribution':'sig-TapeDistribution','LevelFormed':'sig-LevelFormed','LevelApproach':'sig-LevelApproach','LevelRejection':'sig-LevelRejection','LevelBreak':'sig-LevelBreak','LeaderMove':'sig-LeaderMove'};
-  return m[kind] || '';
-}
-function stratBadge(name) {
-  if (!name) return '';
-  const cls = name.includes('Bounce') ? 'strat-bounce' : name.includes('Breakout') ? 'strat-breakout' : name.includes('Leader') ? 'strat-leaderlag' : '';
-  const short = name.replace('FromDensity','').replace('EatThrough','');
-  return `<span class="strat-badge ${cls}">${short}</span>`;
-}
-function stClass(rs) {
-  const m = ['st-cold','st-warming','st-ready','st-planning','st-trading','st-cooldown'];
-  return m[rs] || 'st-cold';
-}
-function stName(rs) {
-  const m = ['Cold','Warming','Ready','Planning','Trading','Cooldown'];
-  return m[rs] || 'Cold';
-}
-function stSymbol(rs) {
-  const m = ['⬤','●','◉','◆','■','○'];
-  return m[rs] || '⬤';
-}
-
 // ── Tab switching ──
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
-    const tc = $('tab-' + btn.dataset.tab);
-    if (tc) tc.classList.add('active');
-    // Re-render canvases for the newly visible tab (display:none → 0 size skips drawCanvas)
-    const activeTab = btn.dataset.tab;
-    if (_state) {
-      if (activeTab === 'command') {
-        const m = computeMetrics(_state);
-        renderEquityChart(m.series, m.startEq);
-      } else if (activeTab === 'trading') {
-        renderTrading(_state, true);
-      } else if (activeTab === 'positions') {
-        renderPositions(_state);
-      } else if (activeTab === 'signals') {
-        renderSignals(_state);
-      } else if (activeTab === 'journal') {
-        renderJournal(_state);
-      }
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    $('tab-' + tab).classList.add('active');
+    if (tab === 'trading') {
+      setTimeout(() => {
+        initChartZoom();
+        if (_state) renderTrading(_state, true);
+      }, 50);
     }
   });
 });
 
-// ── Clock & Uptime ──
-function updateClock() {
-  const n = new Date();
-  const c = $('clock'); if (c) c.textContent = n.toISOString().slice(11, 19);
-  const u = $('uptime'); if (u) {
-    const s = Math.floor((Date.now() - _startTime) / 1000);
-    u.textContent = String(Math.floor(s/3600)).padStart(2,'0') + ':' + String(Math.floor((s%3600)/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
-  }
-  updateFundingCountdowns();
-}
-function updateFundingCountdowns() {
-  if (!_state || !_state.funding_info) return;
-  const now = Math.floor(Date.now() / 1000);
-  _state.funding_info.forEach(fi => {
-    const el = document.querySelector('.fd-cd-' + fi.ticker.replace(/[^a-zA-Z0-9]/g,'_'));
-    if (el) {
-      const dt = fi.next_funding_unix - now;
-      el.textContent = dt <= 0 ? 'now' : dt < 3600 ? Math.floor(dt/60) + 'm' : Math.floor(dt/3600) + 'h ' + Math.floor((dt%3600)/60) + 'm';
-    }
+// ═══════════ API ═══════════
+function selectTicker(t) {
+  _selTicker = t;
+  _selTickerTime = Date.now();
+  _chartZoom = null;
+  updateZoomIndicator();
+  fetch('/api/ticker/select', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticker: t })
+  }).then(r => r.json()).then(j => {
+    if (j.ok && _state) renderTrading(_state, true);
   });
 }
 
-// ═══════════ MAIN UPDATE ═══════════
-function update(data) {
-  if (!data) return;
-  _state = data;
-  const safe = (name, fn, ...args) => { try { fn(...args); } catch(e) { console.error('Render ' + name + ' failed:', e); } };
-
-  $('ks-banner').className = data.kill_switch_active ? 'active' : '';
-  safe('Header', renderHeader, data);
-  const m = computeMetrics(data);
-  safe('Command', renderCommand, data, m);
-  safe('Chart', renderEquityChart, m.series, m.startEq);
-  safe('Risk', renderRisk, data);
-  safe('Strategy', renderStrategyPerf, data);
-  safe('Heatmap', renderHeatmap, data);
-  safe('SigCounts', renderSigCounts, data);
-  safe('Funding', renderFunding, data);
-  // Content-based dirty check for chart data (reference comparison always true)
-  const chartData = data.chart_history || [];
-  const chartChanged = chartData.length !== _lastChartLen ||
-    (chartData.length > 0 && chartData[chartData.length-1]?.mid !== _lastChartLastMid);
-  if (chartData.length > 0) {
-    _lastChartLen = chartData.length;
-    _lastChartLastMid = chartData[chartData.length-1].mid;
-  }
-  safe('Trading', renderTrading, data, chartChanged);
-  safe('Positions', renderPositions, data);
-  // Signal feed: track filter changes for incremental rebuild
-  if (_sigFilter !== _lastSigFilter) {
-    _lastSigFilter = _sigFilter;
-    _renderedSigKeys.clear();
-    _renderedSigFullKeys.clear();
-  }
-  safe('Signals', renderSignals, data);
-  safe('Universe', renderUniverse, data);
-  safe('Journal', renderJournal, data);
-  safe('Controls', renderControls, data);
-
-  updateTabBadge('pos-tab-badge', (data.open_trades || []).filter(t => t.executed_size > 0).length);
-  updateTabBadge('sig-tab-badge', (data.recent_signals || []).length);
-  updateTabBadge('uni-tab-badge', (data.universe || []).length);
-  updateTabBadge('jrn-tab-badge', (data.recent_journal || []).length);
-  detectDiffs(data);
-}
-function updateTabBadge(id, cnt) {
-  const el = $(id); if (!el) return;
-  if (cnt > 0) { el.style.display = 'inline-block'; el.textContent = cnt > 99 ? '99+' : cnt; }
-  else el.style.display = 'none';
+function sendCommand(cmd, args = {}) {
+  fetch('/api/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: cmd, args })
+  }).then(r => r.json()).then(j => {
+    if (j.ok) toast('Command Sent', cmd + ' ok', 'pos');
+    else toast('Command Failed', j.error || 'Error', 'neg');
+  }).catch(() => toast('Command Error', 'Network error', 'neg'));
 }
 
-function renderHeader(data) {
-  const msDot = $('ms-dot'), msLabel = $('ms-label');
-  if (data.metascalp && data.metascalp.connected) {
-    msDot.className = 'dot live'; msLabel.textContent = 'ON'; msLabel.className = 'mono val-up';
-  } else {
-    msDot.className = 'dot offline'; msLabel.textContent = 'OFF'; msLabel.className = 'mono';
-  }
-  $('v-tag').textContent = 'v' + (data.version || '0.0.1');
-  const pnl = data.account ? data.account.realized_pnl_today_usd : 0;
-  const badge = $('pnl-badge');
-  badge.textContent = fmtS(pnl);
-  badge.className = 'pnl-badge ' + (pnl >= 0 ? 'up' : 'dn');
-  const recDot = $('rec-dot');
-  recDot.className = data.recorder_active ? 'rec-dot live' : 'rec-dot';
+// ═══════════ RENDERERS ═══════════
+
+// ── Gauges ──
+function renderGauges(data) {
+  const g = data.gauges || {};
+  const update = (id, val, d = 1) => {
+    const el = $(id);
+    if (el) el.textContent = Number(val || 0).toFixed(d);
+  };
+  update('gauge-cpu', g.cpu_usage);
+  update('gauge-mem', g.mem_usage);
+  update('gauge-lat', g.api_latency, 0);
+  update('gauge-upt', g.uptime_sec / 3600, 1);
 }
 
-// ═══════════ COMMAND TAB ═══════════
-function renderCommand(data, m) {
-  const a = data.account || {};
-  $('equity-val').textContent = fmt$(a.equity_usd);
-  const pToday = a.realized_pnl_today_usd || 0;
-  const pnlEl = $('pnl-today');
-  pnlEl.textContent = fmtS(pToday);
-  pnlEl.className = 'kpi-value xl ' + (pToday >= 0 ? 'val-up' : 'val-dn');
-  $('free-bal').textContent = fmt$(a.free_balance_usd);
-  const upnl = a.unrealized_pnl_usd || 0;
-  const upnlEl = $('unreal-pnl');
-  upnlEl.textContent = fmtS(upnl);
-  upnlEl.className = 'kpi-value lg ' + (upnl >= 0 ? 'val-up' : 'val-dn');
-  $('max-dd').textContent = fmtPct(m.drawdown, 1);
-  $('m-wr').textContent = Math.round(m.wr) + '%';
-  $('m-pf').textContent = m.pf.toFixed(1);
-  $('m-trades').textContent = m.total;
-}
-
-function renderRisk(data) {
-  const r = data.risk || {};
-  renderGauge('margin-gauge', r.margin_used_pct || 0, 100, 'var(--warning)', 'var(--accent2)');
-  renderGauge('exposure-gauge', Math.abs(r.exposure_pct || 0), 50, 'var(--accent3)', 'var(--accent2)');
-  renderGauge('daily-pnl-gauge', (r.daily_pnl_pct || 0), 3, 'var(--negative)', 'var(--positive)');
-  const lossBar = $('loss-limit-bar');
-  const lossPct = Math.abs(r.daily_pnl_pct || 0), maxLoss = 3.0;
-  lossBar.style.width = Math.min(100, (lossPct / maxLoss) * 100) + '%';
-  lossBar.style.background = lossPct > maxLoss * 0.75 ? 'var(--negative)' : lossPct > maxLoss * 0.4 ? 'var(--warning)' : 'var(--accent2)';
-  const slotsBar = $('pos-slots-bar');
-  const active = (data.open_trades || []).filter(t => t.executed_size > 0).length, maxPos = 3;
-  slotsBar.style.width = Math.min(100, (active / maxPos) * 100) + '%';
-  const slotsLabel = slotsBar.parentElement.previousElementSibling;
-  if (slotsLabel) slotsLabel.textContent = 'Position Slots (' + active + '/' + maxPos + ')';
-  if ($('cfg-ms-conn')) $('cfg-ms-conn').textContent = (data.metascalp && data.metascalp.connected) ? 'Connected' : 'Disconnected';
-  if ($('cfg-ms-lat')) $('cfg-ms-lat').textContent = (data.metascalp ? data.metascalp.latency_ms + 'ms' : '—');
-  if ($('cfg-mode')) $('cfg-mode').textContent = 'paper';
-  if ($('cfg-pos')) $('cfg-pos').textContent = String(maxPos);
-  if ($('cfg-version')) $('cfg-version').textContent = data.version || '0.0.1';
-}
-
-function renderGauge(id, value, max, colorNeg, colorPos) {
-  const container = $(id); if (!container) return;
-  const absVal = Math.abs(value), pct = Math.min(100, (absVal / max) * 100);
-  const color = value < 0 ? colorNeg : colorPos;
-  const r = 34, circ = 2 * Math.PI * r, offset = circ - (pct / 100) * circ;
-  container.innerHTML = `<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="${r}" fill="none" stroke="var(--subtle)" stroke-width="5"/><circle cx="40" cy="40" r="${r}" fill="none" stroke="${color}" stroke-width="5" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" stroke-linecap="round" style="transition: stroke-dashoffset 0.6s ease;"/></svg><div class="gauge-value">${fmtPct(value, 1)}</div>`;
-}
-
-function renderStrategyPerf(data) {
-  const body = $('strat-perf-body'); body.replaceChildren();
-  const stats = data.strategy_stats || [];
-  if (!stats.length) { body.appendChild(el('div','empty-state','No trade data yet')); return; }
-  stats.forEach(st => {
-    const card = el('div', 'strat-card');
-    const cls = st.name.includes('Bounce') ? 'strat-bounce' : st.name.includes('Breakout') ? 'strat-breakout' : 'strat-leaderlag';
-    const wr = st.total_trades > 0 ? Math.round((st.wins / st.total_trades) * 100) : 0;
-    card.innerHTML = `<div class="strat-name"><span class="strat-badge ${cls}">${st.name.replace('FromDensity','').replace('EatThrough','')}</span></div><div class="strat-metrics"><div class="strat-metric"><div class="strat-metric-label">PnL</div><div class="strat-metric-val ${st.total_pnl>=0?'val-up':'val-dn'}">${fmtS(st.total_pnl)}</div></div><div class="strat-metric"><div class="strat-metric-label">WR</div><div class="strat-metric-val">${wr}%</div></div><div class="strat-metric"><div class="strat-metric-label">Trades</div><div class="strat-metric-val">${st.wins}W/${st.losses}L</div></div><div class="strat-metric"><div class="strat-metric-label">Best</div><div class="strat-metric-val val-up">${fmtS(st.best_pnl)}</div></div><div class="strat-metric"><div class="strat-metric-label">Worst</div><div class="strat-metric-val val-dn">${fmtS(st.worst_pnl)}</div></div></div>`;
-    body.appendChild(card);
-  });
-}
-
-// ═══════════ HEATMAP ═══════════
+// ── Heatmap ──
 function renderHeatmap(data) {
-  const states = data.strategy_states || [];
-  // Build ticker → strategy → state map
-  const hm = new Map();
-  const stratNames = new Set();
-  states.forEach(s => {
-    if (!hm.has(s.ticker)) hm.set(s.ticker, new Map());
-    hm.get(s.ticker).set(s.strategy_name, s);
-    stratNames.add(s.strategy_name);
-  });
-  const allTickers = [...hm.keys()].sort();
-  const allStrats = [...stratNames].sort();
+  const container = $('heatmap-grid');
+  if (!container) return;
+  const items = data.heatmap || [];
 
-  // Filters
-  const row = $('hm-filters'); row.replaceChildren();
-  ['ALL','Ready only','Trading only','Warming only'].forEach(f => {
+  // Filter
+  const filterRow = $('hm-filter-row');
+  filterRow.replaceChildren();
+  ['ALL', 'Hot', 'Volatile'].forEach(f => {
     const chip = el('span', 'filter-chip', f);
-    chip.dataset.f = f;
     if (_hmFilter === f) chip.classList.add('active');
     chip.addEventListener('click', () => { _hmFilter = f; renderHeatmap(data); });
-    row.appendChild(chip);
+    filterRow.appendChild(chip);
   });
 
-  // Grid
-  const body = $('heatmap-body'); body.replaceChildren();
-  body.style.gridTemplateColumns = `120px repeat(${allStrats.length}, 1fr)`;
-
-  // Header
-  const hdr = el('div', 'hm-header');
-  hdr.innerHTML = '<div class="hm-header-cell">Ticker</div>' + allStrats.map(s => `<div class="hm-header-cell">${s.replace('FromDensity','').replace('EatThrough','')}</div>`).join('');
-  body.appendChild(hdr);
-
-  let visible = 0;
-  allTickers.forEach(ticker => {
-    const stratMap = hm.get(ticker);
-    const cells = allStrats.map(sn => {
-      const ss = stratMap.get(sn);
-      if (!ss) return '<div class="hm-cell">—</div>';
-      const cls = stClass(ss.ready_state);
-      const sym = stSymbol(ss.ready_state);
-      const pct = Math.round(ss.readiness_pct);
-      return `<div class="hm-cell ${cls}" data-ticker="${ss.ticker}" data-strat="${ss.strategy_name}" title="${sn}: ${stName(ss.ready_state)} ${pct}%">${sym} ${pct}%</div>`;
-    });
-
-    // Filter
-    let show = _hmFilter === 'ALL';
-    if (!show) {
-      allStrats.forEach(sn => {
-        const ss = stratMap.get(sn);
-        if (!ss) return;
-        if (_hmFilter === 'Ready only' && ss.ready_state === 2) show = true;
-        if (_hmFilter === 'Trading only' && ss.ready_state === 4) show = true;
-        if (_hmFilter === 'Warming only' && ss.ready_state === 1) show = true;
-      });
-    }
-    if (!show) return;
-
-    visible++;
-    const rowDiv = el('div', 'hm-row');
-    rowDiv.style.display = 'contents';
-    rowDiv.innerHTML = `<div class="hm-row-label" data-ticker="${ticker}" title="Click to select ticker">${ticker}</div>` + cells.join('');
-    body.appendChild(rowDiv);
+  const filtered = items.filter(it => {
+    if (_hmFilter === 'Hot') return it.score > 70;
+    if (_hmFilter === 'Volatile') return it.volatility > 20;
+    return true;
   });
 
-  if (visible === 0) body.appendChild(el('div', 'empty-state', 'No strategies match filter'));
-
-  // Click handlers
-  body.querySelectorAll('.hm-row-label').forEach(lbl => {
-    lbl.addEventListener('click', () => {
-      const ticker = lbl.dataset.ticker;
-      selectTicker(ticker);
-      _selTicker = ticker;
-      _selTickerTime = Date.now();
-      toast('Selected', ticker, '');
-      // Немедленно обновить OB и графики для выбранного тикера
-      if (_state) {
-      renderTrading(_state, true);
-      }
-    });
-  });
-  // Подсветить выбранный тикер в хитмапе
-  body.querySelectorAll('.hm-row-label').forEach(lbl => {
-    lbl.style.color = lbl.dataset.ticker === _selTicker ? 'var(--accent2)' : '';
-  });
-  body.querySelectorAll('.hm-cell').forEach(cell => {
-    if (!cell.dataset.ticker) return;
-    cell.addEventListener('click', () => {
-      const ticker = cell.dataset.ticker, strat = cell.dataset.strat;
-      if (_expandedCell && _expandedCell.ticker === ticker && _expandedCell.strat === strat) {
-        _expandedCell = null; $('hm-detail').classList.remove('open'); return;
-      }
-      _expandedCell = {ticker, strat};
-      renderDetailPanel(data, ticker, strat);
-    });
-  });
-}
-
-function renderDetailPanel(data, ticker, stratName) {
-  const panel = $('hm-detail');
-  const states = data.strategy_states || [];
-  const ss = states.find(s => s.ticker === ticker && s.strategy_name === stratName);
-  if (!ss) { panel.classList.remove('open'); return; }
-
-  const cls = stClass(ss.ready_state);
-  const conds = ss.conditions || [];
-  let condsHtml = conds.map(c => {
-    const pct = c.target > 0 ? Math.min(100, (c.current / c.target) * 100) : (c.met ? 100 : 0);
-    const metCls = c.met ? 'met' : 'unmet';
-    return `<div class="condition-row">
-      <span class="condition-name">${c.name}</span>
-      <svg class="prog-ring"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--subtle)" stroke-width="2.5"/><circle cx="10" cy="10" r="8" fill="none" stroke="${c.met ? 'var(--positive)' : 'var(--warning)'}" stroke-width="2.5" stroke-dasharray="50.27" stroke-dashoffset="${50.27 - (pct/100)*50.27}" stroke-linecap="round" style="transition: stroke-dashoffset 0.5s ease;"/></svg>
-      <div class="condition-bar"><div class="condition-fill ${metCls}" style="width:${pct}%;"></div></div>
-      <span class="condition-val">${c.current.toFixed(2)} / ${c.target.toFixed(2)} ${c.unit}</span>
-      <span class="condition-status ${metCls}">${c.met ? '✓' : '✗'}</span>
-    </div>`;
-  }).join('');
-
-  let rejectHtml = '';
-  if (ss.last_reject_reason) {
-    rejectHtml = `<div class="detail-reject">Last reject: ${ss.last_reject_reason} (${Math.round(ss.seconds_since_last_reject)}s ago)</div>`;
+  container.replaceChildren();
+  if (!filtered.length) {
+    container.appendChild(el('div', 'empty-state', 'No tickers match filter'));
+    return;
   }
 
-  panel.innerHTML = `<div class="detail-head">
-    <span class="detail-title">${ticker} / ${stratName.replace('FromDensity','').replace('EatThrough','')}</span>
-    <span class="detail-badge ${cls}">${stName(ss.ready_state)} ${Math.round(ss.readiness_pct)}% (${conds.filter(c=>c.met).length}/${conds.length})</span>
-  </div>${condsHtml}${rejectHtml}
-  <div style="font-size:11px;color:var(--subtle);margin-top:4px;">Signals last 60s: ${ss.signals_last_60s}</div>`;
-  panel.classList.add('open');
-}
+  filtered.forEach(it => {
+    const card = el('div', 'hm-card');
+    card.addEventListener('click', () => selectTicker(it.ticker));
+    if (it.ticker === _selTicker) card.classList.add('active');
 
-// ═══════════ FUNDING ═══════════
-function renderFunding(data) {
-  const body = $('funding-tbody'); body.replaceChildren();
-  const info = data.funding_info || [];
-  if (!info.length) { const tr = el('tr'); const td = el('td','empty-state','No funding data'); td.colSpan=3; tr.appendChild(td); body.appendChild(tr); return; }
-  const now = Math.floor(Date.now()/1000);
-  info.forEach(fi => {
-    const tr = el('tr');
-    tr.appendChild(el('td','',fi.ticker));
-    const rateTd = el('td','funding-rate');
-    rateTd.textContent = fmtT4(fi.rate*100)+'%';
-    rateTd.className = 'funding-rate '+(fi.rate>=0?'val-up':'val-dn');
-    tr.appendChild(rateTd);
-    const cdTd = el('td','funding-countdown');
-    const dt = fi.next_funding_unix - now;
-    cdTd.textContent = dt<=0?'now':dt<3600?Math.floor(dt/60)+'m':Math.floor(dt/3600)+'h '+Math.floor((dt%3600)/60)+'m';
-    cdTd.className = 'funding-countdown fd-cd-'+fi.ticker.replace(/[^a-zA-Z0-9]/g,'_');
-    tr.appendChild(cdTd);
-    body.appendChild(tr);
+    const scoreColor = it.score > 80 ? 'var(--positive-bright)' : it.score > 50 ? 'var(--warning)' : 'var(--muted)';
+    card.innerHTML = `
+      <div class="hm-ticker">${it.ticker}</div>
+      <div class="hm-score" style="color:${scoreColor}">${it.score.toFixed(0)}</div>
+      <div class="hm-stats">
+        <span>${fmtPct(it.change_24h)}</span>
+        <span>Vol: ${it.volatility.toFixed(1)}</span>
+      </div>
+    `;
+    container.appendChild(card);
   });
 }
 
-// ═══════════ CHART (Canvas helpers) ═══════════
-function drawCanvas(containerId, drawFn) {
-  const container = $(containerId); if (!container) return;
-  const w = container.clientWidth, h = container.clientHeight;
-  if (w <= 0 || h <= 0) return; // hidden tab — skip render
-  
-  // Reuse existing canvas to avoid flicker
-  let canvas = container.querySelector('canvas');
-  if (!canvas) {
-    canvas = el('canvas');
-    container.appendChild(canvas);
-  }
-  const dpr = window.devicePixelRatio || 1;
-  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
-  }
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  try { drawFn(ctx, w, h); } catch(e) { console.error('Canvas ' + containerId + ' failed:', e); }
+// ── Detail Panel ──
+function renderDetail(data) {
+  const d = data.detail || {};
+  const t = d.ticker || '—';
+  $('detail-ticker').textContent = t;
+  $('detail-price').textContent = fmt$(d.price);
+  $('detail-change').textContent = fmtPct(d.change_24h);
+  $('detail-change').className = 'val ' + (d.change_24h >= 0 ? 'val-up' : 'val-dn');
+
+  const stats = $('detail-stats');
+  stats.replaceChildren();
+  const addStat = (label, val) => {
+    const row = el('div', 'stat-row');
+    row.innerHTML = `<span>${label}</span><span class="mono">${val}</span>`;
+    stats.appendChild(row);
+  };
+  addStat('24h High', fmt$(d.high_24h));
+  addStat('24h Low', fmt$(d.low_24h));
+  addStat('Volume', fmtSz(d.volume_24h));
+  addStat('ATR (1h)', fmtT(d.atr_1h));
 }
 
-function renderEquityChart(series, startEq) { drawCanvas('eq-chart', (ctx,w,h) => {
-  if (!series || series.length < 2) { ctx.fillStyle = '#7b859c'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Waiting for trade data...', w/2, h/2); return; }
-  const pad = {top:8, right:40, bottom:18, left:8}, pw = w-pad.left-pad.right, ph = h-pad.top-pad.bottom;
-  const min = Math.min(...series), max = Math.max(...series), range = (max-min)||1;
-  const toX = i => pad.left + (i/(series.length-1))*pw;
-  const toY = v => pad.top + ph - ((v-min)/range)*ph;
-  ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) { const y = pad.top + (i/4)*ph; ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w-pad.right, y); ctx.stroke(); }
-  if (startEq) { const yRef = toY(startEq); ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(pad.left, yRef); ctx.lineTo(w-pad.right, yRef); ctx.stroke(); ctx.setLineDash([]); }
-  ctx.fillStyle = '#7b859c'; ctx.font = '8px Inter, sans-serif'; ctx.textAlign = 'right';
-  for (let i=0;i<=4;i++) { const v = min+(range*i/4); ctx.fillText('$'+Math.round(v).toLocaleString(), w-4, toY(v)+3); }
-  const isUp = series[series.length-1] >= series[0];
-  ctx.beginPath(); ctx.moveTo(toX(0), toY(series[0])); series.forEach((v,i) => ctx.lineTo(toX(i),toY(v)));
-  const baseline = isUp ? toY(min) : toY(min-range*0.02);
-  ctx.lineTo(toX(series.length-1), baseline); ctx.lineTo(toX(0), baseline); ctx.closePath();
-  ctx.fillStyle = isUp ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)'; ctx.fill();
-  ctx.beginPath(); ctx.moveTo(toX(0), toY(series[0])); series.forEach((v,i) => ctx.lineTo(toX(i),toY(v)));
-  ctx.strokeStyle = isUp ? '#10b981' : '#ef4444'; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.stroke();
-  const lx = toX(series.length-1), ly = toY(series[series.length-1]);
-  ctx.beginPath(); ctx.arc(lx, ly, 3, 0, Math.PI*2); ctx.fillStyle = isUp ? '#34d399' : '#f87171'; ctx.fill();
-});}
+// ── Conditions ──
+function renderConditions(data) {
+  const container = $('cond-list');
+  if (!container) return;
+  const conds = data.conditions || [];
+  container.replaceChildren();
 
-function drawPriceChart(ctx, w, h, history) {
-  if (history.length < 2) { ctx.fillStyle = '#7b859c'; ctx.font = '10px sans-serif'; ctx.textAlign='center'; ctx.fillText('No chart data', w/2, h/2); return; }
-  const pad = {top:8, right:45, bottom:30, left:10}, pw = w-pad.left-pad.right, ph = h-pad.top-pad.bottom;
+  if (!conds.length) {
+    container.appendChild(el('div', 'empty-state', 'No active conditions'));
+    return;
+  }
+
+  conds.forEach(c => {
+    const item = el('div', 'cond-item');
+    const statusCls = c.met ? 'met' : 'pending';
+    item.innerHTML = `
+      <div class="cond-info">
+        <span class="cond-name">${c.name}</span>
+        <span class="cond-desc">${c.description}</span>
+      </div>
+      <div class="cond-status ${statusCls}">${c.met ? 'MET' : 'WAIT'}</div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+// ── Trading Chart ──
+function drawTradeChart(ctx, w, h, history) {
+  if (history.length < 2) return;
+  const pad = { top: 10, right: 45, bottom: 20, left: 10 }, pw = w - pad.left - pad.right, ph = h - pad.top - pad.bottom;
+
   const mids = history.map(p => p.mid);
-  const min = Math.min(...mids), max = Math.max(...mids), range = (max-min)||1;
-  const toX = i => pad.left + (i/(mids.length-1))*pw;
-  const toY = v => pad.top + ph - ((v-min)/range)*ph;
+  const min = Math.min(...mids), max = Math.max(...mids), range = (max - min) || 1;
+  const toX = i => pad.left + (i / (mids.length - 1)) * pw;
+  const toY = v => pad.top + ph - ((v - min) / range) * ph;
 
   // Grid
   ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-  for (let i=0;i<=4;i++) { const y=pad.top+(i/4)*ph; ctx.beginPath(); ctx.moveTo(pad.left,y); ctx.lineTo(w-pad.right,y); ctx.stroke(); }
+  for (let i = 0; i <= 4; i++) { const y = pad.top + (i / 4) * ph; ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke(); }
   // Volatility band
   ctx.fillStyle = 'rgba(99,102,241,0.06)';
-  ctx.beginPath(); ctx.moveTo(toX(0), toY(mids[0]*(1+0.002)));
-  history.forEach((p,i) => ctx.lineTo(toX(i), toY(p.mid*(1+p.volatility_1min_bps/10000))));
-  history.slice().reverse().forEach((p,i) => ctx.lineTo(toX(mids.length-1-i), toY(p.mid*(1-p.volatility_1min_bps/10000))));
+  ctx.beginPath(); ctx.moveTo(toX(0), toY(mids[0] * (1 + 0.002)));
+  history.forEach((p, i) => ctx.lineTo(toX(i), toY(p.mid * (1 + p.volatility_1min_bps / 10000))));
+  history.slice().reverse().forEach((p, i) => ctx.lineTo(toX(mids.length - 1 - i), toY(p.mid * (1 - p.volatility_1min_bps / 10000))));
   ctx.closePath(); ctx.fill();
   // Mid line
   ctx.beginPath(); ctx.moveTo(toX(0), toY(mids[0]));
-  mids.forEach((v,i) => ctx.lineTo(toX(i), toY(v)));
+  mids.forEach((v, i) => ctx.lineTo(toX(i), toY(v)));
   ctx.strokeStyle = '#e8edf5'; ctx.lineWidth = 1.2; ctx.stroke();
   // Volume bars
   const maxVol = Math.max(...history.map(p => p.buy_vol_5s + p.sell_vol_5s), 1);
-  const barW = Math.max(1, pw/history.length * 0.7);
-  history.forEach((p,i) => {
-    const x = toX(i) - barW/2;
-    const buyH = (p.buy_vol_5s/maxVol)*(ph*0.25);
-    const sellH = (p.sell_vol_5s/maxVol)*(ph*0.25);
-    if (buyH > 0) { ctx.fillStyle = 'rgba(16,185,129,0.4)'; ctx.fillRect(x, pad.top+ph-buyH, barW, buyH); }
-    if (sellH > 0) { ctx.fillStyle = 'rgba(239,68,68,0.4)'; ctx.fillRect(x, pad.top+ph-buyH-sellH, barW, sellH); }
+  const barW = Math.max(1, pw / history.length * 0.7);
+  history.forEach((p, i) => {
+    const x = toX(i) - barW / 2;
+    const buyH = (p.buy_vol_5s / maxVol) * (ph * 0.25);
+    const sellH = (p.sell_vol_5s / maxVol) * (ph * 0.25);
+    if (buyH > 0) { ctx.fillStyle = 'rgba(16,185,129,0.4)'; ctx.fillRect(x, pad.top + ph - buyH, barW, buyH); }
+    if (sellH > 0) { ctx.fillStyle = 'rgba(239,68,68,0.4)'; ctx.fillRect(x, pad.top + ph - buyH - sellH, barW, sellH); }
   });
   // Y labels
-  ctx.fillStyle = '#7b859c'; ctx.font = '8px Inter, sans-serif'; ctx.textAlign='right';
-  for (let i=0;i<=4;i++) { const v=min+(range*i/4); ctx.fillText(v.toFixed(1), w-4, toY(v)+3); }
+  ctx.fillStyle = '#7b859c'; ctx.font = '8px Inter, sans-serif'; ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) { const v = min + (range * i / 4); ctx.fillText(v.toFixed(1), w - 4, toY(v) + 3); }
   // X labels (time)
-  ctx.textAlign='center';
-  const step = Math.max(1, Math.floor(history.length/6));
-  for (let i=0;i<history.length;i+=step) {
-    const d = new Date(history[i].ts); ctx.fillText(d.toISOString().slice(11,19), toX(i), h-4);
+  ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(history.length / 6));
+  for (let i = 0; i < history.length; i += step) {
+    const d = new Date(history[i].ts); ctx.fillText(d.toISOString().slice(11, 19), toX(i), h - 4);
   }
 }
 
 function drawMiniChart(ctx, w, h, history, field, color, label) {
-  if (history.length < 2) { ctx.fillStyle = '#7b859c'; ctx.font = '9px sans-serif'; ctx.textAlign='center'; ctx.fillText(label, w/2, h/2); return; }
-  const pad={top:4,right:8,bottom:14,left:8}, pw=w-pad.left-pad.right, ph=h-pad.top-pad.bottom;
+  if (history.length < 2) { ctx.fillStyle = '#7b859c'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(label, w / 2, h / 2); return; }
+  const pad = { top: 4, right: 8, bottom: 14, left: 8 }, pw = w - pad.left - pad.right, ph = h - pad.top - pad.bottom;
   const vals = history.map(p => p[field] || 0);
-  const min=Math.min(...vals), max=Math.max(...vals), range=(max-min)||1;
-  const toX=i=>pad.left+(i/(vals.length-1))*pw, toY=v=>pad.top+ph-((v-min)/range)*ph;
-  ctx.beginPath(); ctx.moveTo(toX(0),toY(vals[0])); vals.forEach((v,i)=>ctx.lineTo(toX(i),toY(v)));
-  ctx.strokeStyle=color; ctx.lineWidth=1; ctx.stroke();
+  const min = Math.min(...vals), max = Math.max(...vals), range = (max - min) || 1;
+  const toX = i => pad.left + (i / (vals.length - 1)) * pw, toY = v => pad.top + ph - ((v - min) / range) * ph;
+  ctx.beginPath(); ctx.moveTo(toX(0), toY(vals[0])); vals.forEach((v, i) => ctx.lineTo(toX(i), toY(v)));
+  ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.stroke();
   // Zero line
-  if (min < 0 && max > 0) { const zy=toY(0); ctx.strokeStyle='rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.moveTo(pad.left,zy); ctx.lineTo(w-pad.right,zy); ctx.stroke(); }
-  ctx.fillStyle='#7b859c'; ctx.font='7px Inter, sans-serif'; ctx.textAlign='left';
-  ctx.fillText(max.toFixed(1), 2, pad.top+10);
-  ctx.fillText(min.toFixed(1), 2, h-4);
+  if (min < 0 && max > 0) { const zy = toY(0); ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.moveTo(pad.left, zy); ctx.lineTo(w - pad.right, zy); ctx.stroke(); }
+  ctx.fillStyle = '#7b859c'; ctx.font = '7px Inter, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(max.toFixed(1), 2, pad.top + 10);
+  ctx.fillText(min.toFixed(1), 2, h - 4);
 }
 
-// ═══════════ TRADING TAB (merged: DOM Ladder + Charts) ═══════════
+// ── Trading Tab (merged: DOM Ladder + Charts) ──
 function renderTrading(data, forceRender) {
   const bids = data.bids_top20 || [];
   const asks = data.asks_top20 || [];
@@ -685,8 +410,8 @@ function renderTrading(data, forceRender) {
 
   // ── DOM Ladder hash (cheap — compute first to gate expensive derivations) ──
   const ladderHash = JSON.stringify({
-    b: bids.map(x => [+(x.price||0).toFixed(2), +(x.size||0).toFixed(4)]),
-    a: asks.map(x => [+(x.price||0).toFixed(2), +(x.size||0).toFixed(4)])
+    b: bids.map(x => [+(x.price || 0).toFixed(2), +(x.size || 0).toFixed(4)]),
+    a: asks.map(x => [+(x.price || 0).toFixed(2), +(x.size || 0).toFixed(4)])
   });
   const ladderChanged = ladderHash !== _lastTradingHash || forceRender;
 
@@ -694,8 +419,8 @@ function renderTrading(data, forceRender) {
   let tick = 0.01, dec = 3, bestAsk = 0, bestBid = 0, spreadPrice = 0;
   if (ladderChanged) {
     const candidates = [];
-    for (let i = 1; i < asks.length; i++) { const d = Math.abs(asks[i].price - asks[i-1].price); if (d > 0 && isFinite(d)) candidates.push(d); }
-    for (let i = 1; i < bids.length; i++) { const d = Math.abs(bids[i-1].price - bids[i].price); if (d > 0 && isFinite(d)) candidates.push(d); }
+    for (let i = 1; i < asks.length; i++) { const d = Math.abs(asks[i].price - asks[i - 1].price); if (d > 0 && isFinite(d)) candidates.push(d); }
+    for (let i = 1; i < bids.length; i++) { const d = Math.abs(bids[i - 1].price - bids[i].price); if (d > 0 && isFinite(d)) candidates.push(d); }
     if (candidates.length > 0) tick = Math.min(...candidates);
     dec = tick >= 1 ? 1 : tick >= 0.1 ? 2 : tick >= 0.01 ? 3 : tick >= 0.001 ? 4 : 5;
     bestAsk = asks.length ? Math.min(...asks.map(a => a.price)) : (data.ob_mid || 0);
@@ -734,7 +459,7 @@ function renderTrading(data, forceRender) {
     asksRev.forEach(a => {
       const pct = Math.min(100, (a.size / maxSz) * 100).toFixed(0);
       const big = a.size >= BIG;
-      html += `<div class="lvl ask-lvl${big?' big-ask':''}" style="height:${ROW_H}px">
+      html += `<div class="lvl ask-lvl${big ? ' big-ask' : ''}" style="height:${ROW_H}px">
         <div class="a-side"><div class="a-fill" style="width:${pct}%"></div><span class="a-lbl">${fmtSz(a.size)}</span></div>
         <div class="p-cell">${a.price.toFixed(dec)}</div>
         <div></div></div>`;
@@ -754,7 +479,7 @@ function renderTrading(data, forceRender) {
     bids.forEach(b => {
       const pct = Math.min(100, (b.size / maxSz) * 100).toFixed(0);
       const big = b.size >= BIG;
-      html += `<div class="lvl bid-lvl${big?' big-bid':''}" style="height:${ROW_H}px">
+      html += `<div class="lvl bid-lvl${big ? ' big-bid' : ''}" style="height:${ROW_H}px">
         <div></div>
         <div class="p-cell">${b.price.toFixed(dec)}</div>
         <div class="b-side"><div class="b-fill" style="width:${pct}%"></div><span class="b-lbl">${fmtSz(b.size)}</span></div></div>`;
@@ -798,228 +523,162 @@ function renderTrading(data, forceRender) {
   }
 
   // ── Chart ──
-  let history = data.chart_history || [];
-  const maxPoints = Math.min(_tfPoints, 300);
-  if (history.length > maxPoints) history = history.slice(-maxPoints);
-
-  // Apply zoom
-  if (_chartZoom !== null) {
-    const zoomLen = _chartZoom.end - _chartZoom.start;
-    if (zoomLen < 2 || _chartZoom.end >= history.length || _chartZoom.start >= _chartZoom.end) {
-      _chartZoom = null;
-      updateZoomIndicator();
-    } else {
-      history = history.slice(_chartZoom.start, _chartZoom.end + 1);
+  const canvas = $('trade-chart');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    ctx.clearRect(0, 0, w, h);
+    const history = data.chart_history || [];
+    if (history.length > 0) {
+      const sliced = _chartZoom ? history.slice(_chartZoom.start, _chartZoom.end + 1) : history.slice(-_tfPoints);
+      drawTradeChart(ctx, w, h, sliced);
     }
   }
-
-  // Header
-  const nameEl = $('trade-chart-name'); if (nameEl) nameEl.textContent = obTicker;
-  if (history.length > 0) {
-    const last = history[history.length - 1];
-    const first = history[0];
-    const lastEl = $('trade-chart-last'); if (lastEl) lastEl.textContent = fmtT2(last.mid || 0);
-    const pctEl = $('trade-chart-pct');
-    if (pctEl) {
-      const pct = (first.mid || 0) ? ((last.mid - first.mid) / first.mid * 100) : 0;
-      pctEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-      pctEl.className = 'c-pct ' + (pct >= 0 ? 'up' : 'dn');
-    }
-  } else {
-    const lastEl = $('trade-chart-last'); if (lastEl) lastEl.textContent = '—';
-    const pctEl = $('trade-chart-pct'); if (pctEl) { pctEl.textContent = '—'; pctEl.className = 'c-pct'; }
-  }
-
-  // Timeframe buttons — update active state and bind clicks
-  document.querySelectorAll('#trade-tf-buttons .tf-btn').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.tf) === _tfPoints);
-    btn.onclick = () => {
-      _tfPoints = parseInt(btn.dataset.tf);
-      const tfCustom = $('tf-custom'); if (tfCustom) tfCustom.value = '';
-      _chartZoom = null;
-      updateZoomIndicator();
-      renderTrading(_state);
-    };
-  });
-
-  // Main price chart
-  drawCanvas('trade-chart-body', (ctx, w, h) => drawPriceChart(ctx, w, h, history));
-  updateZoomIndicator();
-
-  // Mini charts
-  drawCanvas('trade-mini-spread', (ctx, w, h) => drawMiniChart(ctx, w, h, history, 'spread_bps', 'var(--accent2)', 'Spread bps'));
-  drawCanvas('trade-mini-vol',    (ctx, w, h) => drawMiniChart(ctx, w, h, history, 'volatility_1min_bps', 'var(--accent3)', 'Vol bps'));
-  drawCanvas('trade-mini-agg',    (ctx, w, h) => drawMiniChart(ctx, w, h, history, 'tape_aggression', 'var(--warning)', 'Aggression'));
-  drawCanvas('trade-mini-corr',   (ctx, w, h) => drawMiniChart(ctx, w, h, history, 'leader_correlation', 'var(--accent)', 'Ldr Corr'));
 }
 
-// ═══════════ POSITIONS TAB ═══════════
+// ── Positions ──
 function renderPositions(data) {
   const body = $('pos-body');
-  const trades = (data.open_trades || []).filter(t => t.executed_size > 0);
-  $('pos-count').textContent = trades.length;
-  body.replaceChildren();
-  if (!trades.length) { const tr = el('tr'); const td = el('td','empty-state','No active positions'); td.colSpan=8; tr.appendChild(td); body.appendChild(tr); return; }
+  const rows = data.positions || [];
+  const badge = $('pos-tab-badge');
+  if (badge) {
+    badge.textContent = rows.length;
+    badge.style.display = rows.length ? 'inline' : 'none';
+  }
 
-  trades.forEach((t, idx) => {
+  body.replaceChildren();
+  if (!rows.length) {
+    const tr = el('tr');
+    const td = el('td', 'empty-state', 'No active positions');
+    td.colSpan = 8;
+    tr.appendChild(td);
+    body.appendChild(tr);
+    return;
+  }
+
+  rows.forEach(p => {
     const tr = el('tr');
     tr.style.cursor = 'pointer';
-    tr.addEventListener('click', () => {
-      const detailRow = tr.nextElementSibling;
-      if (detailRow && detailRow.classList.contains('pos-detail')) {
-        const isOpen = detailRow.classList.contains('open');
-        detailRow.classList.toggle('open', !isOpen);
-      }
-    });
+    tr.addEventListener('click', () => selectTicker(p.ticker));
+    if (p.ticker === _selTicker) tr.classList.add('active');
 
-    const tdTicker = el('td'); tdTicker.innerHTML = `<div class="pos-ticker">${t.plan.ticker}</div><div class="pos-strat">${stratBadge(t.plan.strategy_name)}</div>`; tr.appendChild(tdTicker);
-    const isLong = t.plan.side === 1;
-    const sideTd = el('td'); sideTd.innerHTML = `<span class="pos-side-badge ${isLong?'long':'short'}">${isLong?'LONG':'SHORT'}</span>`; tr.appendChild(sideTd);
-    tr.appendChild(el('td','mono',fmtT(t.avg_entry_price)));
-    const universe = data.universe || [];
-    const uniRow = universe.find(u => u.ticker === t.plan.ticker) || {};
-    const mark = uniRow.mark_price || t.avg_entry_price;
-    tr.appendChild(el('td','mono',fmtT(mark)));
-    tr.appendChild(el('td','mono muted',fmtT(t.plan.stop_price || 0)));
-    const tp1 = t.plan.tp1_price || (isLong ? t.avg_entry_price * 1.01 : t.avg_entry_price * 0.99);
-    tr.appendChild(el('td','mono muted',fmtT(tp1)));
-    const pnl = t.unrealized_pnl || 0;
-    const pnlPct = t.avg_entry_price > 0 ? ((mark - t.avg_entry_price) / t.avg_entry_price * 100 * (isLong ? 1 : -1)) : 0;
-    const pnlTd = el('td');
-    pnlTd.innerHTML = `<div class="pos-pnl ${pnl>=0?'val-up':'val-dn'}">${fmtS(pnl)}</div><div class="pos-pnl-pct ${pnl>=0?'val-up':'val-dn'}">${fmtPct(pnlPct,2)}</div>`;
-    tr.appendChild(pnlTd);
+    const sideCls = p.side === 1 ? 'val-up' : 'val-dn';
+    const sideTxt = p.side === 1 ? 'LONG' : 'SHORT';
 
-    // SLTP bar
-    const sltpTd = el('td');
-    const bar = el('div','sltp-bar');
-    const sl = t.plan.stop_price || t.avg_entry_price;
-    const total = Math.abs(tp1-sl) || 0.0001;
-    const curDist = Math.abs(mark-sl);
-    const pct = Math.max(0, Math.min(100,(curDist/total)*100));
-    const fill = el('div','sltp-fill');
-    fill.style.width = pct+'%';
-    if (pct < 15) fill.style.background = 'var(--negative)';
-    else if (pct < 35) fill.style.background = 'var(--warning)';
-    else if (pct < 65) fill.style.background = 'var(--accent)';
-    else fill.style.background = 'var(--positive)';
-    bar.appendChild(fill);
-    const entryPct = (Math.abs(t.avg_entry_price-sl)/total)*100;
-    const entryMk = el('div','sltp-marker'); entryMk.style.left=entryPct+'%'; entryMk.style.background='var(--text)'; bar.appendChild(entryMk);
-    // Price marker
-    const priceMk = el('div','sltp-marker'); priceMk.style.left=pct+'%'; priceMk.style.background='var(--accent2)'; priceMk.style.boxShadow='0 0 6px rgba(6,182,212,0.5)'; bar.appendChild(priceMk);
-    sltpTd.appendChild(bar);
-    tr.appendChild(sltpTd);
+    tr.innerHTML = `
+      <td class="mono" style="font-weight:700;">${p.ticker}</td>
+      <td class="${sideCls}" style="font-weight:700;">${sideTxt}</td>
+      <td class="mono">${fmtT(p.entry_price)}</td>
+      <td class="mono">${fmtT(p.mark_price)}</td>
+      <td class="mono" style="color:var(--negative-bright)">${fmtT(p.stop_loss)}</td>
+      <td class="mono" style="color:var(--positive-bright)">${fmtT(p.take_profit)}</td>
+      <td class="mono ${p.pnl_usd >= 0 ? 'val-up' : 'val-dn'}">${fmt$(p.pnl_usd)} (${fmtPct(p.pnl_pct)})</td>
+      <td>
+        <div class="progress-ring-container">
+          <svg class="progress-ring" width="24" height="24">
+            <circle class="progress-ring-circle" stroke="var(--muted)" stroke-width="2" fill="transparent" r="10" cx="12" cy="12"/>
+            <circle class="progress-ring-circle-fill" stroke="${p.pnl_usd >= 0 ? 'var(--positive-bright)' : 'var(--negative-bright)'}" stroke-width="2" stroke-dasharray="62.83" stroke-dashoffset="${62.83 * (1 - Math.min(1, Math.abs(p.pnl_pct) / 2))}" fill="transparent" r="10" cx="12" cy="12"/>
+          </svg>
+        </div>
+      </td>
+    `;
     body.appendChild(tr);
-
-    // Detail row
-    const dRow = el('tr','pos-detail');
-    const activePos = (data.open_trades||[]).filter(x=>x.state===0||x.state===4).length;
-    const detailHtml = `<td colspan="8" style="padding:6px 12px;display:flex;gap:16px;flex-wrap:wrap;">
-      <span>Size: <b>${fmtSz(t.executed_size)}</b></span>
-      <span>Avg Entry: <b>${fmtT(t.avg_entry_price)}</b></span>
-      <span>Risk/Coin: <b>${fmtT2(Math.abs(t.avg_entry_price - (t.plan.stop_price||t.avg_entry_price)))}</b></span>
-      <span>Positions: <b>${activePos}</b></span>
-      <span>Reason: <span style="color:var(--muted)">${t.plan.reason || '—'}</span></span>
-    </td>`;
-    dRow.innerHTML = detailHtml;
-    body.appendChild(dRow);
   });
 }
 
-// ═══════════ SIGNALS TAB ═══════════
+// ── Signals ──
 function buildSignalFilters(data) {
-  const kinds = new Set(); (data.recent_signals||[]).forEach(s=>kinds.add(s.kind));
-  const row = $('sig-filter-row'); if(!row) return;
-  row.replaceChildren();
-  const all = el('span','filter-chip','ALL'); all.dataset.kind='';
-  if(!_sigFilter) all.classList.add('active');
-  all.addEventListener('click',()=>{_sigFilter='';renderSignals(data);});
-  row.appendChild(all);
-  [...kinds].sort().forEach(k=>{
-    const chip=el('span','filter-chip',k); chip.dataset.kind=k;
-    if(_sigFilter===k) chip.classList.add('active');
-    chip.addEventListener('click',()=>{_sigFilter=k;renderSignals(data);});
-    row.appendChild(chip);
+  const container = $('sig-filter-row');
+  if (!container) return;
+  const sigs = data.signals || [];
+  const kinds = ['ALL', ...new Set(sigs.map(s => s.kind))].sort();
+
+  if (_lastSigFilter === JSON.stringify(kinds)) return;
+  _lastSigFilter = JSON.stringify(kinds);
+
+  container.replaceChildren();
+  kinds.forEach(k => {
+    const chip = el('span', 'filter-chip', k);
+    if (_sigFilter === k || (_sigFilter === '' && k === 'ALL')) chip.classList.add('active');
+    chip.addEventListener('click', () => {
+      _sigFilter = (k === 'ALL' ? '' : k);
+      document.querySelectorAll('#sig-filter-row .filter-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      renderSignals(data);
+    });
+    container.appendChild(chip);
   });
 }
 
 function renderSignals(data) {
-  const sigs = data.recent_signals || [];
-  const filtered = _sigFilter ? sigs.filter(s=>s.kind===_sigFilter) : sigs;
+  const sigs = data.signals || [];
+  const filtered = _sigFilter ? sigs.filter(s => s.kind === _sigFilter) : sigs;
+  const MAX_FEED = 100;
 
-  const MAX_FEED = 200;
+  const badge = $('sig-tab-badge');
+  if (badge) {
+    const newCount = sigs.filter(s => !_seenSignals.has(s.time_str + s.ticker + s.kind)).length;
+    badge.textContent = newCount;
+    badge.style.display = newCount ? 'inline' : 'none';
+  }
 
-  // ══ Positions tab feed (simple linear, newest first) ══
+  // ── Incremental feed (main tab) ──
   const feed = $('sig-feed');
   if (feed) {
-    $('sig-stream-count').textContent = filtered.length;
-
-    // Count new signals from the start of the array
     let newCount = 0;
     while (newCount < filtered.length) {
       if (_renderedSigKeys.has(filtered[newCount].time_str + filtered[newCount].ticker + filtered[newCount].kind)) break;
       newCount++;
     }
 
-    if (newCount > 0) {
+    if (filtered.length === 0) {
+      feed.replaceChildren();
+    } else if (newCount >= filtered.length || feed.children.length === 0) {
+      feed.replaceChildren();
+      filtered.slice(0, MAX_FEED).forEach(s => {
+        const key = s.time_str + s.ticker + s.kind;
+        _renderedSigKeys.add(key);
+        const div = el('div', 'feed-item ' + sigClass(s.kind));
+        div.dataset.sk = key;
+        const isNew = !_seenSignals.has(key);
+        div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="ticker">${s.ticker}</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> ${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
+        div.addEventListener('click', () => selectTicker(s.ticker));
+        feed.appendChild(div);
+      });
+    } else if (newCount > 0) {
       const atBottom = feed.scrollHeight - feed.scrollTop <= feed.clientHeight + 40;
-
-      if (newCount >= filtered.length) {
-        // State reset — full rebuild (all signals are "new")
-        const atBottomRb = feed.scrollHeight - feed.scrollTop <= feed.clientHeight + 40;
-        feed.replaceChildren();
-        for (let i = filtered.length - 1; i >= 0; i--) {
-          const s = filtered[i];
-          const key = s.time_str + s.ticker + s.kind;
-          _renderedSigKeys.add(key);
-          const div = el('div', 'feed-item ' + sigClass(s.kind));
-          div.dataset.sk = key;
-          const isNew = !_seenSignals.has(key);
-          _seenSignals.add(key);
-          div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="ticker">${s.ticker}</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span>${isNew?'<span class="sig-new-badge">NEW</span>':''}`;
-          feed.appendChild(div);
-        }
-        if (atBottomRb) feed.scrollTop = feed.scrollHeight;
-      } else {
-        // Incremental — prepend only new signals via insertBefore
-        for (let i = newCount - 1; i >= 0; i--) {
-          const s = filtered[i];
-          const key = s.time_str + s.ticker + s.kind;
-          _renderedSigKeys.add(key);
-          const div = el('div', 'feed-item signal-new ' + sigClass(s.kind));
-          div.dataset.sk = key;
-          const isNew = !_seenSignals.has(key);
-          _seenSignals.add(key);
-          div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="ticker">${s.ticker}</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span>${isNew?'<span class="sig-new-badge">NEW</span>':''}`;
-          feed.insertBefore(div, feed.firstChild);
-        }
-        // Auto-scroll only if user was already at bottom
-        if (atBottom) feed.scrollTop = feed.scrollHeight;
+      for (let i = newCount - 1; i >= 0; i--) {
+        const s = filtered[i];
+        const key = s.time_str + s.ticker + s.kind;
+        _renderedSigKeys.add(key);
+        const div = el('div', 'feed-item signal-new ' + sigClass(s.kind));
+        div.dataset.sk = key;
+        const isNew = !_seenSignals.has(key);
+        div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="ticker">${s.ticker}</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> ${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
+        div.addEventListener('click', () => selectTicker(s.ticker));
+        feed.insertBefore(div, feed.firstChild);
       }
+      if (atBottom) feed.scrollTop = 0;
     }
 
-    // Cap DOM items, evict old from the end
     while (feed.children.length > MAX_FEED) {
       feed.removeChild(feed.lastChild);
     }
 
-    // Keep _renderedSigKeys in sync — rebuild from current filtered data
-    // Prevents unbounded growth when backend rotates signals out of the array
     _renderedSigKeys = new Set();
     for (let i = 0; i < filtered.length; i++) {
       _renderedSigKeys.add(filtered[i].time_str + filtered[i].ticker + filtered[i].kind);
     }
-    // Prune orphaned DOM elements whose keys are no longer in server data
     for (let i = feed.children.length - 1; i >= 0; i--) {
       const sk = feed.children[i].dataset.sk;
       if (sk && !_renderedSigKeys.has(sk)) feed.removeChild(feed.children[i]);
     }
   }
 
-  // ══ Full signals tab (grouped by ticker) ══
+  // ── Full signals tab (grouped by ticker) ──
   const feedFull = $('sig-feed-full');
   if (feedFull) {
-    // Count new signals for grouped view
     let newCountFull = 0;
     while (newCountFull < filtered.length) {
       if (_renderedSigFullKeys.has(filtered[newCountFull].time_str + filtered[newCountFull].ticker + filtered[newCountFull].kind)) break;
@@ -1027,22 +686,20 @@ function renderSignals(data) {
     }
 
     if (filtered.length === 0) {
-      // Empty — clear
       feedFull.replaceChildren();
     } else if (newCountFull >= filtered.length || feedFull.children.length === 0) {
-      // All signals are new (first load / filter change / full reset) — FULL rebuild
       feedFull.replaceChildren();
       const groups = new Map();
       filtered.forEach(s => {
         if (!groups.has(s.ticker)) groups.set(s.ticker, []);
         groups.get(s.ticker).push(s);
       });
-      [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).forEach(([ticker,gsigs]) => {
-        const grp = el('div','sig-group');
-        const key = 'sig-grp-'+ticker;
+      [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([ticker, gsigs]) => {
+        const grp = el('div', 'sig-group');
+        const key = 'sig-grp-' + ticker;
         if (_groupOpen[key] === undefined) _groupOpen[key] = true;
-        const head = el('div','sig-group-head');
-        head.innerHTML = `<span>${ticker} <span style="color:var(--muted)">(${gsigs.length})</span></span><span style="font-size:10px;">${_groupOpen[key]?'▼':'▶'}</span>`;
+        const head = el('div', 'sig-group-head');
+        head.innerHTML = `<span>${ticker} <span style="color:var(--muted)">(${gsigs.length})</span></span><span style="font-size:10px;">${_groupOpen[key] ? '▼' : '▶'}</span>`;
         head.addEventListener('click', () => {
           _groupOpen[key] = !_groupOpen[key];
           const body = grp.querySelector('.sig-group-body');
@@ -1050,26 +707,23 @@ function renderSignals(data) {
           head.querySelector('span:last-child').textContent = _groupOpen[key] ? '▼' : '▶';
         });
         grp.appendChild(head);
-        const bodyEl = el('div','sig-group-body');
+        const bodyEl = el('div', 'sig-group-body');
         if (_groupOpen[key]) bodyEl.classList.add('open');
         gsigs.forEach(s => {
           const sigKey = s.time_str + s.ticker + s.kind;
           _renderedSigFullKeys.add(sigKey);
-          const div = el('div','feed-item '+sigClass(s.kind));
+          const div = el('div', 'feed-item ' + sigClass(s.kind));
           div.dataset.sk = sigKey;
           const isNew = !_seenSignals.has(sigKey);
-          _seenSignals.add(sigKey); // Mark as seen once rendered in full tab
-          div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence||0).toFixed(2)})</span>${isNew?'<span class="sig-new-badge">NEW</span>':''}`;
+          _seenSignals.add(sigKey);
+          div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence || 0).toFixed(2)})</span>${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
           bodyEl.appendChild(div);
         });
         grp.appendChild(bodyEl);
         feedFull.appendChild(grp);
       });
     } else if (newCountFull > 0) {
-      // Incremental — prepend new signals to their respective groups
       const atBottom = feedFull.scrollHeight - feedFull.scrollTop <= feedFull.clientHeight + 40;
-
-      // Group new signals by ticker
       const newByTicker = new Map();
       for (let i = 0; i < newCountFull; i++) {
         const s = filtered[i];
@@ -1078,7 +732,6 @@ function renderSignals(data) {
       }
 
       for (const [ticker, newSigs] of newByTicker) {
-        // Find existing group for this ticker
         const grp = Array.from(feedFull.children).find(c => {
           const h = c.querySelector('.sig-group-head');
           return h && h.textContent.trimStart().startsWith(ticker);
@@ -1088,30 +741,27 @@ function renderSignals(data) {
           const bodyEl = grp.querySelector('.sig-group-body');
           const head = grp.querySelector('.sig-group-head');
           if (bodyEl && head) {
-            // Prepend new signals to this group in order (iterate backwards)
             for (let i = newSigs.length - 1; i >= 0; i--) {
               const s = newSigs[i];
               const key = s.time_str + s.ticker + s.kind;
               _renderedSigFullKeys.add(key);
-              const div = el('div','feed-item signal-new '+sigClass(s.kind));
+              const div = el('div', 'feed-item signal-new ' + sigClass(s.kind));
               div.dataset.sk = key;
               const isNew = !_seenSignals.has(key);
               _seenSignals.add(key);
-              div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence||0).toFixed(2)})</span>${isNew?'<span class="sig-new-badge">NEW</span>':''}`;
+              div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence || 0).toFixed(2)})</span>${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
               bodyEl.insertBefore(div, bodyEl.firstChild);
             }
-            // Update group header count
             const sigSpan = head.querySelector('span:first-child');
             if (sigSpan) {
               sigSpan.innerHTML = `${ticker} <span style="color:var(--muted)">(${bodyEl.children.length})</span>`;
             }
           }
         } else {
-          // New ticker appeared — create new group at the top
-          const grp = el('div','sig-group');
-          const key = 'sig-grp-'+ticker;
+          const grp = el('div', 'sig-group');
+          const key = 'sig-grp-' + ticker;
           _groupOpen[key] = true;
-          const head = el('div','sig-group-head');
+          const head = el('div', 'sig-group-head');
           head.innerHTML = `<span>${ticker} <span style="color:var(--muted)">(${newSigs.length})</span></span><span style="font-size:10px;">▼</span>`;
           head.addEventListener('click', () => {
             _groupOpen[key] = !_groupOpen[key];
@@ -1120,28 +770,26 @@ function renderSignals(data) {
             head.querySelector('span:last-child').textContent = _groupOpen[key] ? '▼' : '▶';
           });
           grp.appendChild(head);
-          const bodyEl = el('div','sig-group-body');
+          const bodyEl = el('div', 'sig-group-body');
           bodyEl.classList.add('open');
           for (let i = newSigs.length - 1; i >= 0; i--) {
             const s = newSigs[i];
             const sk = s.time_str + s.ticker + s.kind;
             _renderedSigFullKeys.add(sk);
-            const div = el('div','feed-item signal-new '+sigClass(s.kind));
+            const div = el('div', 'feed-item signal-new ' + sigClass(s.kind));
             div.dataset.sk = sk;
             const isNew = !_seenSignals.has(sk);
             _seenSignals.add(sk);
-            div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence||0).toFixed(2)})</span>${isNew?'<span class="sig-new-badge">NEW</span>':''}`;
+            div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence || 0).toFixed(2)})</span>${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
             bodyEl.appendChild(div);
           }
           grp.appendChild(bodyEl);
           feedFull.insertBefore(grp, feedFull.firstChild);
         }
       }
-
       if (atBottom) feedFull.scrollTop = feedFull.scrollHeight;
     }
 
-    // Cap items per group
     for (const grp of feedFull.children) {
       const bodyEl = grp.querySelector('.sig-group-body');
       if (bodyEl && bodyEl.children.length > MAX_FEED) {
@@ -1150,12 +798,10 @@ function renderSignals(data) {
         }
       }
     }
-    // Keep _renderedSigFullKeys in sync — rebuild from current filtered data
     _renderedSigFullKeys = new Set();
     for (let i = 0; i < filtered.length; i++) {
       _renderedSigFullKeys.add(filtered[i].time_str + filtered[i].ticker + filtered[i].kind);
     }
-    // Prune orphaned DOM elements from grouped view
     for (let i = feedFull.children.length - 1; i >= 0; i--) {
       const grp = feedFull.children[i];
       const bodyEl = grp.querySelector('.sig-group-body');
@@ -1164,12 +810,10 @@ function renderSignals(data) {
         const sk = bodyEl.children[j].dataset.sk;
         if (sk && !_renderedSigFullKeys.has(sk)) bodyEl.removeChild(bodyEl.children[j]);
       }
-      // Remove empty groups
       if (bodyEl.children.length === 0) feedFull.removeChild(grp);
     }
   }
 
-  // Trim _seenSignals to prevent unbounded growth over long sessions
   if (_seenSignals.size > 10000) {
     const arr = [..._seenSignals];
     _seenSignals = new Set(arr.slice(arr.length - 5000));
@@ -1178,19 +822,17 @@ function renderSignals(data) {
   buildSignalFilters(data);
 }
 
-// ═══════════ UNIVERSE TAB ═══════════
+// ── Universe ──
 function renderUniverse(data) {
   const body = $('uni-body');
   const rows = data.universe || [];
   const states = data.strategy_states || [];
-  // Build ticker → {strategy: state} map
   const stMap = new Map();
   states.forEach(s => {
     if (!stMap.has(s.ticker)) stMap.set(s.ticker, new Map());
     stMap.get(s.ticker).set(s.strategy_name, s);
   });
 
-  // Filters
   const filterRow = $('uni-filter-row'); filterRow.replaceChildren();
   ['ALL', 'Ready', 'Trading'].forEach(f => {
     const chip = el('span', 'filter-chip', f);
@@ -1200,11 +842,10 @@ function renderUniverse(data) {
   });
 
   body.replaceChildren();
-  if (!rows.length) { const tr = el('tr'); const td = el('td','empty-state','No tickers in universe'); td.colSpan=3; tr.appendChild(td); body.appendChild(tr); return; }
+  if (!rows.length) { const tr = el('tr'); const td = el('td', 'empty-state', 'No tickers in universe'); td.colSpan = 3; tr.appendChild(td); body.appendChild(tr); return; }
 
   rows.forEach(u => {
     const sm = stMap.get(u.ticker);
-    // Filter
     if (_uniFilter === 'Ready' && (!sm || ![...sm.values()].some(s => s.ready_state === 2))) return;
     if (_uniFilter === 'Trading' && (!sm || ![...sm.values()].some(s => s.ready_state === 4))) return;
 
@@ -1212,22 +853,22 @@ function renderUniverse(data) {
     tr.style.cursor = 'pointer';
     tr.addEventListener('click', () => selectTicker(u.ticker));
     const tdN = el('td');
-    tdN.innerHTML = `<span style="font-weight:700;">${u.ticker}</span>${u.boosted?'<span class="boosted-star">&#9733;</span>':''}`;
+    tdN.innerHTML = `<span style="font-weight:700;">${u.ticker}</span>${u.boosted ? '<span class="boosted-star">&#9733;</span>' : ''}`;
     tr.appendChild(tdN);
-    tr.appendChild(el('td','mono',fmtT2(u.mark_price)));
+    tr.appendChild(el('td', 'mono', fmtT2(u.mark_price)));
     const tdS = el('td');
     if (sm) {
-      tdS.innerHTML = (u.strategies||[]).map(sn => {
+      tdS.innerHTML = (u.strategies || []).map(sn => {
         const ss = sm.get(sn);
         const cls = stClass(ss ? ss.ready_state : 0);
-        return `<span class="state-dot ${cls}" title="${sn}: ${ss?stName(ss.ready_state):'Cold'}"></span>`;
-      }).join('') + ' ' + (u.strategies||[]).map(sn=>{
-        const cls = sn.includes('bounce')?'strat-bounce':sn.includes('breakout')?'strat-breakout':sn.includes('leaderlag')?'strat-leaderlag':'';
+        return `<span class="state-dot ${cls}" title="${sn}: ${ss ? stName(ss.ready_state) : 'Cold'}"></span>`;
+      }).join('') + ' ' + (u.strategies || []).map(sn => {
+        const cls = sn.includes('bounce') ? 'strat-bounce' : sn.includes('breakout') ? 'strat-breakout' : sn.includes('leaderlag') ? 'strat-leaderlag' : '';
         return `<span class="strat-badge ${cls}">${sn}</span>`;
       }).join('');
     } else {
-      tdS.innerHTML = (u.strategies||[]).map(sn=>{
-        const cls = sn.includes('bounce')?'strat-bounce':sn.includes('breakout')?'strat-breakout':sn.includes('leaderlag')?'strat-leaderlag':'';
+      tdS.innerHTML = (u.strategies || []).map(sn => {
+        const cls = sn.includes('bounce') ? 'strat-bounce' : sn.includes('breakout') ? 'strat-breakout' : sn.includes('leaderlag') ? 'strat-leaderlag' : '';
         return `<span class="strat-badge ${cls}">${sn}</span>`;
       }).join('');
     }
@@ -1236,167 +877,96 @@ function renderUniverse(data) {
   });
 }
 
-// ═══════════ JOURNAL TAB ═══════════
+// ── Journal ──
 function renderJournal(data) {
   const body = $('jrn-body');
   const allEntries = (data.recent_journal || []).slice(0, 50);
-  // Filter by strategy
   const stratFilter = $('jrn-strat-filter');
   const curStrat = stratFilter ? stratFilter.value : '';
   const entries = curStrat ? allEntries.filter(e => e.plan.strategy_name.includes(curStrat)) : allEntries;
   $('jrn-count').textContent = entries.length;
-  body.replaceChildren();
-  if (!entries.length) { const tr = el('tr'); const td = el('td','empty-state','No trades yet'); td.colSpan=7; tr.appendChild(td); body.appendChild(tr); }
 
-  // Populate strategy filter dropdown
-  if (stratFilter && stratFilter.options.length <= 1) {
-    const strats = new Set(allEntries.map(e=>e.plan.strategy_name));
-    strats.forEach(s => { const opt = el('option','',s); opt.value=s; stratFilter.appendChild(opt); });
-    stratFilter.addEventListener('change', ()=>renderJournal(_state));
+  body.replaceChildren();
+  if (!entries.length) {
+    const tr = el('tr');
+    const td = el('td', 'empty-state', 'No journal entries');
+    td.colSpan = 7;
+    tr.appendChild(td);
+    body.appendChild(tr);
+    return;
   }
 
   entries.forEach(e => {
     const tr = el('tr');
-    tr.appendChild(el('td','mono muted', e.ts_unix_ms ? new Date(e.ts_unix_ms).toISOString().slice(11, 23).replace('T',' ') : '—'));
-    tr.appendChild(el('td','',e.plan.ticker));
-    const isLong = e.plan.side === 1;
-    tr.appendChild(el('td','mono '+(isLong?'val-up':'val-dn'),isLong?'L':'S'));
-    const tdStrat = el('td'); tdStrat.innerHTML = stratBadge(e.plan.strategy_name); tr.appendChild(tdStrat);
-    tr.appendChild(el('td','mono '+(e.pnl_usd>=0?'val-up':'val-dn'),fmtS(e.pnl_usd)));
-    tr.appendChild(el('td','mono',fmtT(e.exit_price)));
-    tr.appendChild(el('td','muted',e.cause_of_exit||'—'));
+    const pnlCls = e.pnl_usd >= 0 ? 'val-up' : 'val-dn';
+    tr.innerHTML = `
+      <td class="time">${new Date(e.exit_ts).toISOString().slice(11, 19)}</td>
+      <td class="mono" style="font-weight:700;">${e.plan.ticker}</td>
+      <td class="${e.plan.side === 1 ? 'val-up' : 'val-dn'}">${e.plan.side === 1 ? 'LONG' : 'SHORT'}</td>
+      <td>${stratBadge(e.plan.strategy_name)}</td>
+      <td class="mono ${pnlCls}">${fmt$(e.pnl_usd)}</td>
+      <td class="mono">${fmtT(e.exit_price)}</td>
+      <td class="muted" style="font-size:10px;">${e.cause_of_exit || '—'}</td>
+    `;
     body.appendChild(tr);
   });
-
-  // Cumulative PnL chart
-  drawCanvas('jrn-pnl-chart', (ctx,w,h) => {
-    const rev = [...allEntries].reverse();
-    let cum = 0;
-    const series = [0];
-    rev.forEach(e => { cum += e.pnl_usd; series.push(cum); });
-    if (series.length < 2) { ctx.fillStyle='#7b859c'; ctx.font='10px sans-serif'; ctx.textAlign='center'; ctx.fillText('No trade data', w/2, h/2); return; }
-    const pad={top:8,right:40,bottom:18,left:8}, pw=w-pad.left-pad.right, ph=h-pad.top-pad.bottom;
-    const min=Math.min(...series), max=Math.max(...series), range=(max-min)||1;
-    const toX=i=>pad.left+(i/(series.length-1))*pw, toY=v=>pad.top+ph-((v-min)/range)*ph;
-    const isUp=series[series.length-1]>=0;
-    ctx.beginPath(); ctx.moveTo(toX(0),toY(series[0])); series.forEach((v,i)=>ctx.lineTo(toX(i),toY(v)));
-    const baseline=toY(0); ctx.lineTo(toX(series.length-1),baseline); ctx.lineTo(toX(0),baseline); ctx.closePath();
-    ctx.fillStyle=isUp?'rgba(16,185,129,0.08)':'rgba(239,68,68,0.08)'; ctx.fill();
-    ctx.beginPath(); ctx.moveTo(toX(0),toY(series[0])); series.forEach((v,i)=>ctx.lineTo(toX(i),toY(v)));
-    ctx.strokeStyle=isUp?'#10b981':'#ef4444'; ctx.lineWidth=1.5; ctx.stroke();
-    // Zero line
-    const zy=toY(0); ctx.strokeStyle='rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.moveTo(pad.left,zy); ctx.lineTo(w-pad.right,zy); ctx.stroke();
-    ctx.fillStyle='#7b859c'; ctx.font='8px Inter, sans-serif'; ctx.textAlign='right';
-    ctx.fillText('$'+max.toFixed(0), w-4, pad.top+10);
-    ctx.fillText('$'+min.toFixed(0), w-4, h-4);
-  });
-}
-
-// ═══════════ SIGNAL COUNTS ═══════════
-function renderSigCounts(data) {
-  const body = $('sig-cnt-body'); body.replaceChildren();
-  const counts = data.signal_counts || {};
-  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
-  if (!entries.length) { body.appendChild(el('div','empty-state','No signals')); return; }
-  const max = entries[0][1]||1;
-  entries.slice(0,12).forEach(([k,v])=>{
-    const row=el('div','sig-bar-row');
-    row.innerHTML=`<span class="sig-bar-label">${k}</span><div class="sig-bar-track"><div class="sig-bar-fill" style="width:${(v/max*100).toFixed(0)}%;"></div></div><span class="sig-bar-cnt">${v}</span>`;
-    body.appendChild(row);
-  });
-}
-
-// ═══════════ CONTROLS TAB ═══════════
-function renderControls(data) {
-  const recActive = data.recorder_active;
-  $('rec-start-btn').disabled = recActive;
-  $('rec-stop-btn').disabled = !recActive;
-  $('rec-status').textContent = recActive ? '● RECORDING' : 'Idle';
-  $('rec-status').className = recActive ? 'val-dn' : '';
-  $('rec-path').textContent = data.recorder_path || '';
-}
-
-// ═══════════ TICKER SELECTOR ═══════════
-function selectTicker(ticker) {
-  if (!ticker || ticker === _selTicker) return;
-  _selTicker = ticker;
-  _selTickerTime = Date.now();
-  fetch('/api/ticker/select', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ticker: ticker})
-  }).catch(e => console.error('selectTicker failed:', e));
-}
-
-// ═══════════ METRICS ═══════════
-function computeMetrics(data) {
-  const journal = data.recent_journal || [];
-  const startEq = (data.account && data.account.starting_equity_usd) || 10000;
-  const curEq = (data.account && data.account.equity_usd) || startEq;
-  let cur = startEq, wins=0, losses=0, totalW=0, totalL=0;
-  const series = [startEq];
-  [...journal].reverse().forEach(e => { cur+=e.pnl_usd; series.push(cur); if(e.pnl_usd>0){wins++;totalW+=e.pnl_usd;}else{losses++;totalL+=Math.abs(e.pnl_usd);} });
-  if (series[series.length-1] !== curEq) series.push(curEq);
-  const total=wins+losses, wr=total>0?(wins/total)*100:0, pf=totalL>0?totalW/totalL:(totalW>0?99:0);
-  const drawdown = startEq>0?((curEq-startEq)/startEq)*100:0;
-  return {series,wr,pf,total,drawdown,startEq};
-}
-
-// ═══════════ TRADE DETECTION ═══════════
-function detectDiffs(data) {
-  const current = new Map();
-  (data.open_trades||[]).forEach(t=>{const k=`${t.plan.ticker}_${t.plan.side}_${t.plan.strategy_name}`;current.set(k,t);if(!_prevTrades.has(k)&&t.executed_size>0){const side=t.plan.side===1?'LONG':'SHORT';toast(`▲ OPENED ${t.plan.ticker}`,`${side} @ ${fmtT(t.avg_entry_price)} | ${stratBadge(t.plan.strategy_name)}`,'pos');}});
-  _prevTrades.forEach((t,k)=>{if(!current.has(k)){const j=(data.recent_journal||[]).find(x=>x.plan.ticker===t.plan.ticker&&x.plan.side===t.plan.side&&x.plan.strategy_name===t.plan.strategy_name);const pnl=j?j.pnl_usd:0;const icon=pnl>=0?'▲':'▼';toast(`${icon} CLOSED ${t.plan.ticker}`,`PNL: ${fmtS(pnl)} | ${stratBadge(t.plan.strategy_name)}`,pnl>=0?'pos':'neg');}});
-  _prevTrades=current;
-}
-function toast(title, msg, type) {
-  const t=el('div','toast');t.className='toast '+(type||'');const progress=el('div','toast-progress');t.appendChild(progress);
-  const strong = el('strong'); strong.textContent = title;
-  const span = el('span'); span.style.cssText = 'font-size:11px;color:var(--muted)'; span.innerHTML = msg;
-  t.appendChild(strong); t.appendChild(el('br')); t.appendChild(span);
-  $('toasts').appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity 0.3s';setTimeout(()=>t.remove(),300);},4800);
 }
 
 // ═══════════ RECORDER ═══════════
 function startRecorder() {
-  const fn = ($('rec-filename').value||'dump').replace(/[^a-zA-Z0-9\-_.]/g,'');
-  fetch('/api/dump/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:fn})})
-    .then(r=>r.json()).then(j=>{if(j.ok){$('rec-status').textContent='● RECORDING';$('rec-status').className='val-dn';$('rec-start-btn').disabled=true;$('rec-stop-btn').disabled=false;}else toast('Recorder Error',j.error||'Failed','neg');})
-    .catch(()=>toast('Recorder Error','Network error','neg'));
+  const fn = ($('rec-filename').value || 'dump').replace(/[^a-zA-Z0-9\-_.]/g, '');
+  fetch('/api/dump/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: fn }) })
+    .then(r => r.json()).then(j => { if (j.ok) { $('rec-status').textContent = '● RECORDING'; $('rec-status').className = 'val-dn'; $('rec-start-btn').disabled = true; $('rec-stop-btn').disabled = false; } else toast('Recorder Error', j.error || 'Failed', 'neg'); })
+    .catch(() => toast('Recorder Error', 'Network error', 'neg'));
 }
 function stopRecorder() {
-  fetch('/api/dump/stop',{method:'POST'}).then(r=>r.json()).then(()=>{$('rec-status').textContent='Idle';$('rec-status').className='';$('rec-start-btn').disabled=false;$('rec-stop-btn').disabled=true;}).catch(()=>{});
+  fetch('/api/dump/stop', { method: 'POST' }).then(r => r.json()).then(() => { $('rec-status').textContent = 'Idle'; $('rec-status').className = ''; $('rec-start-btn').disabled = false; $('rec-stop-btn').disabled = true; }).catch(() => { });
 }
 
 // ═══════════ CSV ═══════════
 function exportCSV() {
-  if(!_state||!_state.recent_journal||!_state.recent_journal.length) return;
-  let csv='Ticker,Side,Strategy,Entry Price,Exit Price,PnL USD,Exit Reason\n';
-  _state.recent_journal.forEach(e=>{csv+=`${e.plan.ticker},${e.plan.side===1?'LONG':'SHORT'},${e.plan.strategy_name},${e.plan.entry_price},${e.exit_price},${e.pnl_usd},${e.cause_of_exit||''}\n`;});
-  const blob=new Blob([csv],{type:'text/csv'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='trade_journal_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  if (!_state || !_state.recent_journal || !_state.recent_journal.length) return;
+  let csv = 'Ticker,Side,Strategy,Entry Price,Exit Price,PnL USD,Exit Reason\n';
+  _state.recent_journal.forEach(e => { csv += `${e.plan.ticker},${e.plan.side === 1 ? 'LONG' : 'SHORT'},${e.plan.strategy_name},${e.plan.entry_price},${e.exit_price},${e.pnl_usd},${e.cause_of_exit || ''}\n`; });
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `journal_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
 }
 
-// ═══════════ LOGS ═══════════
-function fetchLogs() {
-  fetch('/api/logs?n=60').then(r=>r.json()).then(lines=>{
-    const feed=$('log-feed');if(!feed)return;const atBottom=feed.scrollHeight-feed.scrollTop<=feed.clientHeight+40;feed.replaceChildren();
-    if(!lines||!lines.length){feed.appendChild(el('div','empty-state','No log entries'));return;}
-    lines.forEach(l=>{const div=el('div','feed-line');div.textContent=l;if(/\[critical\]/.test(l))div.className='feed-line lvl-critical';else if(/\[error\]/.test(l))div.className='feed-line lvl-error';else if(/\[warn\]/.test(l))div.className='feed-line lvl-warn';else if(/\[info\]/.test(l))div.className='feed-line lvl-info';else if(/\[debug\]/.test(l))div.className='feed-line lvl-debug';else if(/\[trace\]/.test(l))div.className='feed-line lvl-trace';feed.appendChild(div);});
-    if(atBottom)feed.scrollTop=feed.scrollHeight;}).catch(()=>{});
+// ═══════════ MAIN LOOP ═══════════
+function poll() {
+  fetch('/api/state').then(r => r.json()).then(data => {
+    _state = data;
+    renderGauges(data);
+    renderHeatmap(data);
+    renderDetail(data);
+    renderConditions(data);
+    renderTrading(data);
+    renderPositions(data);
+    renderSignals(data);
+    renderUniverse(data);
+    renderJournal(data);
+
+    // Kill-switch banner
+    const ks = $('kill-switch-banner');
+    if (ks) ks.style.display = data.kill_switch_active ? 'block' : 'none';
+
+  }).catch(err => {
+    console.error('Poll error:', err);
+  });
 }
 
-// ═══════════ WEBSOCKET ═══════════
-function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => { $('ws-dot').className='dot live'; $('ws-label').textContent='LIVE'; $('ws-label').className='mono val-up'; };
-  ws.onclose = () => { $('ws-dot').className='dot offline'; $('ws-label').textContent='OFF'; $('ws-label').className='mono'; setTimeout(connect,2000); };
-  ws.onmessage = e => { try { update(JSON.parse(e.data)); } catch(err) { console.error('WS parse error:', err); } };
-  ws.onerror = () => {};
-}
+setInterval(poll, 1000);
+poll();
 
-// ═══════════ INIT ═══════════
-window.addEventListener('DOMContentLoaded',()=>{connect();updateClock();setInterval(updateClock,1000);setInterval(fetchLogs,3000);fetchLogs();initChartZoom();});
-window.addEventListener('resize',()=>{clearTimeout(_resizeTimer);_resizeTimer=setTimeout(()=>{if(_state){const m=computeMetrics(_state);renderEquityChart(m.series,m.startEq);renderTrading(_state,true);}},300);});
+// Handle resize
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => { if (_state) renderTrading(_state, true); }, 100);
+});
 </script>
 </body>
 </html>
