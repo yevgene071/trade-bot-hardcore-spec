@@ -1,0 +1,11 @@
+.pos-ticker { font-weight: 800; font-size: 12px; color: var(--text); }
+.pos-strat { font-size: 12px; color: var(--muted); font-weight: 500; }
+.pos-side-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-weight: 800; font-size: 12px; letter-spacing: 0.04em; }
+.pos-side-badge.long { background: var(--positive-soft); color: var(--positive-bright); border: 1px solid rgba(16,185,129,0.2); }
+.pos-side-badge.short { background: var(--negative-soft); color: var(--negative-bright); border: 1px solid rgba(239,68,68,0.2); }
+.pos-pnl { font-size: 13px; font-weight: 800; transition: color 0.3s ease; }
+.pos-pnl-pct { font-size: 11px; color: var(--muted); }
+
+.sltp-bar { height: 6px; background: var(--subtle); border-radius: 3px; position: relative; overflow: visible; min-width: 60px; }
+.sltp-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.sltp-marker { position: absolute; top: -3px; width: 6px; height: 12px; border-radius: 2px; transform: translateX(-50%); z-index: 2; }

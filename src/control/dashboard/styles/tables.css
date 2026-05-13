@@ -1,0 +1,8 @@
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; padding: 5px 8px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 2px solid var(--border); position: sticky; top: 0; background: var(--surface-glass); z-index: 1; }
+td { padding: 5px 8px; font-size: 12.5px; border-bottom: 1px solid rgba(255,255,255,0.02); vertical-align: middle; }
+tr:hover td { background: rgba(255,255,255,0.01); }
+tr.pos-detail { display: none; }
+tr.pos-detail.open { display: table-row; }
+tr.pos-detail td { padding: 4px 8px; font-size: 11px; background: var(--surface); color: var(--muted); }
+.mono { font-family: var(--mono); }
