@@ -37,9 +37,14 @@ let _lastSigFilter = '';
  * State setters to be used by other modules.
  */
 function setState(s) { _state = s; }
-function setSelTicker(t) { _selTicker = t; _selTickerTime = Date.now(); }
+function setSelTicker(t) { _selTicker = t; }
+function setSelTickerTime(t) { _selTickerTime = t; }
 function setHmFilter(f) { _hmFilter = f; }
 function setTfPoints(p) { _tfPoints = p; }
 function setSigFilter(f) { _sigFilter = f; }
 function setUniFilter(f) { _uniFilter = f; }
 function setChartZoom(z) { _chartZoom = z; }
+function setZoomDragStart(s) { _zoomDragStart = s; }
+function setLastTradingHash(h) { _lastTradingHash = h; }
+function setLastSticks(s) { _lastSticks = s; }
+function setResizeTimer(t) { _resizeTimer = t; }

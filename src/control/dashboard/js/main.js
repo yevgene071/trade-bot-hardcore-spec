@@ -5,6 +5,13 @@
 // @depends-on: core/dom.js
 // @depends-on: core/toast.js
 
+// Charts
+// @depends-on: charts/canvas.js
+// @depends-on: charts/equity.js
+// @depends-on: charts/price.js
+// @depends-on: charts/mini.js
+// @depends-on: charts/zoom.js
+
 // Panels
 // @depends-on: panels/header.js
 // @depends-on: panels/strategy-perf.js
