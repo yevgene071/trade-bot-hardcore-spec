@@ -257,7 +257,9 @@ std::string DashboardServer::serialize_state_locked_() const {
             {"losses",       st.losses},
             {"total_pnl",    st.total_pnl},
             {"best_pnl",     st.best_pnl},
-            {"worst_pnl",    st.worst_pnl}
+            {"worst_pnl",    st.worst_pnl},
+            {"gross_profit", st.gross_profit},
+            {"gross_loss",   st.gross_loss}
         });
     }
     j["funding_info"] = nlohmann::json::array();

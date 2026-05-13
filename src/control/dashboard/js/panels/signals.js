@@ -152,7 +152,7 @@ function renderSignals(data) {
             const div = el('div', 'feed-item ' + sigClass(s.kind));
             div.dataset.sk = sigKey;
             const isNew = !_seenSignals.has(sigKey);
-            _seenSignals.add(sigKey);
+            if ($('tab-signals') && $('tab-signals').classList.contains('active')) _seenSignals.add(sigKey);
             div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence || 0).toFixed(2)})</span>${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
             bodyEl.appendChild(div);
           });
@@ -185,7 +185,7 @@ function renderSignals(data) {
               const div = el('div', 'feed-item signal-new ' + sigClass(s.kind));
               div.dataset.sk = key;
               const isNew = !_seenSignals.has(key);
-              _seenSignals.add(key);
+              if ($('tab-signals') && $('tab-signals').classList.contains('active')) _seenSignals.add(key);
               div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence || 0).toFixed(2)})</span>${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
               bodyEl.insertBefore(div, bodyEl.firstChild);
             }
@@ -216,7 +216,7 @@ function renderSignals(data) {
             const div = el('div', 'feed-item signal-new ' + sigClass(s.kind));
             div.dataset.sk = sk;
             const isNew = !_seenSignals.has(sk);
-            _seenSignals.add(sk);
+            if ($('tab-signals') && $('tab-signals').classList.contains('active')) _seenSignals.add(sk);
             div.innerHTML = `<span class="time">[${s.time_str}]</span> <span class="kind">${s.kind}</span> @ <span class="mono">${fmtT(s.price)}</span> <span class="muted">(${(s.confidence || 0).toFixed(2)})</span>${isNew ? '<span class="sig-new-badge">NEW</span>' : ''}`;
             bodyEl.appendChild(div);
           }
@@ -253,7 +253,9 @@ function renderSignals(data) {
 
   // Mark ALL current signals as seen so the badge only highlights
   // signals that arrive between polls, regardless of active filter.
-  sigs.forEach((s) => _seenSignals.add(s.time_str + s.ticker + s.kind));
+  if ($('tab-signals') && $('tab-signals').classList.contains('active')) {
+    sigs.forEach((s) => _seenSignals.add(s.time_str + s.ticker + s.kind));
+  }
 
   if (_seenSignals.size > 10000) {
     const arr = [..._seenSignals];

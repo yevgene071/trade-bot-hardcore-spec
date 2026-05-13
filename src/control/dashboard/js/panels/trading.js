@@ -49,20 +49,26 @@ function renderTrading(data, forceRender) {
     }
   }
 
+  // ── Chart Header ──
+  const chartName = $('trade-chart-name');
+  if (chartName) chartName.textContent = obTicker;
+  const chartLast = $('trade-chart-last');
+  if (chartLast) chartLast.textContent = fmt$(data.ob_mid || 0);
+
   // ── DOM Ladder hash (cheap — compute first to gate expensive derivations) ──
   const ladderHash = JSON.stringify({
-    b: bids.map((x) => [+(x.price || 0).toFixed(2), +(x.size || 0).toFixed(4)]),
-    a: asks.map((x) => [+(x.price || 0).toFixed(2), +(x.size || 0).toFixed(4)]),
+    b: bids.map((x) => x.price),
+    a: asks.map((x) => x.price),
   });
   const ladderChanged = ladderHash !== _lastTradingHash || forceRender;
 
-  // ── Derive tick / bestAsk / bestBid / sticks ONLY on ladder change ──
+  // ── Derive tick / bestAsk / bestBid / sticks ──
   let tick = 0.01,
     dec = 3,
     bestAsk = 0,
     bestBid = 0,
     spreadPrice = 0;
-  if (ladderChanged) {
+  if (true) {
     const candidates = [];
     for (let i = 1; i < asks.length; i++) {
       const d = Math.abs(asks[i].price - asks[i - 1].price);
@@ -144,32 +150,67 @@ function renderTrading(data, forceRender) {
     });
 
     ladder.innerHTML = html;
-
-    // ── Mid-line positioning ──
-    if (bestAsk !== bestBid && tick > 0) {
-      const askCount = asks.length;
-      const spCount = spreadRows;
-      const spreadZoneTopY = askCount * ROW_H;
-      const spreadZoneBotY = (askCount + spCount) * ROW_H;
-      const midFrac = Math.max(
-        0,
-        Math.min(1, (bestAsk - (data.ob_mid || 0)) / (bestAsk - bestBid))
-      );
-      const midY = spreadZoneTopY + midFrac * (spreadZoneBotY + ROW_H - spreadZoneTopY);
-
-      const midLine = $('trade-mid-line');
-      const midTag = $('trade-mid-tag');
-      if (midLine) midLine.style.top = midY + 'px';
-      if (midTag) {
-        midTag.style.top = midY + 'px';
-        midTag.textContent = (data.ob_mid || 0).toFixed(dec);
+  } else if (!ladderChanged && ladder.children.length > 0 && (bids.length || asks.length)) {
+    // Fast path: Update sizes dynamically
+    const maxSz = Math.max(...bids.map((b) => b.size), ...asks.map((a) => a.size), 0.001);
+    const BIG = maxSz * 0.52;
+    
+    const askLvls = ladder.querySelectorAll('.ask-lvl');
+    const asksRev = [...asks].reverse();
+    asksRev.forEach((a, i) => {
+      if (i < askLvls.length) {
+        const el = askLvls[i];
+        const pct = Math.min(100, (a.size / maxSz) * 100).toFixed(0);
+        const big = a.size >= BIG;
+        el.className = `lvl ask-lvl${big ? ' big-ask' : ''}`;
+        const fill = el.querySelector('.a-fill');
+        if (fill) fill.style.width = `${pct}%`;
+        const lbl = el.querySelector('.a-lbl');
+        if (lbl) lbl.textContent = fmtSz(a.size);
       }
-
-      // Auto-scroll to mid only on first render (when ladder changed)
-      const wrap = $('trade-ladder-wrap');
-      if (wrap && (forceRender || ladderChanged)) {
-        wrap.scrollTop = Math.max(0, midY - wrap.clientHeight / 2);
+    });
+    
+    const bidLvls = ladder.querySelectorAll('.bid-lvl');
+    bids.forEach((b, i) => {
+      if (i < bidLvls.length) {
+        const el = bidLvls[i];
+        const pct = Math.min(100, (b.size / maxSz) * 100).toFixed(0);
+        const big = b.size >= BIG;
+        el.className = `lvl bid-lvl${big ? ' big-bid' : ''}`;
+        const fill = el.querySelector('.b-fill');
+        if (fill) fill.style.width = `${pct}%`;
+        const lbl = el.querySelector('.b-lbl');
+        if (lbl) lbl.textContent = fmtSz(b.size);
       }
+    });
+  }
+
+  // ── Mid-line positioning ──
+  if ((bids.length || asks.length) && bestAsk !== bestBid && tick > 0) {
+    const ROW_H = 18;
+    const askCount = asks.length;
+    const spreadRows = _lastSticks > 1 ? _lastSticks - 1 : 0;
+    const spCount = spreadRows;
+    const spreadZoneTopY = askCount * ROW_H;
+    const spreadZoneBotY = (askCount + spCount) * ROW_H;
+    const midFrac = Math.max(
+      0,
+      Math.min(1, (bestAsk - (data.ob_mid || 0)) / (bestAsk - bestBid))
+    );
+    const midY = spreadZoneTopY + midFrac * (spreadZoneBotY + ROW_H - spreadZoneTopY);
+
+    const midLine = $('trade-mid-line');
+    const midTag = $('trade-mid-tag');
+    if (midLine) midLine.style.top = midY + 'px';
+    if (midTag) {
+      midTag.style.top = midY + 'px';
+      midTag.textContent = (data.ob_mid || 0).toFixed(dec);
+    }
+
+    // Auto-scroll to mid only on first render (when ladder changed)
+    const wrap = $('trade-ladder-wrap');
+    if (wrap && (forceRender || ladderChanged)) {
+      wrap.scrollTop = Math.max(0, midY - wrap.clientHeight / 2);
     }
   }
 

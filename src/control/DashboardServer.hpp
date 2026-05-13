@@ -56,6 +56,8 @@ public:
             double      total_pnl{0.0};
             double      best_pnl{0.0};
             double      worst_pnl{0.0};
+            double      gross_profit{0.0};
+            double      gross_loss{0.0};
         };
 
         struct FundingInfo {
