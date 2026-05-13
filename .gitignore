@@ -39,3 +39,5 @@ CLAUDE.md
 claude-flow.config.json
 Connections
 data/
+journal/account_state.json
+cmake/__pycache__/
