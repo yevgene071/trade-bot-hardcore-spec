@@ -1972,7 +1972,6 @@ function connect() {
 
 // ═══════════ INIT ═══════════
 window.addEventListener('DOMContentLoaded',()=>{connect();updateClock();setInterval(updateClock,1000);setInterval(fetchLogs,3000);fetchLogs();initChartZoom();});
-let _resizeTimer=null;
 window.addEventListener('resize',()=>{clearTimeout(_resizeTimer);_resizeTimer=setTimeout(()=>{if(_state){const m=computeMetrics(_state);renderEquityChart(m.series,m.startEq);renderTrading(_state,true);}},300);});
 </script>
 </body>
