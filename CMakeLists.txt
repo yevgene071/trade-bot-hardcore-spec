@@ -126,6 +126,10 @@ file(GLOB DASHBOARD_STYLE_DEPS CONFIGURE_DEPENDS
 file(GLOB DASHBOARD_JS_DEPS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard/js/*.js"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard/js/core/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard/js/panels/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard/js/charts/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard/js/transport/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/control/dashboard/js/app/*.js"
 )
 
 add_custom_command(
