@@ -22,3 +22,5 @@
 // @depends-on: panels/universe.js
 // @depends-on: panels/journal.js
 // @depends-on: panels/signals.js
+// @depends-on: panels/heatmap.js
+// @depends-on: panels/trading.js
