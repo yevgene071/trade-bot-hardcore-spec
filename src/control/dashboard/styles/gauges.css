@@ -1,5 +1,0 @@
-.gauge-container { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.gauge-ring { position: relative; width: 80px; height: 80px; }
-.gauge-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.gauge-value { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-family: var(--mono); font-size: 14px; font-weight: 800; color: var(--text); }
-.gauge-label { font-size: 11px; color: var(--muted); text-align: center; text-transform: uppercase; letter-spacing: 0.05em; }

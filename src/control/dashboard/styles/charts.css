@@ -1,5 +1,0 @@
-.chart-container { border-radius: var(--radius-sm); overflow: hidden; position: relative; background: var(--surface2); }
-.chart-container canvas { width: 100%; height: 100%; }
-.chart-container.lg { height: 220px; }
-.chart-container.md { height: 140px; }
-.chart-container.sm { height: 90px; }

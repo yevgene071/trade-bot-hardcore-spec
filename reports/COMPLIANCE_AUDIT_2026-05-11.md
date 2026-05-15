@@ -18,7 +18,7 @@
 
 ---
 
-## 1. SIGNAL DETECTORS (src/signals/)
+## 1. SIGNAL DETECTORS (core/src/signals/)
 
 ### 1.1 DensityDetector ✅ СООТВЕТСТВУЕТ (95%)
 - ✅ DEMA для фильтрации шума.
@@ -41,7 +41,7 @@
 
 ---
 
-## 2. STRATEGIES (src/strategy/)
+## 2. STRATEGIES (core/src/strategy/)
 
 ### 2.1 BounceFromDensity ✅ СООТВЕТСТВУЕТ (95%)
 - ✅ Добавлены проверки TapeFade (C4) и LeaderMove (C6).

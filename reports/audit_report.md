@@ -12,7 +12,7 @@
 
 ### [C-1] Active trades не персистируются — startup recovery сломан полностью
 
-**Файл:** `src/main.cpp:483`
+**Файл:** `core/src/main.cpp:483`
 
 ```cpp
 // каждые 10 секунд
@@ -41,7 +41,7 @@ persister_->save({account_state_, active_snapshot, last_reset_day_, false, ""});
 
 ### [C-2] SL/TP-failure не генерирует алерт — позиция без стопа
 
-**Файл:** `src/executor/LiveExecutor.cpp:394–418` (функция `place_stops_`)
+**Файл:** `core/src/executor/LiveExecutor.cpp:394–418` (функция `place_stops_`)
 
 ```cpp
 try {
@@ -72,7 +72,7 @@ try {
 
 ### [C-3] RiskManager создаётся с дефолтным конфигом — параметры из config.toml игнорируются
 
-**Файл:** `src/main.cpp:150`
+**Файл:** `core/src/main.cpp:150`
 
 ```cpp
 risk_manager_ = std::make_unique<RiskManager>(universe_, news_);
@@ -96,7 +96,7 @@ risk_manager_ = std::make_unique<RiskManager>(universe_, news_, rm_cfg);
 
 ### [C-4] R10 (rate-limit) считает закрытия сделок, а не их открытия
 
-**Файл:** `src/risk/RiskManager.cpp:255–260`
+**Файл:** `core/src/risk/RiskManager.cpp:255–260`
 
 ```cpp
 void RiskManager::record_trade_end(bool is_loss,
@@ -126,7 +126,7 @@ if (trade_history_.size() >= static_cast<size_t>(cfg_.max_trades_per_window)) {
 
 ### [H-1] Order-matching по размеру — риск ложного захвата при дублирующихся сделках
 
-**Файл:** `src/executor/LiveExecutor.cpp:135–168`
+**Файл:** `core/src/executor/LiveExecutor.cpp:135–168`
 
 ```cpp
 constexpr double kSizeEps = 1e-6;
@@ -151,7 +151,7 @@ const bool fresh_entry =
 
 ### [H-2] StartupRecovery размещает emergency-stop с `OrderType::Stop`, а не `StopLoss`
 
-**Файл:** `src/executor/StartupRecovery.cpp:71`
+**Файл:** `core/src/executor/StartupRecovery.cpp:71`
 
 ```cpp
 req.type = OrderType::Stop;   // ← должен быть StopLoss
@@ -163,7 +163,7 @@ req.type = OrderType::Stop;   // ← должен быть StopLoss
 
 ### [H-3] schema_version не проверяется при загрузке — тихая деградация данных
 
-**Файл:** `src/risk/AccountStatePersister.cpp:47–66`
+**Файл:** `core/src/risk/AccountStatePersister.cpp:47–66`
 
 ```cpp
 j["schema_version"] = 1;   // сохраняем
@@ -189,7 +189,7 @@ if (ver != 1) {
 
 ### [H-4] ClosedTrade.reason неверен для второй части позиции после TP1
 
-**Файл:** `src/executor/LiveExecutor.cpp:240–253`
+**Файл:** `core/src/executor/LiveExecutor.cpp:240–253`
 
 ```cpp
 } else if (is_stop || is_tp2 || (is_tp1 && trade.tp1_filled)) {
@@ -212,7 +212,7 @@ if (ver != 1) {
 
 ### [M-1] `update_extremes_` — мёртвый код в дублирующемся duplicate-check
 
-**Файл:** `src/signals/LevelDetector.cpp:52–81`
+**Файл:** `core/src/signals/LevelDetector.cpp:52–81`
 
 ```cpp
 bool found = false;
@@ -234,7 +234,7 @@ if (!found) {
 
 ### [M-2] PaperExecutor не учитывает fees и funding — результаты систематически оптимистичны
 
-**Файл:** `src/executor/PaperExecutor.cpp`
+**Файл:** `core/src/executor/PaperExecutor.cpp`
 
 Slippage моделируется (bps), но комиссия биржи (`~0.04%` maker/taker на futures) и funding-rate (`~0.01% / 8h`) игнорируются полностью. Для скальпинговой стратегии с коротким holding-time fees составляют значительную долю PnL. Paper-результаты будут систематически завышены относительно live.
 
@@ -244,7 +244,7 @@ Slippage моделируется (bps), но комиссия биржи (`~0.0
 
 ### [M-3] `books_for_executor_` передаётся в PaperExecutor по ссылке до заполнения
 
-**Файл:** `src/main.cpp:213–216`
+**Файл:** `core/src/main.cpp:213–216`
 
 ```cpp
 executor_ = std::make_unique<PaperExecutor>(books_for_executor_);
@@ -261,15 +261,15 @@ executor_ = std::make_unique<PaperExecutor>(books_for_executor_);
 
 ### [L-1] Нормализация ticker-name (`BTC_USDT` ↔ `BTCUSDT`) дублируется в двух местах
 
-**Файл:** `src/main.cpp:273–276, 428–432`
+**Файл:** `core/src/main.cpp:273–276, 428–432`
 
-Одна и та же логика разбора leader ticker вынесена дважды. Нужна утилита в `src/utils/` или `TickerUniverse`.
+Одна и та же логика разбора leader ticker вынесена дважды. Нужна утилита в `core/src/utils/` или `TickerUniverse`.
 
 ---
 
 ### [L-2] `authorize()` — длина токена утекает через timing
 
-**Файл:** `src/control/DashboardServer.cpp:818–831`
+**Файл:** `core/src/control/DashboardServer.cpp:818–831`
 
 ```cpp
 if (presented.size() != auth_token_.size()) return false;  // ← early-exit по длине

@@ -284,13 +284,13 @@ The toml value is integer; `int64_t` is used for parsing but the config field is
 
 | File | Issues |
 |------|--------|
-| `src/transport/MarketDataFeed.cpp` | T0-BUG #1: fix mark_price_update parser |
-| `src/risk/RiskManager.hpp` | T0-BUG #2, #3: add config fields |
-| `src/risk/RiskManager.cpp` | T0-BUG #2, #3: add R14/R15 checks |
-| `src/executor/LiveExecutor.cpp` | T0-BUG #2: add R14 monitoring loop |
-| `src/executor/PaperExecutor.cpp` | T0-BUG #2: add R14 monitoring loop |
-| `src/main.cpp` | T1-FEAT #6: real affinity scoring, T2-GAP #12: FlushReversal registration |
-| `src/strategy/FlushReversal.{hpp,cpp}` | T0-BUG #4: create strategy |
-| `src/signals/LiquidationDetector.{hpp,cpp}` | T1-FEAT #5: create detector |
+| `core/src/transport/MarketDataFeed.cpp` | T0-BUG #1: fix mark_price_update parser |
+| `core/src/risk/RiskManager.hpp` | T0-BUG #2, #3: add config fields |
+| `core/src/risk/RiskManager.cpp` | T0-BUG #2, #3: add R14/R15 checks |
+| `core/src/executor/LiveExecutor.cpp` | T0-BUG #2: add R14 monitoring loop |
+| `core/src/executor/PaperExecutor.cpp` | T0-BUG #2: add R14 monitoring loop |
+| `core/src/main.cpp` | T1-FEAT #6: real affinity scoring, T2-GAP #12: FlushReversal registration |
+| `core/src/strategy/FlushReversal.{hpp,cpp}` | T0-BUG #4: create strategy |
+| `core/src/signals/LiquidationDetector.{hpp,cpp}` | T1-FEAT #5: create detector |
 | `config.toml` | T1-FEAT: add missing config keys |
 | `CMakeLists.txt` | T0-BUG #4, T1-FEAT #5: add new source files |

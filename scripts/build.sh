@@ -83,13 +83,13 @@ echo -e "${BOLD}═══ ${GREEN}Build: $MODE${NC} ${BOLD}═══${NC}"
 if [ "$NO_CONAN" = false ]; then
     step "Conan install ($MODE) ..."
     if [ "$MODE" = "debug" ]; then
-        conan install . \
+        conan install core \
             --output-folder="$BUILD_DIR" \
             --build=missing \
             -pr debug-asan \
             || die "Conan install failed"
     else
-        conan install . \
+        conan install core \
             --output-folder="$BUILD_DIR" \
             --build=missing \
             -s build_type="$BUILD_TYPE" \
@@ -103,7 +103,7 @@ fi
 # ── cmake configure ───────────────────────────────────────
 if [ "$QUICK" = false ]; then
     step "CMake configure ($MODE) ..."
-    cmake --preset "$MODE" \
+    cmake -S core --preset "$MODE" \
         -DBUILD_TESTS="$BUILD_TESTS" \
         -DBUILD_BENCHMARKS="$BUILD_BENCHMARKS" \
         || die "CMake configure failed"

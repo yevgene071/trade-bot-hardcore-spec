@@ -34,10 +34,37 @@ GEMINI.md
 .gemini/
 gha-creds-*.json
 node_modules
-journal/account_state.json
 CLAUDE.md
 claude-flow.config.json
 Connections
 data/
-journal/account_state.json
 cmake/__pycache__/
+
+# core build dir (safety)
+/core/build/
+
+# CTest artifacts
+/Testing/
+
+# Dashboard build and cache
+/dashboard/dist/
+/dashboard/.env
+/dashboard/.vite/
+
+# Agent artifacts (.omc, .beads)
+.omc/
+.beads/
+
+# Temporary report images
+/reports/*.png
+/reports/*.jpg
+/reports/*.webp
+
+# Lock files
+/recovery-ack
+
+# Catch-all: ignore any untracked dotfiles/directories in root (e.g. .env, .cursor/, etc.)
+# Negation patterns keep .github/ (CI) and .gitignore visible for new files.
+/.*
+!/.github/
+!/.gitignore

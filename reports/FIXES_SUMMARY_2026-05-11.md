@@ -15,22 +15,22 @@
    - `main.cpp:175-187` читает все параметры из `config.toml` и передаёт в `RiskManager`
 
 4. **ApproachAnalyzer** — УЖЕ РЕАЛИЗОВАН
-   - `src/signals/ApproachAnalyzer.cpp` содержит полную реализацию 3-state HMM
+   - `core/src/signals/ApproachAnalyzer.cpp` содержит полную реализацию 3-state HMM
    - ZigZag для pullback detection, Forward algorithm для inference
 
 ### ✅ Доработки стратегий
 
-5. **LeaderLag: добавлены условия C4, C5** (`src/strategy/LeaderLag.cpp`)
+5. **LeaderLag: добавлены условия C4, C5** (`core/src/strategy/LeaderLag.cpp`)
    - **C4**: Проверка `|our_change_2s| <= 0.1%` (интерполяция между 1s и 5s)
    - **C5**: Проверка отсутствия крупной плотности на пути (25 bps)
    - Добавлены config параметры `max_our_change_2s_pct`, `density_on_path_search_bps`
 
-6. **BounceFromDensity: добавлены явные проверки TapeFade и LeaderMove** (`src/strategy/BounceFromDensity.cpp`)
+6. **BounceFromDensity: добавлены явные проверки TapeFade и LeaderMove** (`core/src/strategy/BounceFromDensity.cpp`)
    - **C4-explicit**: Требование сигнала `TapeFade` (configurable via `require_tape_fade`)
    - **C6-explicit**: Проверка отсутствия `LeaderMove` против направления отскока
    - Добавлены config параметры `require_tape_fade`, `tape_fade_max_age`, `leader_contra_max_pct`
 
-7. **BreakoutEatThrough: добавлена проверка min_distance_from_best** (`src/strategy/BreakoutEatThrough.cpp`)
+7. **BreakoutEatThrough: добавлена проверка min_distance_from_best** (`core/src/strategy/BreakoutEatThrough.cpp`)
    - **C5-distance**: Плотность должна быть минимум на 2 bps от текущего best price
    - Предотвращает вход когда движение уже началось без нас
 
@@ -113,13 +113,13 @@
 ## Изменённые файлы
 
 ```
-src/strategy/LeaderLag.hpp
-src/strategy/LeaderLag.cpp
-src/strategy/BounceFromDensity.hpp
-src/strategy/BounceFromDensity.cpp
-src/strategy/BreakoutEatThrough.cpp
-test/unit/bounce_strategy_test.cpp
-test/unit/breakout_strategy_test.cpp
+core/src/strategy/LeaderLag.hpp
+core/src/strategy/LeaderLag.cpp
+core/src/strategy/BounceFromDensity.hpp
+core/src/strategy/BounceFromDensity.cpp
+core/src/strategy/BreakoutEatThrough.cpp
+core/test/unit/bounce_strategy_test.cpp
+core/test/unit/breakout_strategy_test.cpp
 ```
 
 **Коммит:** Все изменения готовы к коммиту после финального прохождения всех тестов.

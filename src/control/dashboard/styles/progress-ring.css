@@ -1,7 +1,0 @@
-.prog-ring { width: 20px; height: 20px; flex-shrink: 0; }
-.prog-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-
-
-.tf-btn { padding: 2px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: var(--font); font-size: 12px; font-weight: 600; cursor: pointer; transition: all var(--transition); white-space: nowrap; }
-.tf-btn:hover { border-color: var(--accent); color: var(--text); }
-.tf-btn.active { background: var(--accent2); color: #000; border-color: var(--accent2); }

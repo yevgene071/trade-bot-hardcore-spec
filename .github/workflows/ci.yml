@@ -19,7 +19,7 @@ jobs:
         sudo apt-get install -y cmake build-essential libboost-all-dev libcurl4-openssl-dev
 
     - name: Configure CMake
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -S core -B build -DCMAKE_BUILD_TYPE=Release
 
     - name: Build
       run: cmake --build build -j$(nproc)

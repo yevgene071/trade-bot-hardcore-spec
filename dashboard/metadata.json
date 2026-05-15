@@ -1,0 +1,6 @@
+{
+  "name": "Dashboard",
+  "description": "A professional-grade real-time trading dashboard for automated trading bots, featuring live charts, order books, and performance metrics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
