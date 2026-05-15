@@ -41,6 +41,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <thread>
 #include <spdlog/fmt/ranges.h>
 
@@ -174,6 +175,51 @@ void BotApp::start_dashboard_thread_() {
     const auto port  = static_cast<uint16_t>(Config::get_or<int64_t>("dashboard.port", 8080));
     const auto token = Config::get_or<std::string>("dashboard.auth_token", std::string{});
     dashboard_ = std::make_unique<DashboardServer>(dashboard_ioc_, addr, port, token);
+
+    dashboard_->set_command_handler([this](const std::string& cmd) -> nlohmann::json {
+        LOG_INFO("[Dashboard] Received command: {}", cmd);
+        std::istringstream iss(cmd);
+        std::string token;
+        iss >> token;
+        if (token == "order") {
+            // order BUY 0.1 50000 BTCUSDT
+            std::string side_str;
+            double size = 0.0, price = 0.0;
+            std::string ticker;
+            if (iss >> side_str >> size >> price >> ticker) {
+                trade_bot::TradePlan plan;
+                plan.ticker = ticker;
+                plan.side = (side_str == "BUY" || side_str == "LONG") ? Side::Buy : Side::Sell;
+                plan.size_coin = size;
+                plan.entry_price = price;
+                plan.strategy_name = "Manual";
+                executor_->submit(plan);
+                return {{"ok", true}, {"msg", "Order submitted"}};
+            }
+            return {{"ok", false}, {"error", "Invalid order format"}};
+        } else if (token == "strategy") {
+            std::string action, ticker;
+            if (iss >> action >> ticker) {
+                if (action == "enable") {
+                    universe_.override_affinity(ticker, "bounce", true);
+                    return {{"ok", true}};
+                } else if (action == "disable") {
+                    universe_.override_affinity(ticker, "bounce", false);
+                    return {{"ok", true}};
+                }
+            }
+            return {{"ok", false}, {"error", "Invalid strategy command"}};
+        } else if (token == "close") {
+            std::string ticker;
+            if (iss >> ticker) {
+                executor_->close_trade(ticker, "Manual");
+                return {{"ok", true}, {"msg", "Close requested"}};
+            }
+            return {{"ok", false}, {"error", "Missing ticker"}};
+        }
+        return {{"ok", false}, {"error", "Unknown command"}};
+    });
+
     dashboard_->start();
 
     const auto m_addr  = Config::get_or<std::string>("metrics.bind_address", "127.0.0.1");
@@ -578,7 +624,7 @@ void BotApp::start_notification_feed_(int port) {
     LOG_INFO("[Universe] NotificationFeed started — screener will populate pool");
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═��═════════════════════════════════════════════════════════════
 // init_components() — the master orchestrator
 // ═══════════════════════════════════════════════════════════════
 

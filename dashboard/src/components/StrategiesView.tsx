@@ -96,6 +96,13 @@ export function StrategiesView() {
                 )}
               </div>
             )}
+            
+            {/* Signals in last 60s */}
+            {s.signals_last_60s !== undefined && (
+              <div className="mt-2 text-[9px] font-bold text-[#7b859c] uppercase">
+                Signals (last 60s): <span className="text-white font-mono">{s.signals_last_60s}</span>
+              </div>
+            )}
           </div>
         );
       })}

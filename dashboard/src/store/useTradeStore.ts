@@ -27,6 +27,9 @@ interface TradeStore {
   sessionPnLPct: number;
   marginUsedPct: number;
   dailyDrawdownPct: number;
+  unrealizedPnl: number;
+  freeBalance: number;
+  recorderActive: boolean;
   
   tickerPrices: Record<string, number>;
   updatePrices: (prices: Record<string, number>) => void;
@@ -40,6 +43,8 @@ interface TradeStore {
   
   strategyStates: StrategyState[];
   setStrategyStates: (states: StrategyState[]) => void;
+
+  risk: { exposurePct: 0, totalTradesToday: 0, consecutiveLosses: 0 },
 
   // Real-time data from server
   orderbook: { bids: ObLevel[]; asks: ObLevel[]; mid: number; spreadBps: number; imbalance: number };
@@ -68,6 +73,10 @@ export const useTradeStore = create<TradeStore>((set) => ({
   sessionPnLPct: 0,
   marginUsedPct: 0,
   dailyDrawdownPct: 0,
+  risk: { exposurePct: 0, totalTradesToday: 0, consecutiveLosses: 0 },
+  unrealizedPnl: 0,
+  freeBalance: 0,
+  recorderActive: false,
 
   tickerPrices: {},
   updatePrices: (prices) => set({ tickerPrices: prices }),
@@ -111,6 +120,11 @@ export const useTradeStore = create<TradeStore>((set) => ({
     if (data.ob_mid && data.selected_ticker) {
       newPrices[data.selected_ticker] = data.ob_mid;
     }
+    if (data.universe) {
+      data.universe.forEach((r: any) => {
+        newPrices[r.ticker] = r.mark_price;
+      });
+    }
 
     const equityHistory = (data.equity_history || []).map((e: any) => ({ ts: e.ts, val: e.equity }));
 
@@ -119,46 +133,73 @@ export const useTradeStore = create<TradeStore>((set) => ({
     const aggressionHistory = chartHistory.map((c: any) => ({ ts: c.ts, val: c.tape_aggression }));
     const volumeHistory = chartHistory.map((c: any) => ({ ts: c.ts, buy: c.buy_vol_5s, sell: c.sell_vol_5s }));
 
-    const journalEntries: JournalEntry[] = (data.recent_journal || []).map((j: any) => ({
-      id: j.id || String(j.entry_time_ms),
-      ticker: j.ticker,
-      side: j.side,
-      entryPrice: j.entry_price,
-      exitPrice: j.exit_price,
-      pnlUsd: j.pnl_usd,
-      pnlPct: j.pnl_pct,
-      size: j.size,
-      entryTimeMs: j.entry_time_ms,
-      exitTimeMs: j.exit_time_ms,
-      strategy: j.strategy,
+    const trades = (data.open_trades || []).map((t: any) => ({
+      id: t.plan?.ticker || Math.random().toString(),
+      ticker: t.plan?.ticker || 'UNKNOWN',
+      side: t.plan?.side === 0 ? 'LONG' : (t.plan?.side === 1 ? 'SHORT' : 'UNKNOWN'),
+      entry_price: t.avg_entry_price || 0,
+      pnl_usd: t.unrealized_pnl || 0,
+      strategy: t.plan?.strategy_name || 'Manual',
+      mark_price: newPrices[t.plan?.ticker] || t.avg_entry_price || 0
     }));
 
-    const newSignals = (data.recent_signals || []).map((s: any, i: number) => ({
-      id: i,
-      type: s.kind,
-      ticker: s.ticker,
-      age: s.time_str,
-      conf: s.confidence,
-      side: s.confidence > 0 ? 'BUY' : 'SELL',
-      text: s.kind,
-      value: `$${Math.round(Math.abs(s.price || 0))}`,
-      count: 1,
-      timestamp: Date.now(),
-      price: s.price,
+    const journalEntries: JournalEntry[] = (data.recent_journal || []).map((j: any) => ({
+      id: j.id || String(j.ts_unix_ms),
+      ticker: j.plan?.ticker || j.ticker,
+      side: j.plan?.side === 0 ? 'LONG' : (j.plan?.side === 1 ? 'SHORT' : j.side),
+      entryPrice: j.plan?.entry_price || j.entry_price,
+      exitPrice: j.exit_price,
+      pnlUsd: j.pnl_usd,
+      pnlPct: j.pnl_pct || 0,
+      size: j.plan?.size_coin || j.size,
+      entryTimeMs: j.entry_time_ms || j.ts_unix_ms,
+      exitTimeMs: j.ts_unix_ms || j.exit_time_ms,
+      strategy: j.plan?.strategy_name || j.strategy,
     }));
+
+    const newSignals = (data.recent_signals || []).map((s: any, i: number) => {
+      let mappedSide = 'BUY';
+      if (typeof s.side === 'string') {
+        const u = s.side.toUpperCase();
+        if (u.includes('ASK') || u.includes('SELL')) mappedSide = 'SELL';
+      } else {
+        mappedSide = s.confidence > 0 ? 'BUY' : 'SELL';
+      }
+      return {
+        id: i,
+        type: s.kind,
+        ticker: s.ticker,
+        age: s.time_str,
+        conf: s.confidence,
+        side: mappedSide as any,
+        text: s.kind,
+        value: `${Math.round(Math.abs(s.price || 0))}`,
+        count: 1,
+        timestamp: Date.now(),
+        price: s.price,
+      };
+    });
 
     return {
       killSwitchActive: data.kill_switch_active ?? state.killSwitchActive,
+      recorderActive: data.recorder_active ?? state.recorderActive,
       equity: acc.equity_usd ?? state.equity,
+      unrealizedPnl: acc.unrealized_pnl_usd ?? state.unrealizedPnl,
+      freeBalance: acc.free_balance_usd ?? state.freeBalance,
       sessionPnL: acc.realized_pnl_today_usd ?? state.sessionPnL,
       sessionPnLPct: acc.realized_pnl_today_usd && acc.starting_equity_usd
         ? (acc.realized_pnl_today_usd / acc.starting_equity_usd) * 100
         : state.sessionPnLPct,
       marginUsedPct: risk.margin_used_pct ?? state.marginUsedPct,
       dailyDrawdownPct: risk.current_drawdown_pct ?? state.dailyDrawdownPct,
+      risk: {
+        exposurePct: risk.exposure_pct ?? state.risk.exposurePct,
+        totalTradesToday: risk.total_trades_today ?? state.risk.totalTradesToday,
+        consecutiveLosses: risk.consecutive_losses ?? state.risk.consecutiveLosses
+      },
       latency: data.metascalp?.latency_ms ?? state.latency,
       tickerPrices: newPrices,
-      trades: data.open_trades ?? state.trades,
+      trades: data.open_trades ? trades : state.trades,
       signals: newSignals.length ? newSignals : state.signals,
       strategyStates: data.strategy_states ?? state.strategyStates,
       orderbook: {
