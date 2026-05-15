@@ -18,6 +18,14 @@ export async function apiToggleKillSwitch() {
   return post('/killswitch/toggle');
 }
 
+export async function apiStartDump(filename?: string) {
+  return post('/dump/start', { filename: filename || 'dump' });
+}
+
+export async function apiStopDump() {
+  return post('/dump/stop');
+}
+
 export async function apiSendCommand(command: string) {
   return post('/command', { command });
 }

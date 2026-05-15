@@ -14,11 +14,13 @@ export function CommandCenter({ equityHistory, sparkData, sparkData2 }: any) {
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6 p-8">
-       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Equity" value={`$${store.equity.toFixed(2)}`} sub="1.0x" icon={Activity} color="blue" data={sparkData} />
-        <StatCard label="Daily Realized PnL" value={`+$${store.sessionPnL.toFixed(2)}`} sub={`+${store.sessionPnLPct.toFixed(2)}%`} icon={TrendingUp} color="emerald" data={sparkData2} />
-        <StatCard label="Margin Exposure" value="4.2%" sub="SAFE" icon={Layers} color="slate" glow={false} />
-        <StatCard label="Drawdown" value="-1.1%" sub="NORMAL" icon={ShieldAlert} color="amber" glow={false} />
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard label="Total Equity" value={`${store.equity.toFixed(2)}`} sub="1.0x" icon={Activity} color="blue" data={sparkData} />
+        <StatCard label="Daily Realized PnL" value={`+${store.sessionPnL.toFixed(2)}`} sub={`+${store.sessionPnLPct.toFixed(2)}%`} icon={TrendingUp} color="emerald" data={sparkData2} />
+        <StatCard label="Margin Exposure" value={`${store.marginUsedPct.toFixed(1)}%`} sub="SAFE" icon={Layers} color="slate" glow={false} />
+        <StatCard label="Drawdown" value={`${store.dailyDrawdownPct.toFixed(2)}%`} sub="NORMAL" icon={ShieldAlert} color="amber" glow={false} />
+        <StatCard label="Total Trades" value={`${store.risk.totalTradesToday}`} sub={`${store.risk.consecutiveLosses} loss streak`} icon={Activity} color="slate" glow={false} />
+        <StatCard label="Total Exposure" value={`${store.risk.exposurePct.toFixed(1)}%`} sub="RISK" icon={ShieldAlert} color="amber" glow={false} />
       </div>
       
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

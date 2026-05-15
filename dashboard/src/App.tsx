@@ -12,7 +12,7 @@ import { cn } from './lib/utils';
 import { StrategyReadyState } from './types';
 import { useTradeStore } from './store/useTradeStore';
 import { useWsTransport } from './transport/useWsTransport';
-import { apiToggleKillSwitch, apiSelectTicker, apiSendCommand } from './transport/api';
+import { apiToggleKillSwitch, apiSelectTicker, apiSendCommand, apiStartDump, apiStopDump } from './transport/api';
 import { Ladder } from './components/Ladder';
 import { CandlestickChart } from './components/Chart';
 import { CanvasMiniChart } from './components/CanvasMiniChart';
@@ -104,7 +104,7 @@ export default function App() {
   const [audioEnabled, setAudioEnabled] = useState(true);
 
   // Zustand State
-  const { killSwitchActive, toggleKillSwitch, latency, equity, sessionPnL, sessionPnLPct, marginUsedPct, dailyDrawdownPct, tickerPrices, trades, signals, strategyStates, activeTicker, setActiveTicker, equityHistory, wsConnected, spreadHistory, aggressionHistory, volumeHistory } = useTradeStore();
+  const { killSwitchActive, toggleKillSwitch, latency, equity, sessionPnL, sessionPnLPct, marginUsedPct, dailyDrawdownPct, tickerPrices, trades, signals, strategyStates, activeTicker, setActiveTicker, equityHistory, wsConnected, spreadHistory, aggressionHistory, volumeHistory, recorderActive, unrealizedPnl, freeBalance } = useTradeStore();
 
   const spreadArr = useMemo(() => spreadHistory.map(p => p.val), [spreadHistory]);
   const aggressionArr = useMemo(() => aggressionHistory.map(p => p.val), [aggressionHistory]);
@@ -164,6 +164,18 @@ export default function App() {
                 </div>
                 <div className="w-px h-8 bg-white/10" />
                 <div className="flex flex-col">
+                  <span className="text-[9px] font-bold text-[#7b859c] uppercase tracking-wider">Free Balance</span>
+                  <span className="text-[13px] font-mono font-bold text-white">${freeBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="w-px h-8 bg-white/10" />
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-bold text-[#7b859c] uppercase tracking-wider">Unrealized PnL</span>
+                  <span className={cn("text-[13px] font-mono font-bold", unrealizedPnl >= 0 ? "text-[#10b981] text-glow-green" : "text-[#f43f5e]")}>
+                    {unrealizedPnl >= 0 ? '+' : ''}{unrealizedPnl.toFixed(2)}
+                  </span>
+                </div>
+                <div className="w-px h-8 bg-white/10" />
+                <div className="flex flex-col">
                   <span className="text-[9px] font-bold text-[#7b859c] uppercase tracking-wider">Session PnL</span>
                   <span className={cn("text-[13px] font-mono font-bold", sessionPnL >= 0 ? "text-[#10b981] text-glow-green" : "text-[#f43f5e]")}>
                     {sessionPnL >= 0 ? '+' : ''}{sessionPnL.toFixed(2)} ({sessionPnLPct.toFixed(2)}%)
@@ -184,6 +196,22 @@ export default function App() {
           
           <div className="flex items-center gap-4">
              <div className={cn("w-2 h-2 rounded-full", wsConnected ? "bg-[#10b981]" : "bg-[#f59e0b] animate-pulse")} title={wsConnected ? "WS Connected" : "WS Disconnected"} />
+             
+             <button
+               onClick={() => {
+                 if (recorderActive) {
+                   apiStopDump().catch(console.error);
+                 } else {
+                   apiStartDump().catch(console.error);
+                 }
+               }}
+               className={cn(
+                 "px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-lg transition-all border",
+                 recorderActive ? "bg-amber-500/20 text-amber-500 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.2)] animate-pulse" : "bg-white/5 text-[#7b859c] border-white/10 hover:bg-white/10 hover:text-white"
+               )}>
+                {recorderActive ? "● Recording" : "○ Record Dump"}
+             </button>
+
              <button
                onClick={() => { toggleKillSwitch(); apiToggleKillSwitch().catch(console.error); }}
                className={cn(
@@ -349,7 +377,7 @@ export default function App() {
                          </div>
 
                          <div className="mt-6 flex justify-end">
-                            <button className="px-6 py-2 bg-[#f43f5e]/15 text-[#f43f5e] hover:bg-[#f43f5e] hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">
+                            <button onClick={() => apiSendCommand('close ' + t.ticker).catch(console.error)} className="px-6 py-2 bg-[#f43f5e]/15 text-[#f43f5e] hover:bg-[#f43f5e] hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">
                               Market Close
                             </button>
                          </div>

@@ -24,6 +24,7 @@ export interface StrategyState {
   conditions: StrategyCondition[];
   last_reject_reason?: string;
   seconds_since_last_reject?: number;
+  signals_last_60s?: number;
 }
 
 export interface ObLevel {
