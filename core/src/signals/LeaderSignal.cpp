@@ -41,23 +41,27 @@ void LeaderSignal::check_signal_(std::chrono::system_clock::time_point now) {
     auto get_move = [](const auto& history, auto now) -> double {
         if (history.empty()) return 0.0;
         double cur = history.back().second;
+        if (cur == 0.0) return 0.0;
         double prev = 0.0;
+        bool found = false;
         for (int i = static_cast<int>(history.size()) - 1; i >= 0; --i) {
             if ((now - history[i].first) >= std::chrono::seconds(5)) {
                 prev = history[i].second;
+                found = true;
                 break;
             }
         }
-        if (prev == 0.0) prev = history[0].second;
+        if (!found) prev = history[0].second;
+        if (prev == 0.0) return 0.0; // guard against division by zero
         return (cur - prev) / prev * 100.0;
     };
 
     double leader_move = get_move(leader_history_, now);
     double our_move = get_move(our_history_, now);
 
-    if (std::abs(leader_move) >= cfg_.move_min_pct && 
-        std::signbit(leader_move) == std::signbit(corr)) {
-        
+    // GAP-04 FIX: removed signbit equality filter which blocked all short-direction signals.
+    // Signal direction is encoded in lag_pct sign (positive = BUY catch-up, negative = SELL).
+    if (std::abs(leader_move) >= cfg_.move_min_pct) {
         double expected_move = leader_move * corr;
         double lag_diff = expected_move - our_move;
 

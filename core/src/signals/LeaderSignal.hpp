@@ -45,8 +45,13 @@ private:
     const LeaderTracker& tracker_;
     Config          cfg_;
 
-    CircularBuffer<std::pair<std::chrono::system_clock::time_point, double>, 128> leader_history_;
-    CircularBuffer<std::pair<std::chrono::system_clock::time_point, double>, 128> our_history_;
+    // 60 000 записей = 10 мин при 100 Hz (тик 10 мс).
+    // Было 128 (12.8 с при старом тике 100 мс), стало 1280 мс при 10 мс →
+    // get_move() не находил 5-секундной давности запись и брал history[0],
+    // занижая leader_move в ~3.9× и блокируя эмиссию сигналов.
+    // Память: ~960 KB на буфер, ~1.92 MB на инстанс — некритично.
+    CircularBuffer<std::pair<std::chrono::system_clock::time_point, double>, 60000> leader_history_;
+    CircularBuffer<std::pair<std::chrono::system_clock::time_point, double>, 60000> our_history_;
 };
 
 } // namespace trade_bot

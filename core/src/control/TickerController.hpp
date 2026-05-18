@@ -11,6 +11,7 @@
 #include "signals/ApproachAnalyzer.hpp"
 #include "signals/LeaderSignal.hpp"
 #include "transport/MarketDataFeed.hpp"
+#include "config/Config.hpp"
 
 #include <memory>
 #include <mutex>
@@ -78,7 +79,14 @@ struct TickerController : public IMarketDataListener {
         detectors.push_back(std::move(aa));
 
         if (leader_tracker && leader_ticker) {
-            auto ls = std::make_unique<LeaderSignal>(ticker, *leader_ticker, bus, *leader_tracker);
+            LeaderSignal::Config ls_cfg;
+            ls_cfg.min_correlation = Config::get_or<double>("signals.leader.leader_min_correlation", ls_cfg.min_correlation);
+            ls_cfg.move_min_pct    = Config::get_or<double>("signals.leader.leader_move_min_pct", ls_cfg.move_min_pct);
+            ls_cfg.lag_min_pct     = Config::get_or<double>("signals.leader.leader_lag_min_pct",  ls_cfg.lag_min_pct);
+            const auto age_ms      = Config::get_or<int64_t>("signals.leader.lag_max_age_ms",
+                                         static_cast<int64_t>(ls_cfg.lag_max_age.count()));
+            ls_cfg.lag_max_age     = std::chrono::milliseconds(age_ms);
+            auto ls = std::make_unique<LeaderSignal>(ticker, *leader_ticker, bus, *leader_tracker, ls_cfg);
             leader_detector = ls.get();
             detectors.push_back(std::move(ls));
         }
@@ -121,6 +129,17 @@ struct TickerController : public IMarketDataListener {
     }
     void on_orderbook_snapshot(const OrderBookSnapshot& snap) override {
         std::lock_guard lock(mtx_);
+        
+        // Sanity Check: if we already have data, verify consistency before applying.
+        // Significant divergence (>3 levels) indicates a missed WS update gap.
+        if (book->bid_levels() > 0 || book->ask_levels() > 0) {
+            if (!book->is_consistent(snap, 3)) {
+                LOG_WARN("OrderBook Sanity Check FAILED for {}. Local book diverged from snapshot. Resetting...", snap.ticker);
+            } else {
+                LOG_DEBUG("OrderBook Sanity Check PASSED for {}", snap.ticker);
+            }
+        }
+
         book->apply_snapshot(snap);
         dirty_flags_ |= DirtyBook;
     }
@@ -158,6 +177,14 @@ struct TickerController : public IMarketDataListener {
         // DS-08: Push to chart history ring buffer for dashboard
         chart_history_.push(last_frame_);
 
+        // Liquidity topology: compact density column aligned 1:1 with chart tick
+        {
+            const int64_t ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                last_frame_.timestamp.time_since_epoch()).count();
+            book->get_top_levels(20, bid_buffer_, ask_buffer_);
+            density_history_.push(build_density_column(ts_ms, bid_buffer_, ask_buffer_));
+        }
+
         return last_frame_;
     }
 
@@ -165,6 +192,12 @@ struct TickerController : public IMarketDataListener {
     [[nodiscard]] std::vector<ChartPoint> chart_snapshot() const {
         std::lock_guard lock(mtx_);
         return chart_history_.snapshot();
+    }
+
+    /// Liquidity topology history aligned 1:1 with chart_snapshot() by ts.
+    [[nodiscard]] std::vector<DensityColumn> density_snapshot() const {
+        std::lock_guard lock(mtx_);
+        return density_history_.snapshot();
     }
 
     /// DS-09: Return top N levels from the order book.
@@ -185,6 +218,9 @@ private:
     FeatureFrame last_leader_frame_;
     std::chrono::system_clock::time_point last_extract_;
     ChartHistory chart_history_;
+    DensityHistory density_history_;
+    std::vector<ObLevel> bid_buffer_;
+    std::vector<ObLevel> ask_buffer_;
 };
 
 } // namespace trade_bot

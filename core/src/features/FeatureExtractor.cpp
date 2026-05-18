@@ -46,7 +46,11 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
         if (m)  f.mid      = *m;
         if (bb && ba) {
             f.spread_abs = *ba - *bb;
-            if (f.mid > 0.0) {
+            if (f.spread_abs < 0.0) {
+                // Crossed book (ask < bid) — refuse to trade, signal wide spread
+                f.spread_bps = 999.0;
+                f.spread_abs = -f.spread_abs; // store absolute magnitude for diagnostics
+            } else if (f.mid > 0.0) {
                 f.spread_bps = f.spread_abs / f.mid * kBpsScale;
             }
         }
@@ -89,11 +93,12 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
     // ----- Price dynamics & Volatility (Single Pass) -----
     if (mid_count_ >= 2) {
         const auto t1 = now - std::chrono::seconds{1};
+        const auto t2 = now - std::chrono::seconds{2};
         const auto t5 = now - std::chrono::seconds{5};
         const auto t30 = now - std::chrono::seconds{30};
         const auto t60 = now - std::chrono::seconds{60};
 
-        double mid1 = 0, mid5 = 0, mid30 = 0;
+        double mid1 = 0, mid2 = 0, mid5 = 0, mid30 = 0;
         WelfordAccumulator<double> vol_acc;
         
         // Scan backwards in circular buffer
@@ -106,6 +111,7 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
             
             if (i > 0) { // Skip the very first (current) sample
                 if (sample.t >= t1) mid1 = sample.mid;
+                if (sample.t >= t2) mid2 = sample.mid;
                 if (sample.t >= t5) mid5 = sample.mid;
                 if (sample.t >= t30) mid30 = sample.mid;
                 if (sample.t >= t60) {
@@ -124,9 +130,11 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
             return (ref > 0) ? (current_mid - ref) / ref * 100.0 : 0.0;
         };
 
-        f.price_change_1s = calc_pct(mid1 > 0 ? mid1 : mid_history_[(mid_head_ + cfg_.reserve_history - mid_count_) % cfg_.reserve_history].mid);
-        f.price_change_5s = calc_pct(mid5 > 0 ? mid5 : mid_history_[(mid_head_ + cfg_.reserve_history - mid_count_) % cfg_.reserve_history].mid);
-        f.price_change_30s = calc_pct(mid30 > 0 ? mid30 : mid_history_[(mid_head_ + cfg_.reserve_history - mid_count_) % cfg_.reserve_history].mid);
+        const double oldest_mid = mid_history_[(mid_head_ + cfg_.reserve_history - mid_count_) % cfg_.reserve_history].mid;
+        f.price_change_1s = calc_pct(mid1 > 0 ? mid1 : oldest_mid);
+        f.price_change_2s = calc_pct(mid2 > 0 ? mid2 : oldest_mid);
+        f.price_change_5s = calc_pct(mid5 > 0 ? mid5 : oldest_mid);
+        f.price_change_30s = calc_pct(mid30 > 0 ? mid30 : oldest_mid);
         f.volatility_1min = vol_acc.stdev();
     }
     

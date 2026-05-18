@@ -21,11 +21,59 @@ struct DashboardServer::Session : public std::enable_shared_from_this<DashboardS
     websocket::stream<beast::tcp_stream> ws;
     DashboardServer& parent;
     std::deque<std::shared_ptr<std::string>> write_queue_;
+    std::deque<std::shared_ptr<std::vector<uint8_t>>> binary_queue_;
+    beast::flat_buffer read_buf_;
     bool writing_{false};
+    bool use_binary_{false};  // true = FlatBuffers, false = JSON
+
+    // Hard cap: a slow client (mobile, heavy DevTools) must not grow the queue
+    // unboundedly — OOM on a live trading bot is worse than a dropped dashboard.
+    static constexpr std::size_t kMaxWriteQueueSize = 8;
 
     Session(tcp::socket socket, DashboardServer& p) : ws(std::move(socket)), parent(p) {}
 
     void start(const http::request<http::string_body>& req) {
+        // Detect binary mode from query param: ws://host:port/?format=binary
+        // Parse properly to avoid false matches like ?xformat=binary or ?format=binaryjson.
+        auto target = std::string(req.target());
+        auto qpos = target.find('?');
+        if (qpos != std::string::npos) {
+            auto query = target.substr(qpos + 1);
+            // Walk &-separated key=value pairs
+            std::size_t pos = 0;
+            while (pos < query.size()) {
+                auto end = query.find('&', pos);
+                auto param = query.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+                if (param == "format=binary") { use_binary_ = true; break; }
+                pos = (end == std::string::npos) ? query.size() : end + 1;
+            }
+        }
+        
+        // WS-01: Set timeout on the WebSocket to detect dead browser tabs.
+        // Idle timeout = 30s without receiving a frame → auto-close session.
+        // The browser automatically responds to pings, so this only fires
+        // when the tab is genuinely dead or the network dropped.
+        ws.set_option(websocket::stream_base::timeout{
+            std::chrono::seconds(30),  // handshake timeout
+            std::chrono::seconds(30),  // idle timeout
+            true                        // send keep-alive pings
+        });
+
+        // WS-FIX: Set frame type based on protocol mode
+        if (use_binary_) {
+            ws.binary(true);   // Send as binary frames (FlatBuffers)
+            ws.text(false);
+        } else {
+            ws.text(true);     // Send as text frames (JSON)
+            ws.binary(false);
+        }
+        
+        // WS-FIX: Disable automatic fragmentation
+        ws.auto_fragment(false);
+        
+        // 64 KiB covers expected max payload (~60 KB full update) in one syscall.
+        ws.write_buffer_bytes(65536);
+
         ws.async_accept(req, [self = shared_from_this()](beast::error_code ec) {
             if (!ec) {
                 self->send_initial();
@@ -37,20 +85,74 @@ struct DashboardServer::Session : public std::enable_shared_from_this<DashboardS
     }
 
     void send_initial() {
-        std::string payload;
-        {
-            std::lock_guard lock(parent.mutex_);
-            payload = parent.serialize_state_locked_();
+        if (use_binary_) {
+            std::vector<uint8_t> payload;
+            {
+                std::lock_guard lock(parent.mutex_);
+                payload = parent.serialize_state_binary_locked_();
+            }
+            send_payload_binary(std::move(payload));
+        } else {
+            std::string payload;
+            {
+                std::lock_guard lock(parent.mutex_);
+                payload = parent.serialize_state_locked_();
+            }
+            send_payload(std::move(payload));
         }
-        send_payload(std::move(payload));
+        // Phase 5: Drain incoming frames so Beast can process pong responses
+        // and detect client close. Without this loop the idle timeout pings
+        // are never acknowledged and connections are dropped prematurely.
+        do_read_();
+    }
+
+    void do_read_() {
+        ws.async_read(read_buf_, [self = shared_from_this()](beast::error_code ec, std::size_t) {
+            if (ec) {
+                std::lock_guard lock(self->parent.mutex_);
+                self->parent.sessions_.erase(self);
+                return;
+            }
+            self->read_buf_.consume(self->read_buf_.size());
+            self->do_read_();
+        });
     }
 
     void send_payload(std::string payload) {
         auto buf = std::make_shared<std::string>(std::move(payload));
         net::post(ws.get_executor(),
             [self = shared_from_this(), buf]() {
+                if (self->write_queue_.size() >= kMaxWriteQueueSize) {
+                    LOG_WARN("Dashboard: JSON write queue full ({} entries), dropping slow client",
+                             self->write_queue_.size());
+                    self->ws.async_close(websocket::close_code::try_again_later,
+                        [self](beast::error_code) {
+                            std::lock_guard lock(self->parent.mutex_);
+                            self->parent.sessions_.erase(self);
+                        });
+                    return;
+                }
                 self->write_queue_.push_back(buf);
                 if (!self->writing_) self->do_write_();
+            });
+    }
+
+    void send_payload_binary(std::vector<uint8_t> payload) {
+        auto buf = std::make_shared<std::vector<uint8_t>>(std::move(payload));
+        net::post(ws.get_executor(),
+            [self = shared_from_this(), buf]() {
+                if (self->binary_queue_.size() >= kMaxWriteQueueSize) {
+                    LOG_WARN("Dashboard: binary write queue full ({} entries), dropping slow client",
+                             self->binary_queue_.size());
+                    self->ws.async_close(websocket::close_code::try_again_later,
+                        [self](beast::error_code) {
+                            std::lock_guard lock(self->parent.mutex_);
+                            self->parent.sessions_.erase(self);
+                        });
+                    return;
+                }
+                self->binary_queue_.push_back(buf);
+                if (!self->writing_) self->do_write_binary_();
             });
     }
 
@@ -69,6 +171,24 @@ struct DashboardServer::Session : public std::enable_shared_from_this<DashboardS
                 }
                 self->write_queue_.pop_front();
                 self->do_write_();
+            });
+    }
+    
+    void do_write_binary_() {
+        if (binary_queue_.empty()) { writing_ = false; return; }
+        writing_ = true;
+        auto& front = binary_queue_.front();
+        ws.async_write(net::buffer(*front),
+            [self = shared_from_this()](beast::error_code ec, std::size_t) {
+                if (ec) {
+                    self->binary_queue_.clear();
+                    self->writing_ = false;
+                    std::lock_guard lock(self->parent.mutex_);
+                    self->parent.sessions_.erase(self);
+                    return;
+                }
+                self->binary_queue_.pop_front();
+                self->do_write_binary_();
             });
     }
 };
@@ -99,7 +219,8 @@ DashboardServer::DashboardServer(net::io_context& ioc,
     : ioc_(ioc)
     , strand_(net::make_strand(ioc_.get_executor()))
     , acceptor_(ioc, {net::ip::make_address(address), port})
-    , auth_token_(std::move(auth_token)) {
+    , auth_token_(std::move(auth_token))
+    , conflation_timer_(strand_) {
     if (auth_token_.empty() && address != "127.0.0.1" && address != "::1") {
         LOG_WARN("DashboardServer bound to {} with NO auth token — anyone on "
                  "the network can read account state. Set "
@@ -127,7 +248,8 @@ void DashboardServer::set_recorder(DumpRecorder* recorder) { recorder_ = recorde
 bool DashboardServer::recorder_start(const std::string& path) { return recorder_ && recorder_->start(path); }
 void DashboardServer::recorder_stop() { if (recorder_) recorder_->stop(); }
 bool DashboardServer::recorder_active() const noexcept { return recorder_ && recorder_->is_active(); }
-void DashboardServer::start() { do_accept(); }
+void DashboardServer::set_command_handler(CommandHandler handler) { command_handler_ = std::move(handler); }
+void DashboardServer::start() { do_accept(); schedule_conflation_(); }
 
 void DashboardServer::set_selected_ticker(std::string ticker) {
     std::lock_guard lock(mutex_);
@@ -140,12 +262,35 @@ std::string DashboardServer::get_selected_ticker() const noexcept {
     return selected_ticker_;
 }
 
+void DashboardServer::push_iceberg_event(int64_t ts_ms, double price, std::string side, double hidden_size) {
+    std::lock_guard lock(mutex_);
+    State::IcebergEvent ev;
+    ev.ts_ms       = ts_ms;
+    ev.price       = price;
+    ev.side        = std::move(side);
+    ev.hidden_size = hidden_size;
+    current_state_.iceberg_events.push_back(std::move(ev));
+    if (current_state_.iceberg_events.size() > kMaxIcebergEvents)
+        current_state_.iceberg_events.erase(current_state_.iceberg_events.begin());
+}
+
 void DashboardServer::update_state(const State& state) {
-    std::string payload;
+    std::string json_payload;
+    std::vector<uint8_t> binary_payload;
     std::vector<std::shared_ptr<Session>> snap;
+    bool has_json = false;
+    bool has_binary = false;
+    
     {
         std::lock_guard lock(mutex_);
+        // WS-02: increment generation counter — frontend uses this to skip
+        // unnecessary applyServerState calls when only the gen changed.
+        ++state_gen_;
+        // Preserve iceberg_events managed separately via push_iceberg_event()
+        auto saved_iceberg = std::move(current_state_.iceberg_events);
         current_state_ = state;
+        current_state_.state_gen = state_gen_;
+        current_state_.iceberg_events = std::move(saved_iceberg);
         // Accumulate equity history
         if (state.server_time_unix > 0) {
             equity_history_.push_back({state.server_time_unix, state.account.equity_usd});
@@ -153,23 +298,57 @@ void DashboardServer::update_state(const State& state) {
                 equity_history_.pop_front();
         }
         if (sessions_.empty()) return;
-        payload = serialize_state_locked_();
+        
+        // Check which protocols are in use
+        for (const auto& s : sessions_) {
+            if (s->use_binary_) has_binary = true;
+            else has_json = true;
+        }
+        
+        // Serialize only needed formats
+        if (has_json) json_payload = serialize_state_locked_();
+        if (has_binary) binary_payload = serialize_state_binary_locked_();
+        
         snap.assign(sessions_.begin(), sessions_.end());
     }
-    for (auto& s : snap) s->send_payload(payload);
-    if (payload.size() > 50000) {
-        LOG_TRACE("Dashboard: broadcast {} bytes to {} sessions", payload.size(), snap.size());
+    
+    // Broadcast to sessions
+    for (auto& s : snap) {
+        if (s->use_binary_) {
+            s->send_payload_binary(binary_payload);
+        } else {
+            s->send_payload(json_payload);
+        }
+    }
+    
+    if (has_json && json_payload.size() > 50000) {
+        LOG_TRACE("Dashboard: broadcast JSON {} bytes to {} sessions", json_payload.size(), snap.size());
+    }
+    if (has_binary && binary_payload.size() > 50000) {
+        LOG_TRACE("Dashboard: broadcast binary {} bytes to {} sessions", binary_payload.size(), snap.size());
     }
 }
 
 void DashboardServer::update_state_async(State state) {
-    // DS-10.5: Post serialization + broadcast to dashboard strand
-    // so the trading loop is never blocked by JSON serialization.
-    // State is taken by value and moved into the lambda to avoid
-    // an extra copy of potentially large vector fields.
+    // Phase 4: Conflation — store latest state; the 50ms timer does the actual
+    // broadcast, collapsing multiple rapid posts into one WebSocket write.
     net::post(strand_, [this, state = std::move(state)]() mutable {
-        update_state(state);
+        pending_state_ = std::move(state);
+        pending_dirty_ = true;
     });
+}
+
+void DashboardServer::schedule_conflation_() {
+    conflation_timer_.expires_after(std::chrono::milliseconds(50));
+    conflation_timer_.async_wait(
+        net::bind_executor(strand_, [this](beast::error_code ec) {
+            if (ec) return;
+            if (pending_dirty_) {
+                pending_dirty_ = false;
+                update_state(pending_state_);
+            }
+            schedule_conflation_();
+        }));
 }
 
 std::string DashboardServer::serialize_state() const {
@@ -211,21 +390,23 @@ std::string DashboardServer::serialize_state_locked_() const {
             {"unrealized_pnl",  t.unrealized_pnl}
         });
     }
-    j["recent_journal"] = nlohmann::json::array();
-    for (const auto& e : s.recent_journal) {
-        j["recent_journal"].push_back({
-            {"plan", {
-                {"ticker",        e.plan.ticker},
-                {"strategy_name", e.plan.strategy_name},
-                {"size_coin",     e.plan.size_coin},
-                {"side",          static_cast<int>(e.plan.side)},
-                {"entry_price",   e.plan.entry_price}
-            }},
-            {"pnl_usd",       e.pnl_usd},
-            {"exit_price",    e.exit_price},
-            {"cause_of_exit", e.cause_of_exit},
-            {"ts_unix_ms",    e.ts_unix_ms}
-        });
+    if (s.is_full_update) {
+        j["recent_journal"] = nlohmann::json::array();
+        for (const auto& e : s.recent_journal) {
+            j["recent_journal"].push_back({
+                {"plan", {
+                    {"ticker",        e.plan.ticker},
+                    {"strategy_name", e.plan.strategy_name},
+                    {"size_coin",     e.plan.size_coin},
+                    {"side",          static_cast<int>(e.plan.side)},
+                    {"entry_price",   e.plan.entry_price}
+                }},
+                {"pnl_usd",       e.pnl_usd},
+                {"exit_price",    e.exit_price},
+                {"cause_of_exit", e.cause_of_exit},
+                {"ts_unix_ms",    e.ts_unix_ms}
+            });
+        }
     }
     j["metascalp"] = {
         {"connected",       s.metascalp.connected},
@@ -248,30 +429,35 @@ std::string DashboardServer::serialize_state_locked_() const {
             {"ticker",     sg.ticker},
             {"price",      sg.price},
             {"confidence", sg.confidence},
-            {"time_str",   sg.time_str}
+            {"time_str",   sg.time_str},
+            {"side",       sg.side}
         });
     }
-    j["strategy_stats"] = nlohmann::json::array();
-    for (const auto& st : s.strategy_stats) {
-        j["strategy_stats"].push_back({
-            {"name",         st.name},
-            {"total_trades", st.total_trades},
-            {"wins",         st.wins},
-            {"losses",       st.losses},
-            {"total_pnl",    st.total_pnl},
-            {"best_pnl",     st.best_pnl},
-            {"worst_pnl",    st.worst_pnl},
-            {"gross_profit", st.gross_profit},
-            {"gross_loss",   st.gross_loss}
-        });
+    if (s.is_full_update) {
+        j["strategy_stats"] = nlohmann::json::array();
+        for (const auto& st : s.strategy_stats) {
+            j["strategy_stats"].push_back({
+                {"name",         st.name},
+                {"total_trades", st.total_trades},
+                {"wins",         st.wins},
+                {"losses",       st.losses},
+                {"total_pnl",    st.total_pnl},
+                {"best_pnl",     st.best_pnl},
+                {"worst_pnl",    st.worst_pnl},
+                {"gross_profit", st.gross_profit},
+                {"gross_loss",   st.gross_loss}
+            });
+        }
     }
-    j["funding_info"] = nlohmann::json::array();
-    for (const auto& fi : s.funding_info) {
-        j["funding_info"].push_back({
-            {"ticker",             fi.ticker},
-            {"rate",               fi.rate},
-            {"next_funding_unix",  fi.next_funding_unix}
-        });
+    if (s.is_full_update) {
+        j["funding_info"] = nlohmann::json::array();
+        for (const auto& fi : s.funding_info) {
+            j["funding_info"].push_back({
+                {"ticker",             fi.ticker},
+                {"rate",               fi.rate},
+                {"next_funding_unix",  fi.next_funding_unix}
+            });
+        }
     }
     j["risk"] = {
         {"margin_used_pct",     s.risk.margin_used_pct},
@@ -285,65 +471,118 @@ std::string DashboardServer::serialize_state_locked_() const {
     j["recorder_active"] = s.recorder_active;
     j["recorder_path"] = s.recorder_path;
     j["server_time_unix"] = s.server_time_unix;
+    j["state_gen"]         = s.state_gen;
+    j["is_full_update"]   = s.is_full_update;
 
-    // DS-11: New dashboard fields
-    j["strategy_states"] = nlohmann::json::array();
-    for (const auto& ss : s.strategy_states) {
-        nlohmann::json sj;
-        sj["ticker"]       = ss.ticker;
-        sj["strategy_name"] = ss.strategy_name;
-        sj["ready_state"]   = static_cast<int>(ss.ready_state);
-        sj["readiness_pct"] = ss.readiness_pct;
-        sj["conditions"]    = nlohmann::json::array();
-        for (const auto& c : ss.conditions) {
-            sj["conditions"].push_back({
-                {"name",    c.name},
-                {"current", c.current},
-                {"target",  c.target},
-                {"met",     c.met},
-                {"unit",    c.unit}
+    // Iceberg sonar events — always sent (transient, real-time)
+    {
+        nlohmann::json iceberg_arr = nlohmann::json::array();
+        for (const auto& ev : s.iceberg_events) {
+            iceberg_arr.push_back({
+                {"ts_ms",       ev.ts_ms},
+                {"price",       ev.price},
+                {"side",        ev.side},
+                {"hidden_size", ev.hidden_size}
             });
         }
-        sj["last_reject_reason"]        = ss.last_reject_reason;
-        sj["seconds_since_last_reject"] = ss.seconds_since_last_reject;
-        sj["signals_last_60s"]          = ss.signals_last_60s;
-        j["strategy_states"].push_back(sj);
+        j["iceberg_events"] = iceberg_arr;
     }
 
-    j["chart_history"] = nlohmann::json::array();
-    for (const auto& pt : s.chart_history) {
-        j["chart_history"].push_back({
-            {"ts",                 pt.ts_unix_ms},
-            {"mid",                pt.mid},
-            {"best_bid",           pt.best_bid},
-            {"best_ask",           pt.best_ask},
-            {"spread_bps",         pt.spread_bps},
-            {"buy_vol_5s",         pt.buy_vol_5s},
-            {"sell_vol_5s",        pt.sell_vol_5s},
-            {"volatility_1min_bps", pt.volatility_1min_bps},
-            {"tape_aggression",    pt.tape_aggression},
-            {"leader_change_1s",   pt.leader_change_1s},
-            {"leader_correlation", pt.leader_correlation}
-        });
+    // WS-02: delta optimisation — skip heavy fields on fast (100ms) ticks.
+    // The frontend preserves these from the last full update and only
+    // merges the fields present in the partial payload.
+    if (s.is_full_update) {
+        // DS-11: Strategy states with full condition trees
+        j["strategy_states"] = nlohmann::json::array();
+        for (const auto& ss : s.strategy_states) {
+            nlohmann::json sj;
+            sj["ticker"]        = ss.ticker;
+            sj["strategy_name"] = ss.strategy_name;
+            sj["ready_state"]   = static_cast<int>(ss.ready_state);
+            sj["readiness_pct"] = ss.readiness_pct;
+            sj["conditions"]    = nlohmann::json::array();
+            for (const auto& c : ss.conditions) {
+                sj["conditions"].push_back({
+                    {"name",    c.name},
+                    {"current", c.current},
+                    {"target",  c.target},
+                    {"met",     c.met},
+                    {"unit",    c.unit}
+                });
+            }
+            sj["last_reject_reason"]        = ss.last_reject_reason;
+            sj["seconds_since_last_reject"] = ss.seconds_since_last_reject;
+            sj["signals_last_60s"]          = ss.signals_last_60s;
+            j["strategy_states"].push_back(sj);
+        }
+
+        // Chart history (60+ points)
+        j["chart_history"] = nlohmann::json::array();
+        for (const auto& pt : s.chart_history) {
+            j["chart_history"].push_back({
+                {"ts_unix_ms",          pt.ts_unix_ms},
+                {"mid",                 pt.mid},
+                {"best_bid",            pt.best_bid},
+                {"best_ask",            pt.best_ask},
+                {"spread_bps",          pt.spread_bps},
+                {"buy_vol_5s",          pt.buy_vol_5s},
+                {"sell_vol_5s",         pt.sell_vol_5s},
+                {"volatility_1min_bps", pt.volatility_1min_bps},
+                {"tape_aggression",     pt.tape_aggression},
+                {"leader_change_1s",    pt.leader_change_1s},
+                {"leader_correlation",  pt.leader_correlation},
+                {"leader_lag_ms",       pt.leader_lag_ms},
+                {"imbalance",           pt.imbalance},
+                {"prints_per_sec",      pt.prints_per_sec}
+            });
+        }
+
+        // Liquidity topology history. Capped to the last 300 columns to bound
+        // the WS frame; bins are uint8 (kDensityBins per column).
+        j["density_history"] = nlohmann::json::array();
+        {
+            const auto& dh = s.density_history;
+            constexpr std::size_t kMaxCols = 300;
+            const std::size_t start = dh.size() > kMaxCols ? dh.size() - kMaxCols : 0;
+            for (std::size_t k = start; k < dh.size(); ++k) {
+                const auto& col = dh[k];
+                nlohmann::json bins = nlohmann::json::array();
+                for (auto b : col.bins) bins.push_back(static_cast<int>(b));
+                j["density_history"].push_back({
+                    {"ts_unix_ms", col.ts_unix_ms},
+                    {"lo",         col.lo},
+                    {"hi",         col.hi},
+                    {"bins",       std::move(bins)}
+                });
+            }
+        }
     }
 
-    j["bids_top20"] = nlohmann::json::array();
-    for (const auto& lv : s.bids_top20) {
-        j["bids_top20"].push_back({{"price", lv.price}, {"size", lv.size}});
-    }
-    j["asks_top20"] = nlohmann::json::array();
-    for (const auto& lv : s.asks_top20) {
-        j["asks_top20"].push_back({{"price", lv.price}, {"size", lv.size}});
-    }
+    if (s.is_full_update) {
+        j["bids_top20"] = nlohmann::json::array();
+        for (const auto& lv : s.bids_top20) {
+            j["bids_top20"].push_back({{"price", lv.price}, {"size", lv.size}});
+        }
+        j["asks_top20"] = nlohmann::json::array();
+        for (const auto& lv : s.asks_top20) {
+            j["asks_top20"].push_back({{"price", lv.price}, {"size", lv.size}});
+        }
 
-    j["ob_mid"]        = s.ob_mid;
-    j["ob_spread_bps"] = s.ob_spread_bps;
-    j["ob_imbalance"]  = s.ob_imbalance;
-    j["selected_ticker"] = s.selected_ticker;
+        j["ob_mid"]        = s.ob_mid;
+        j["ob_spread_bps"] = s.ob_spread_bps;
+        j["ob_imbalance"]  = s.ob_imbalance;
+        j["selected_ticker"] = s.selected_ticker;
 
-    j["equity_history"] = nlohmann::json::array();
-    for (const auto& pt : equity_history_) {
-        j["equity_history"].push_back({{"ts", pt.first}, {"equity", pt.second}});
+        j["equity_history"] = nlohmann::json::array();
+        for (const auto& pt : equity_history_) {
+            j["equity_history"].push_back({{"ts", pt.first}, {"equity", pt.second}});
+        }
+    } else {
+        // Lightweight fields always sent on fast ticks
+        j["ob_mid"]        = s.ob_mid;
+        j["ob_spread_bps"] = s.ob_spread_bps;
+        j["ob_imbalance"]  = s.ob_imbalance;
+        j["selected_ticker"] = s.selected_ticker;
     }
 
     return j.dump();
@@ -483,7 +722,12 @@ void HttpSession::handle_request() {
     }
 
     if (req->method() == http::verb::post && req->target() == "/api/command") {
-        send_json(http::status::ok, R"({"ok":true})");
+        if (parent.command_handler_) {
+            auto body = parent.command_handler_(req->body());
+            send_json(http::status::ok, body.dump());
+        } else {
+            send_json(http::status::ok, R"({"ok":true})");
+        }
         return;
     }
 

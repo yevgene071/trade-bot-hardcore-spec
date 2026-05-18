@@ -9,13 +9,17 @@
 #include "marketdata/OrderBook.hpp"
 #include "transport/DumpRecorder.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,6 +50,7 @@ public:
             double      price{0.0};
             double      confidence{0.0};
             std::string time_str; // HH:MM:SS.mmm
+            std::string side;     // "Bid","Ask","Buy","Sell" from payload.side
         };
 
         struct StrategyStats {
@@ -100,12 +105,30 @@ public:
         // DS-11: New dashboard fields
         std::vector<StrategyState>   strategy_states;
         std::vector<ChartPoint>      chart_history;
+        std::vector<DensityColumn>   density_history;   // liquidity topology
         std::vector<ObLevel>         bids_top20;
         std::vector<ObLevel>         asks_top20;
         double                       ob_mid{0.0};
         double                       ob_spread_bps{0.0};
         double                       ob_imbalance{0.0};
-        Ticker                       selected_ticker;
+        Ticker                       selected_ticker;    /// Monotonically increasing generation counter. Incremented on every
+    /// update_state() — the frontend can skip applyServerState if the
+    /// gen hasn't changed, avoiding unnecessary React re-renders.
+    uint64_t                     state_gen{0};
+
+    /// Delta-optimisation: when false, the serialiser skips heavy fields
+    /// (strategy_states, chart_history, journal, funding_info, stats,
+    /// equity_history) that change slowly. The frontend merges only the
+    /// provided fields and preserves the rest from the last full update.
+    bool                         is_full_update{true};
+
+        struct IcebergEvent {
+            int64_t     ts_ms{0};
+            double      price{0.0};
+            std::string side; // "BID" or "ASK"
+            double      hidden_size{0.0};
+        };
+        std::vector<IcebergEvent> iceberg_events; // last 10
     };
 
     /// `auth_token` is compared against the `Authorization: Bearer <token>`
@@ -159,6 +182,15 @@ public:
     void set_selected_ticker(std::string ticker);
     [[nodiscard]] std::string get_selected_ticker() const noexcept;
 
+    /// Push an iceberg detection event for display on the dashboard sonar.
+    /// Keeps last kMaxIcebergEvents; safe to call from any thread.
+    void push_iceberg_event(int64_t ts_ms, double price, std::string side, double hidden_size);
+
+    /// Set a handler for POST /api/command requests from the dashboard.
+    /// The callback receives the command string and returns a JSON response.
+    using CommandHandler = std::function<nlohmann::json(const std::string&)>;
+    void set_command_handler(CommandHandler handler);
+
     friend struct HttpSession;
 
 private:
@@ -168,6 +200,10 @@ private:
     /// Builds the JSON payload from \c current_state_. Caller MUST hold
     /// \c mutex_.
     std::string serialize_state_locked_() const;
+    
+    /// Builds the binary FlatBuffers payload from \c current_state_. Caller
+    /// MUST hold \c mutex_. Returns raw buffer for WebSocket binary frame.
+    std::vector<uint8_t> serialize_state_binary_locked_() const;
 
     boost::asio::io_context& ioc_;
     boost::asio::strand<boost::asio::io_context::executor_type> strand_;
@@ -187,6 +223,22 @@ private:
     std::set<std::shared_ptr<Session>> sessions_;
 
     std::string selected_ticker_;
+    CommandHandler command_handler_;
+
+    /// Monotonically increasing generation counter incremented on every
+    /// update_state() call. Injected into State::state_gen at serialisation
+    /// time so the frontend can skip redundant applyServerState.
+    uint64_t state_gen_{0};
+
+    static constexpr std::size_t kMaxIcebergEvents = 10;
+
+    // Phase 4: Conflation — trading loop posts state here; a 50ms timer
+    // broadcasts the latest accumulated state so multiple rapid posts within
+    // one 50ms window collapse into a single WebSocket write.
+    bool pending_dirty_{false};
+    State pending_state_;
+    boost::asio::steady_timer conflation_timer_;
+    void schedule_conflation_();
 };
 
 } // namespace trade_bot

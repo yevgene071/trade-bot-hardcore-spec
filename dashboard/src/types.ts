@@ -35,12 +35,32 @@ export interface ObLevel {
 export interface ChartPoint {
   ts_unix_ms: number;
   mid: number;
+  best_bid: number;
+  best_ask: number;
   spread_bps: number;
   buy_vol_5s: number;
   sell_vol_5s: number;
   volatility_1min_bps: number;
   tape_aggression: number;
+  leader_change_1s: number;
   leader_correlation: number;
+  leader_lag_ms: number;
+  imbalance: number;
+  prints_per_sec: number;
+}
+
+export interface DensityColumn {
+  ts_unix_ms: number;
+  lo: number;
+  hi: number;
+  bins: number[]; // normalized 0..255, sqrt-contrast, low→high price
+}
+
+export interface IcebergEvent {
+  ts_ms: number;
+  price: number;
+  side: string; // "BID" or "ASK"
+  hidden_size: number;
 }
 
 export interface TickerInfo {
@@ -53,7 +73,7 @@ export interface TickerInfo {
 export interface Trade {
   id: string;
   ticker: string;
-  side: 'LONG' | 'SHORT';
+  side: 'LONG' | 'SHORT' | 'UNKNOWN'; // FUNC-01: store emits 'UNKNOWN' when plan.side absent
   entry_price: number;
   mark_price: number;
   pnl_usd: number;
@@ -61,12 +81,20 @@ export interface Trade {
   status: 'OPEN' | 'CLOSED';
   time: string;
   strategy: string;
+  // Position levels — emitted alongside the snake_case fields for the
+  // AdvancedChart L1 layer (camelCase, all optional → backward compatible).
+  entryPrice?: number;
+  unrealizedPnl?: number;
+  executedSize?: number;
+  sizeCoin?: number;
+  stopLoss?: number;
+  takeProfit?: number;
 }
 
 export interface JournalEntry {
   id: string;
   ticker: string;
-  side: 'LONG' | 'SHORT';
+  side: 'LONG' | 'SHORT' | 'UNKNOWN'; // FUNC-01
   entryPrice: number;
   exitPrice: number;
   pnlUsd: number;
@@ -75,4 +103,8 @@ export interface JournalEntry {
   entryTimeMs: number;
   exitTimeMs: number;
   strategy: string;
+  // Used by AdvancedChart journal markers (optional → backward compatible).
+  tsMs?: number;          // exit timestamp (ts_unix_ms)
+  entryTsMs?: number;     // entry timestamp
+  causeOfExit?: string;   // 'TP' | 'SL' | 'SIGNAL' | 'TIME' | ...
 }

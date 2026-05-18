@@ -79,10 +79,14 @@ finres_staleness_kill_sec = 300
 finres_kill_on_staleness = false
 
 [clock]
+# NTP sources for ClockDriftMonitor. First-responder wins (failover).
 sources = ["pool.ntp.org", "time.google.com"]
 check_interval_sec = 30
-warn_drift_ms = 500
-max_clock_drift_ms = 2000
+query_timeout_ms = 1500
+warn_drift_ms = 1000
+# WSL note: WSL clocks consistently lag Windows host by ~2 s.
+# 5000 ms prevents false kills while still catching genuine clock jumps.
+max_clock_drift_ms = 5000
 
 
 [external_feeds]
@@ -158,8 +162,8 @@ pullback_min_bps = 5
 
 [signals.leader]
 leader_min_correlation = 0.6
-leader_move_min_pct = 0.3
-leader_lag_min_pct = 0.15
+leader_move_min_pct = 0.10
+leader_lag_min_pct = 0.05
 lag_max_age_ms = 3000
 
 [strategies]
@@ -180,6 +184,34 @@ affinity_stable_min = 5
 # Post-entry invalidation (STRATEGIES.md § 1.7)
 burst_contra_exit_sec = 5       # TapeBurst contra → close within this window after entry
 
+# S4-FIX: Missing parameters (15 added)
+min_approach_speed_bps_1s = 15.0      # C2: impulse approach speed
+max_tape_speed_ratio = 1.5            # C4: stalling check (vol_1s / avg_vol_1s)
+min_relative_density = 0.15           # C3: density size vs book depth
+tp1_r = 2.0                           # TP1 = entry + 2R
+min_driver_reversal_bps = 20.0        # S1-FIX: C5 leader alignment (was dead at 2 bps)
+max_level_age_sec = 300               # C1: level freshness (5 min)
+min_density_age_ms = 2000             # C3b: density maturity (2 sec)
+require_tape_fade = true              # C4-explicit: require TapeFade signal
+tape_fade_max_age_sec = 5             # C4-explicit: TapeFade age limit
+leader_contra_lookback_sec = 5        # C6-explicit: LeaderMove lookback
+leader_contra_max_pct = 0.3           # C6-explicit: max leader contra move (0.3%)
+max_funding_against_bps = 15.0        # C-Funding: max funding rate against position
+max_mark_mid_bps = 10.0               # C-MarkMid: max mark/mid divergence
+density_cluster_enabled = true        # §5.6: scan for density clusters
+density_cluster_max_bps = 20.0        # §5.6: cluster range
+max_level_touches_for_bounce = 2      # §0.8: N-th approach filter (3rd+ = breakout only)
+
+# Tier-based thresholds (adaptive per coin volume)
+# Format: [tier0_value, tier1_value, tier2_value]
+# Tier 0: >$1B (BTC, ETH) — stricter thresholds
+# Tier 1: $100M-$1B (SOL, AVAX) — baseline thresholds
+# Tier 2: <$100M (small caps) — relaxed thresholds
+[strategies.bounce.tiers]
+min_approach_speed_bps_1s = [50.0, 15.0, 8.0]
+min_relative_density = [0.25, 0.15, 0.10]
+min_driver_reversal_bps = [30.0, 20.0, 12.0]
+
 [strategies.breakout]
 tp1_size_ratio = 0.5
 no_progress_timeout_sec = 60
@@ -196,6 +228,20 @@ fade_contra_exit_sec = 5         # TapeFade on our side → close within this wi
 leader_contra_exit_sec = 5       # LeaderMove contra → close within this window after entry
 leader_exit_contra_pct = 0.15    # |lag_pct| threshold for leader contra exit
 
+# S4-FIX: Missing parameters (6 added)
+max_avg_spread_bps = 4.0         # Spread gate
+stop_buffer_bps = 8.0            # Stop buffer beyond support
+tp1_r = 2.5                      # TP1 = entry + 2.5R
+min_leader_correlation = 0.6     # C4: leader alignment threshold
+support_search_range_bps = 30.0  # C3: support search range
+min_distance_from_best_bps = 5.0 # C5: min distance from best price (§2.4)
+
+# Tier-based thresholds
+[strategies.breakout.tiers]
+min_tape_aggression = [0.35, 0.20, 0.12]
+min_distance_from_best_bps = [8.0, 5.0, 3.0]
+support_search_range_bps = [40.0, 30.0, 20.0]
+
 [strategies.leaderlag]
 tp1_size_ratio = 0.6
 no_progress_timeout_sec = 15
@@ -207,6 +253,21 @@ correlation_exit_threshold = 0.3   # exit if correlation drops below this
 leader_exit_reversal_bps = 5.0     # exit if leader reverses more than this
 swing_lookback_ticks = 30          # ticks for local extremum stop placement
 
+# S4-FIX: Missing parameters (8 added)
+min_correlation = 0.6              # C3: rolling correlation threshold
+max_our_change_2s_pct = 0.1        # C4: max our movement (0.1%)
+density_on_path_search_bps = 30.0  # C5: density search range
+max_spread_bps = 3.0               # C6: spread gate
+lag_max_age_ms = 3000              # C2: signal age limit (3 sec)
+entry_timeout_sec = 10             # Plan TTL
+tp1_catchup_ratio = 0.8            # TP1 = expected_catchup * 0.8
+
+# Tier-based thresholds
+[strategies.leaderlag.tiers]
+max_our_change_2s_pct = [0.05, 0.1, 0.15]  # Stricter for BTC, relaxed for small caps
+density_on_path_search_bps = [40.0, 30.0, 20.0]
+stop_distance_bps = [12.0, 8.0, 6.0]
+
 [strategies.flush]
 tp1_size_ratio = 0.7
 no_progress_timeout_sec = 90
@@ -214,7 +275,34 @@ flush_window_sec = 120
 affinity_threshold = 0.4
 affinity_stable_min = 5
 
+# S4-FIX: Missing parameters (10 added)
+max_spread_bps = 6.0               # C1: spread gate
+flush_max_age_sec = 10             # C2: LevelBreak age limit
+min_flush_dist_bps = 15.0          # C2: min flush distance
+min_level_touches = 3              # C3: level strength
+tape_flush_max_age_sec = 5         # C4: TapeFlush age limit
+min_flush_count = 1                # C4: min flush count (GAP-09)
+flush_count_window_sec = 30        # C4: flush count window
+max_vol_fade_ratio = 0.6           # C5: volume fade threshold
+min_price_reversal_bps = 5.0       # C6: reversal confirmation
+entry_offset_bps = 3.0             # Entry offset from level
+stop_buffer_bps = 8.0              # Stop buffer beyond level
+tp1_r = 2.0                        # TP1 = entry + 2R
+entry_timeout_sec = 10             # Plan TTL
+post_entry_grace_sec = 5           # Grace period before follow-through check
+min_follow_through_bps = 8.0       # Min follow-through after grace
+
+# Tier-based thresholds
+[strategies.flush.tiers]
+min_flush_dist_bps = [25.0, 15.0, 10.0]
+min_price_reversal_bps = [8.0, 5.0, 3.0]
+entry_offset_bps = [5.0, 3.0, 2.0]
+
 [universe]
+# Tier-based threshold scaling (Phase 0-4)
+tier_thresholds_enabled = true
+tier_volume_boundaries = [1000000000.0, 100000000.0, 0.0]  # [$1B, $100M, $0]
+
 [universe.pool]
 allow_patterns         = ["*USDT"]
 deny_patterns          = ["*UP*", "*DOWN*", "*BULL*", "*BEAR*", "*1000*"]
@@ -254,12 +342,12 @@ affinity_stable_min = 5
 require_7d_history = false
 
 [universe.affinity.bounce]
-min_volume_24h_usd = 100000000.0
+min_volume_24h_usd = 50000000.0      # S6-FIX: 100M→50M (more coins)
 max_avg_spread_bps = 3.0
 require_low_news_density = true
 min_density_events_per_hour = 4
-min_levels_in_60min = 3
-min_bounce_success_rate_7d = 0.40
+min_levels_in_60min = 2              # S6-FIX: 3→2 (more realistic)
+min_bounce_success_rate_7d = 0.25    # S6-FIX: 0.40→0.25 (more realistic)
 
 [universe.affinity.breakout]
 min_volume_24h_usd = 100000000.0
@@ -272,11 +360,11 @@ min_breakout_events_per_day = 5
 [universe.affinity.leaderlag]
 require_leader = "BTCUSDT"
 exclude_self_for_leader = true
-min_correlation_60s = 0.6
+min_correlation_60s = 0.4            # S6-FIX: 0.6→0.4 (more realistic for alts)
 min_volume_24h_usd = 50000000.0
 max_avg_spread_bps = 3.0
 min_leader_lag_events_per_hour = 2
-avg_catchup_completion_rate_7d = 0.50
+avg_catchup_completion_rate_7d = 0.30  # S6-FIX: 0.50→0.30 (more realistic)
 leader_lag_consistency_7d = 0.40
 
 [universe.affinity.flush]
