@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <shared_mutex>
 
 namespace trade_bot {
 
@@ -50,10 +51,13 @@ public:
     OrderBook& operator=(OrderBook&& other) noexcept;
 
     void apply_snapshot(const OrderBookSnapshot& snap);
-    void apply_update(const OrderBookUpdate& upd);
+    void apply_update(const OrderBookUpdate& upd) noexcept;
 
     /// Apply a heterogeneous batch of changes.
     void apply_update_batch(const std::vector<PriceLevel>& changes);
+
+    void reset_sync() { m_synced = false; }
+    bool is_synced() const { return m_synced; }
 
     [[nodiscard]] std::optional<double> best_bid() const noexcept;
     [[nodiscard]] std::optional<double> best_ask() const noexcept;
@@ -91,11 +95,16 @@ public:
     [[nodiscard]] std::pair<std::vector<ObLevel>, std::vector<ObLevel>>
     get_top_levels(int n) const noexcept;
 
+    /**
+     * Fills the provided vectors with the top N levels. Faster than the returning version.
+     */
+    void get_top_levels(int n, std::vector<ObLevel>& bids, std::vector<ObLevel>& asks) const noexcept;
+
 private:
     using BidMap = absl::btree_map<PriceTick, SizeFix, std::greater<PriceTick>>;
     using AskMap = absl::btree_map<PriceTick, SizeFix>;
 
-    void apply_change_(Side side, double price, double size);
+    void apply_change_(Side side, double price, double size) noexcept;
     void refresh_top_of_book_() noexcept;
 
     Ticker      ticker_;
@@ -103,12 +112,14 @@ private:
     double      size_increment_;
     double      inv_price_increment_;
     double      inv_size_increment_;
+    mutable std::shared_mutex mtx_;    // K1: guards all book state
     BidMap      bids_;
     AskMap      asks_;
     std::optional<PriceTick> best_bid_tick_;
     std::optional<PriceTick> best_ask_tick_;
-    int64_t             update_count_{0};
-    std::atomic<bool>   top_dirty_{false};
+    std::atomic<int64_t>    update_count_{0}; // K3: atomic for lockless read
+    bool                    top_dirty_{false}; // K2: plain bool, always under mtx_
+    bool                    m_synced{false};
 };
 
 }  // namespace trade_bot

@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <random>
 #include <string>
 #include <vector>
 #include <boost/asio/steady_timer.hpp>
@@ -62,6 +63,9 @@ private:
     
     std::vector<Ticker>    active_tickers_;
     mutable std::mutex     active_tickers_mtx_;
+
+    // V1: reuse rng across schedule_poll_ calls — random_device is expensive
+    std::mt19937_64        rng_{std::random_device{}()};
 };
 
 } // namespace trade_bot

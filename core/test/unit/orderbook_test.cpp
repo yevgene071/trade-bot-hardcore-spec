@@ -266,3 +266,32 @@ TEST_F(OrderBookTest, IsConsistentDetectsMissingUpdates) {
     // With max_diff=5 it should pass
     EXPECT_TRUE(ob.is_consistent(corrupted_snap, 5));
 }
+
+TEST_F(OrderBookTest, ApplyUpdateBatchParallelCrossed) {
+    auto ob = make();
+    OrderBookSnapshot snap{};
+    snap.ticker = "BTCUSDT";
+    snap.bids = {{99.00, 1.0, Side::Buy}};
+    snap.asks = {{101.00, 1.0, Side::Sell}};
+    ob.apply_snapshot(snap);
+
+    // Создаем батч размером 64, чтобы сработала параллельная ветка
+    std::vector<PriceLevel> batch;
+    // Новый бид пересекает старый аск на 101.00
+    batch.push_back({101.50, 1.0, Side::Buy});
+    
+    // Добавляем 63 фиктивных изменения бидов на низких ценах
+    for (int i = 0; i < 63; ++i) {
+        batch.push_back({90.00 - i * 0.1, 1.0, Side::Buy});
+    }
+
+    ob.apply_update_batch(batch);
+
+    // Проверяем, что старый ask на 101.00 был удален
+    auto bb = ob.best_bid();
+    auto ba = ob.best_ask();
+    ASSERT_TRUE(bb.has_value());
+    EXPECT_DOUBLE_EQ(*bb, 101.50);
+    EXPECT_FALSE(ba.has_value()); // Старый аск 101.00 удален, книга пуста с этой стороны
+}
+

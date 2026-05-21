@@ -93,8 +93,12 @@ void ClockDriftMonitor::update_average_(int64_t sample) {
     }
     window_[window_idx_] = sample;
     window_idx_ = (window_idx_ + 1) % window_.size();
-    const int64_t sum = std::accumulate(window_.begin(), window_.end(), int64_t{0});
-    drift_ms_ = sum / static_cast<int64_t>(window_.size());
+    // Track fill count so cold-start zeros don't dilute early measurements.
+    if (window_fill_ < window_.size()) ++window_fill_;
+    const int64_t sum = std::accumulate(window_.begin(),
+                                        window_.begin() + static_cast<std::ptrdiff_t>(window_fill_),
+                                        int64_t{0});
+    drift_ms_ = sum / static_cast<int64_t>(window_fill_);
 }
 
 void ClockDriftMonitor::evaluate_thresholds_locked_(std::unique_lock<std::mutex>& lk) {
@@ -114,6 +118,9 @@ void ClockDriftMonitor::evaluate_thresholds_locked_(std::unique_lock<std::mutex>
     } else if (abs_drift >= cfg_.warn_drift_ms) {
         LOG_WARN("ClockDriftMonitor: drift={} ms exceeds warn {} ms",
                  drift_ms_, cfg_.warn_drift_ms);
+    } else {
+        // Drift recovered below warn threshold — allow re-triggering on next transgression.
+        kill_triggered_ = false;
     }
 }
 

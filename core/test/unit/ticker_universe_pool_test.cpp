@@ -28,7 +28,7 @@ TEST_F(TickerUniversePoolTest, LowVolumeRejected) {
         if (t == "POOR") return TickerStats{  500'000.0, 5.0};
         return std::nullopt;
     });
-    u.refresh_pool({"OK", "POOR"});
+    u.refresh_pool({"OK", "POOR"}, std::chrono::system_clock::now());
     auto active = u.active();
     EXPECT_EQ(active.size(), 1u);
     EXPECT_EQ(active[0], "OK");
@@ -45,7 +45,7 @@ TEST_F(TickerUniversePoolTest, HighSpreadRejected) {
         if (t == "WIDE") return TickerStats{1'000'000.0, 30.0};
         return std::nullopt;
     });
-    u.refresh_pool({"OK", "WIDE"});
+    u.refresh_pool({"OK", "WIDE"}, std::chrono::system_clock::now());
     EXPECT_EQ(u.active(), std::vector<Ticker>{"OK"});
 }
 
@@ -59,7 +59,7 @@ TEST_F(TickerUniversePoolTest, ManualAllowForcesIn) {
     u.set_stats_lookup([](const Ticker&) -> std::optional<TickerStats> {
         return std::nullopt;                  // no stats — manual_allow bypasses
     });
-    u.refresh_pool({"FORCE", "BANNED"});
+    u.refresh_pool({"FORCE", "BANNED"}, std::chrono::system_clock::now());
     EXPECT_EQ(u.active(), std::vector<Ticker>{"FORCE"});
 }
 
@@ -72,7 +72,7 @@ TEST_F(TickerUniversePoolTest, ManualDenyForcesOut) {
     u.set_stats_lookup([](const Ticker&) {
         return std::optional<TickerStats>{TickerStats{1'000'000.0, 5.0}};
     });
-    u.refresh_pool({"BLOCK", "OK"});
+    u.refresh_pool({"BLOCK", "OK"}, std::chrono::system_clock::now());
     EXPECT_EQ(u.active(), std::vector<Ticker>{"OK"});
 }
 
@@ -90,7 +90,7 @@ TEST_F(TickerUniversePoolTest, MaxPoolSizeKeepsTopByVolume) {
         if (it == volumes.end()) return std::nullopt;
         return TickerStats{it->second, 5.0};
     });
-    u.refresh_pool({"A", "B", "C", "D", "E"});
+    u.refresh_pool({"A", "B", "C", "D", "E"}, std::chrono::system_clock::now());
 
     auto active = u.active();
     ASSERT_EQ(active.size(), 3u);

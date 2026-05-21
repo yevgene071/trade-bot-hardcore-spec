@@ -2,6 +2,7 @@
 
 #include "transport/external/IExternalFeed.hpp"
 #include "transport/IHttpClient.hpp"
+#include "transport/IClock.hpp" // Добавляем заголовок часов
 #include <map>
 #include <set>
 #include <memory>
@@ -18,7 +19,8 @@ struct FundingData {
 
 class BinanceFundingClient : public IExternalFeed {
 public:
-    explicit BinanceFundingClient(std::shared_ptr<IHttpClient> http);
+    // Изменяем конструктор: передаем IClock (по умолчанию nullptr для совместимости с продом)
+    explicit BinanceFundingClient(std::shared_ptr<IHttpClient> http, std::shared_ptr<IClock> clock = nullptr);
     
     std::string name() const override { return "BinanceFunding"; }
     bool is_stale(std::chrono::seconds max_age) const override;
@@ -36,6 +38,8 @@ private:
     void schedule_poll(std::chrono::seconds interval);
 
     std::shared_ptr<IHttpClient> http_;
+    std::shared_ptr<IClock> clock_; // Хранилище часов
+    
     mutable std::shared_mutex mutex_;
     std::map<std::string, FeedValue<FundingData>> funding_map_;
     std::set<std::string> active_tickers_;

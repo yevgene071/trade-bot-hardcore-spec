@@ -114,6 +114,9 @@ DashboardServer::State make_state(double equity = 12345.67) {
         pt.tape_aggression = 0.25;
         pt.leader_change_1s = 0.001;
         pt.leader_correlation = 0.7;
+        pt.leader_lag_ms = 340.0;
+        pt.imbalance = 0.33;
+        pt.prints_per_sec = 42.0;
         s.chart_history.push_back(pt);
     }
 
@@ -267,6 +270,9 @@ TEST_F(DashboardServerTest, SerializeNewDashboardFields) {
     EXPECT_EQ(j["chart_history"][0]["ts"].get<int64_t>(), 1716500000);
     EXPECT_DOUBLE_EQ(j["chart_history"][2]["tape_aggression"].get<double>(), 0.25);
     EXPECT_DOUBLE_EQ(j["chart_history"][2]["leader_correlation"].get<double>(), 0.7);
+    EXPECT_DOUBLE_EQ(j["chart_history"][2]["leader_lag_ms"].get<double>(), 340.0);
+    EXPECT_DOUBLE_EQ(j["chart_history"][2]["imbalance"].get<double>(), 0.33);
+    EXPECT_DOUBLE_EQ(j["chart_history"][2]["prints_per_sec"].get<double>(), 42.0);
 
     // bids_top20 / asks_top20
     ASSERT_TRUE(j.contains("bids_top20"));

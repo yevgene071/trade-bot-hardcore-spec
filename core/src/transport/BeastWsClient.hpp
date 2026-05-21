@@ -31,10 +31,12 @@ public:
     void send(std::string_view message) override;
     void disconnect() override;
 
-    void set_on_message(std::function<void(const nlohmann::json&)> callback) override { m_on_message = std::move(callback); }
+    void set_on_message(std::function<void(const nlohmann::json&, uint64_t recv_ns, TraceId trace_id)> callback) override { m_on_message_json = std::move(callback); }
+    void set_on_raw_message(std::function<void(const char* data, size_t size, uint64_t recv_ns, TraceId trace_id)> callback) { m_on_message_raw = std::move(callback); }
     void set_on_close(std::function<void(int code, const std::string& reason)> callback) override { m_on_close = std::move(callback); }
     void set_on_error(std::function<void(const std::string& msg)> callback) override { m_on_error = std::move(callback); }
     void set_on_connect(std::function<void()> callback) override { m_on_connect = std::move(callback); }
+    void set_max_queue_size(size_t size) { m_max_queue_size = size; }
 
     bool is_connected() const override { return m_connected; }
     bool is_ssl() const { return m_use_ssl; }
@@ -59,6 +61,8 @@ private:
 
     net::io_context& m_ioc;
     net::ssl::context m_ctx{net::ssl::context::tls_client};
+    // P1: single shared strand so resolver, timers, and stream ops are serialized.
+    net::strand<net::io_context::executor_type> m_strand;
     tcp::resolver m_resolver;
 
     using plain_stream = websocket::stream<beast::tcp_stream>;
@@ -81,11 +85,13 @@ private:
     net::steady_timer m_reconnect_timer;
     net::steady_timer m_ping_timer;
 
+    size_t m_max_queue_size{1000};
     std::queue<std::string> m_write_queue;
     std::string m_write_msg; // Current message being written
     std::mutex m_write_mutex;
 
-    std::function<void(const nlohmann::json&)> m_on_message;
+    std::function<void(const nlohmann::json&, uint64_t recv_ns, TraceId trace_id)> m_on_message_json;
+    std::function<void(const char* data, size_t size, uint64_t recv_ns, TraceId trace_id)> m_on_message_raw;
     std::function<void(int code, const std::string& reason)> m_on_close;
     std::function<void(const std::string& msg)> m_on_error;
     std::function<void()> m_on_connect;

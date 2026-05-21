@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { normalizeTicker } from '../utils/tickerUtils';
 import { useTradeStore } from '../store/useTradeStore';
 import { marketDataService } from '../services/MarketDataService';
 import type { ChartPoint, ObLevel, IcebergEvent, DensityColumn, Trade, JournalEntry } from '../types';
@@ -901,7 +902,11 @@ function drawPosition(
   if (!pts.length) { ctx.restore(); return; }
   const gx = makeXOf(lastTs, windowMs, W);
 
-  const tickerShort = (s: string) => (s.split(':')[1] ?? s).replace('.p','').replace('.m','');
+  const tickerShort = (s: string) => {
+    const parts = s.split(':');
+    const raw = parts[parts.length - 1].replace('.p','').replace('.m','').replace('_', '');
+    return raw.toUpperCase();
+  };
   const T = tickerShort(ticker);
 
   // ── Закрытые сделки журнала ────────────────────────────────────────────────
@@ -1291,7 +1296,7 @@ function drawRibbon(canvas: HTMLCanvasElement, pts: ChartPoint[], lastTs: number
 
 function hasValidPrices(pts: ChartPoint[]) { return pts.some(p => p.mid > 0); }
 
-const shortName = (t: string) => (t.split(':')[1] ?? t).replace('.p', '').replace('.m', '');
+const shortName = (t: string) => normalizeTicker(t);
 
 interface PriceMeta {
   price: number; isUp: boolean; changePct: number; spreadBps: number;
@@ -1565,10 +1570,15 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
       const rect = el.getBoundingClientRect();
       const W = rect.width || 1;
       const fx = Math.min(1, Math.max(0, (e.clientX - rect.left) / W));
-      // PERF-02: Read from mutable buffer
-      const pts = bufferRef.current.chart.toArray();
-      if (!pts || !pts.length) return;
-      const { lastTs, windowMs } = xWindow(pts, viewRef.current.windowMs, viewRef.current.rightTs);
+      // F2b-FIX: Use buffer metadata instead of toArray()
+      const chartBuf = bufferRef.current.chart;
+      const chartSize = chartBuf.getSize();
+      if (chartSize === 0) return;
+      const lastMeta = chartBuf.getLastMetadata();
+      const curWindowMs = viewRef.current.windowMs || TIME_WINDOW_MS;
+      const curLastTs = viewRef.current.rightTs || lastMeta.ts;
+      const windowMs = curWindowMs;
+      const lastTs = curLastTs;
       const tsCursor = lastTs - (1 - fx) * windowMs;
       const k = Math.exp(-e.deltaY * 0.0012);
       const newWin = Math.min(TIME_WINDOW_MS, Math.max(MIN_WINDOW_MS, windowMs / k));
@@ -1577,7 +1587,8 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
       if (newRight >= now) {
         viewRef.current = { windowMs: newWin, rightTs: 0 };
       } else {
-        const firstTs = pts.find(p => p.mid > 0)?.ts_unix_ms ?? tsCursor;
+        const firstPt = chartBuf.getSize() > 0 ? chartBuf.getPoint(0) : null;
+        const firstTs = (firstPt && firstPt.mid > 0) ? firstPt.ts_unix_ms : tsCursor;
         newRight = Math.max(newRight, firstTs + newWin * 0.15);
         viewRef.current = { windowMs: newWin, rightTs: newRight };
       }
@@ -1589,10 +1600,12 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
     let dragWindowMs = 0;
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
-      // PERF-02: Read from mutable buffer
-      const pts = bufferRef.current.chart.toArray();
-      if (!pts || !pts.length) return;
-      const { lastTs, windowMs } = xWindow(pts, viewRef.current.windowMs, viewRef.current.rightTs);
+      // F2b-FIX: Use buffer metadata instead of toArray()
+      const chartBuf = bufferRef.current.chart;
+      if (chartBuf.getSize() === 0) return;
+      const lastMeta = chartBuf.getLastMetadata();
+      const windowMs = viewRef.current.windowMs || TIME_WINDOW_MS;
+      const lastTs = viewRef.current.rightTs || lastMeta.ts;
       dragging = true;
       dragStartX = e.clientX;
       dragStartRight = lastTs;
@@ -1606,13 +1619,14 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
       const dx = e.clientX - dragStartX;
       // drag right → pan into the past → rightTs decreases
       let newRight = dragStartRight - (dx / W) * dragWindowMs;
-      // PERF-02: Read from mutable buffer
-      const pts = bufferRef.current.chart.toArray();
+      // F2b-FIX: Use buffer point access instead of toArray()
       const now = Date.now();
       if (newRight >= now) {
         viewRef.current = { windowMs: dragWindowMs, rightTs: 0 };
       } else {
-        const firstTs = pts?.find(p => p.mid > 0)?.ts_unix_ms ?? newRight;
+        const chartBuf = bufferRef.current.chart;
+        const firstPt = chartBuf.getSize() > 0 ? chartBuf.getPoint(0) : null;
+        const firstTs = (firstPt && firstPt.mid > 0) ? firstPt.ts_unix_ms : newRight;
         newRight = Math.max(newRight, firstTs + dragWindowMs * 0.15);
         viewRef.current = { windowMs: dragWindowMs, rightTs: newRight };
       }
@@ -1707,42 +1721,50 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
 
       // PERF-02: Read chart data from mutable buffer
       const chartBuffer = bufferRef.current.chart;
-      const chartHistory = chartBuffer.toArray(); // Legacy compatibility - TODO: refactor helpers to use buffer directly
+      const lastMeta = chartBuffer.getLastMetadata();
+      const now = Date.now();
 
-      if (chartHistory.length) {
-        // D4-FIX: Reduce pulse threshold to 1s to avoid false "live" on stale data
-        // REFRESH-FIX: Force redraw every 500ms even if no new data to prevent freeze
-        let freshTs = 0;
-        for (let i = chartHistory.length - 1; i >= 0; i--) {
-          if (chartHistory[i].mid > 0) { freshTs = chartHistory[i].ts_unix_ms; break; }
-        }
-        const now = Date.now();
-        const timeSinceLastDraw = now - (lastMetaPush || 0);
-        if ((freshTs && now - freshTs < 1000) || timeSinceLastDraw > 500) {
-          dirtyRef.current.price = true;
-          dirtyRef.current.density = true;
-          dirtyRef.current.position = true;
-        }
+      // D4-FIX: Reduce pulse threshold to 1s to avoid false "live" on stale data
+      // REFRESH-FIX: Force redraw every 500ms even if no new data to prevent freeze
+      const timeSinceLastDraw = now - (lastMetaPush || 0);
+      const isFresh = lastMeta.ts > 0 && (now - lastMeta.ts < 1000);
+      
+      if (isFresh || timeSinceLastDraw > 500) {
+        dirtyRef.current.price = true;
+        dirtyRef.current.density = true;
+        dirtyRef.current.position = true;
+      }
 
-        // #13: nothing changed, feed stale, no iceberg pulse active →
-        // skip the per-frame range math and all draws this frame.
-        const anyDirty = dirtyRef.current.density || dirtyRef.current.price ||
-          dirtyRef.current.position || dirtyRef.current.ribbon || dirtyRef.current.signals;
-        if (!anyDirty && icebergEvents.length === 0) {
-          rafId = requestAnimationFrame(animate);
-          return;
-        }
+      // #13: nothing changed, feed stale, no iceberg pulse active →
+      // skip the per-frame range math and all draws this frame.
+      const anyDirty = dirtyRef.current.density || dirtyRef.current.price ||
+        dirtyRef.current.position || dirtyRef.current.ribbon || dirtyRef.current.signals;
+      
+      if (!anyDirty && icebergEvents.length === 0) {
+        rafId = requestAnimationFrame(animate);
+        return;
+      }
 
-        const extras: number[] = [];
-        for (const t of openTrades) {
-          if (t.entryPrice) extras.push(t.entryPrice);
-          if (t.stopLoss)   extras.push(t.stopLoss);
-          if (t.takeProfit) extras.push(t.takeProfit);
-        }
+      // F2-FIX: Cache toArray() result per dirty frame. Only allocate when
+      // at least one layer needs a redraw, not on every RAF tick (60fps).
+      // TODO: Refactor draw* functions to accept (buffer, size) instead.
+      const chartSize = chartBuffer.getSize();
+      if (chartSize === 0) {
+        rafId = requestAnimationFrame(animate);
+        return;
+      }
+      const chartHistory = chartBuffer.toArray();
 
-        const rawRange = priceRange(chartHistory, extras);
-        const range = smoothRange(rawRange, yEmaRef.current);
-        resolvedRangeRef.current = range;
+      const extras: number[] = [];
+      for (const t of openTrades) {
+        if (t.entryPrice) extras.push(t.entryPrice);
+        if (t.stopLoss)   extras.push(t.stopLoss);
+        if (t.takeProfit) extras.push(t.takeProfit);
+      }
+
+      const rawRange = priceRange(chartHistory, extras);
+      const range = smoothRange(rawRange, yEmaRef.current);
+      resolvedRangeRef.current = range;
 
         const { lastTs, windowMs } = xWindow(chartHistory, viewRef.current.windowMs, viewRef.current.rightTs);
 
@@ -1806,12 +1828,12 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
             setRegimeMeta(newRegime);
           }
         }
-      }
+
       rafId = requestAnimationFrame(animate);
     };
     rafId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafId);
-  }, []);
+  }, [ticker]);
 
   const priceColor = priceMeta ? (priceMeta.isUp ? '#26c26e' : '#e05050') : '#7a8fa8';
   const C = useMemo(() => getChartColors(), [regimeMeta.regime, priceMeta?.isUp]);
@@ -1823,27 +1845,22 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
   // D8-FIX: Memoize by crosshair coordinates and trade ID, not full objects
   const crosshairInfo = useMemo(() => {
     if (!crosshair || !mainChartRef.current) return null;
-    const chartHistory = bufferRef.current.chart.toArray();
-    if (!chartHistory.length) return null;
+    // F3b-FIX: Use findNearest() instead of toArray() — avoids 600 object allocations on every mousemove
+    const chartBuffer = bufferRef.current.chart;
+    const chartSize = chartBuffer.getSize();
+    if (chartSize === 0) return null;
     const el = mainChartRef.current;
     const w = el.clientWidth || 1;
     const h = el.clientHeight || 1;
-    const range = resolvedRangeRef.current ?? priceRange(chartHistory);
+    const range = resolvedRangeRef.current ?? { min: 0, max: 1 }; // F3b: use cached range, don't build array
     const price = range.min + (1 - crosshair.y / h) * (range.max - range.min);
-    const { lastTs, windowMs } = xWindow(chartHistory, viewRef.current.windowMs, viewRef.current.rightTs);
+    // F3b: Compute xWindow from buffer metadata instead of full array
+    const lastMeta = chartBuffer.getLastMetadata();
+    const windowMs = viewRef.current.windowMs || TIME_WINDOW_MS;
+    const lastTs = viewRef.current.rightTs || lastMeta.ts;
     const ts = lastTs - (1 - crosshair.x / w) * windowMs;
-    let nearest = chartHistory[0];
-    if (chartHistory.length > 0) {
-      const firstValidIdx = chartHistory.findIndex(p => p.mid > 0);
-      let lastValidIdx = -1;
-      for (let i = chartHistory.length - 1; i >= 0; i--) {
-        if (chartHistory[i].mid > 0) { lastValidIdx = i; break; }
-      }
-      if (firstValidIdx >= 0 && lastValidIdx >= firstValidIdx) {
-        const idx = findClosestByTs(chartHistory, ts, firstValidIdx, lastValidIdx);
-        nearest = chartHistory[idx];
-      }
-    }
+    const nearest = chartBuffer.findNearest(ts);
+
     const deltas: { label: string; value: string; color: string }[] = [];
     if (activeTrade?.entryPrice) {
       const d = ((price - activeTrade.entryPrice) / activeTrade.entryPrice) * 100;
@@ -1870,7 +1887,9 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
   }, [crosshair?.x, crosshair?.y, activeTrade?.id, activeTrade?.entryPrice, activeTrade?.stopLoss, activeTrade?.takeProfit]);
 
   const regimeClr = regimeColor(regimeMeta.regime, C);
-  const chartHistory = bufferRef.current.chart.toArray();
+  // F3a-FIX: Use buffer metadata instead of toArray() in render body
+  const chartBuffer = bufferRef.current.chart;
+  const hasChartData = chartBuffer.hasValidPrices();
 
   return (
     <div className="w-full h-full flex flex-col select-none">
@@ -2007,7 +2026,7 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
           <canvas ref={icebergRef}  className="absolute inset-0" style={{ width: '100%', height: '100%' }} />
           <canvas ref={overlayRef}  className="absolute inset-0" style={{ width: '100%', height: '100%' }} />
 
-          {!hasValidPrices(chartHistory) && (
+          {!hasChartData && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
               <div className="flex flex-col items-center gap-1.5">
                 <div className="w-1.5 h-1.5 bg-[#3c4e62] rounded-full" />
@@ -2018,26 +2037,17 @@ function AdvancedChartInner({ ticker }: { ticker: string }) {
 
           {/* Data Quality Indicators */}
           {(() => {
-            if (!chartHistory.length) return null;
-            let lastValidTs = 0;
-            for (let i = chartHistory.length - 1; i >= 0; i--) {
-              if (chartHistory[i].mid > 0) { lastValidTs = chartHistory[i].ts_unix_ms; break; }
-            }
+            if (!hasChartData) return null;
+            const lastMeta = chartBuffer.getLastMetadata();
+            const lastValidTs = lastMeta.ts;
             if (!lastValidTs) return null;
             
             const ageMs = Date.now() - lastValidTs;
             const isStale = ageMs > 5000;
             const isWarning = ageMs > 2000 && ageMs <= 5000;
             
-            // Detect gaps (missing data points > 500ms)
-            let gapCount = 0;
-            for (let i = 1; i < chartHistory.length; i++) {
-              const prev = chartHistory[i - 1];
-              const curr = chartHistory[i];
-              if (prev.mid > 0 && curr.mid > 0 && curr.ts_unix_ms - prev.ts_unix_ms > 500) {
-                gapCount++;
-              }
-            }
+            // F3a-FIX: Use buffer's getGaps() instead of iterating toArray()
+            const gapCount = chartBuffer.getGaps(500).length;
             
             if (!isStale && !isWarning && gapCount === 0) return null;
             

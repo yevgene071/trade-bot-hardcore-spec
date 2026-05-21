@@ -45,10 +45,12 @@ public:
     void on_frame(const FeatureFrame& frame) override;
     void on_trade(const Trade& trade) override;
     void on_book_update(const OrderBookUpdate& update) override;
+    
+    const char* perf_stage_name() const noexcept override { return "iceberg_eval_us"; }
 
 private:
     struct LevelStats {
-        double posterior;
+        double posterior{0.0};
         int    refill_count{0};
         double total_eaten_vol{0.0};
         std::chrono::system_clock::time_point last_refill;

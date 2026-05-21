@@ -2,16 +2,22 @@
 
 #include "domain/Types.hpp"
 #include "transport/MarketDataFeed.hpp"
+#include "transport/IClock.hpp" // Добавляем заголовок часов
 #include <map>
 #include <mutex>
+#include <memory>
 
 namespace trade_bot {
 
 class FinresHandler : public IMarketDataListener {
 public:
+    // Передаем абстракцию часов (опционально, для работы в реплее)
+    explicit FinresHandler(std::shared_ptr<IClock> clock = nullptr);
+
     struct State {
         double current_result{0.0};
         double day_start_result{0.0};
+        int64_t last_day_start_ts{0};
         bool   initialized{false};
     };
 
@@ -43,6 +49,7 @@ public:
 private:
     mutable std::mutex mutex_;
     std::map<int, State> states_;
+    std::shared_ptr<IClock> clock_; // Хранилище часов
 };
 
 } // namespace trade_bot

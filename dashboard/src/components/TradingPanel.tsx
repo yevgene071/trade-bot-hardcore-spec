@@ -60,17 +60,17 @@ export function TradingPanel() {
         <button
           onClick={() => setSide('BUY')}
           className={cn("flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors border",
-            side === 'BUY'
-              ? "bg-[#10b981] text-white border-[#10b981]"
-              : "bg-[#10b981]/10 text-[#10b981] border-[#10b981]/30 hover:bg-[#10b981]/20"
+          side === 'BUY'
+            ? "bg-[#1a9448] text-white border-[#1a9448]"
+              : "bg-[#1a9448]/10 text-[#1a9448] border-[#1a9448]/30 hover:bg-[#1a9448]/20"
           )}
         >BUY</button>
         <button
           onClick={() => setSide('SELL')}
           className={cn("flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors border",
             side === 'SELL'
-              ? "bg-[#f43f5e] text-white border-[#f43f5e]"
-              : "bg-[#f43f5e]/10 text-[#f43f5e] border-[#f43f5e]/30 hover:bg-[#f43f5e]/20"
+              ? "bg-[#ae2c2c] text-white border-[#ae2c2c]"
+              : "bg-[#ae2c2c]/10 text-[#ae2c2c] border-[#ae2c2c]/30 hover:bg-[#ae2c2c]/20"
           )}
         >SELL</button>
       </div>
@@ -82,7 +82,7 @@ export function TradingPanel() {
           value={price}
           onChange={e => setPrice(e.target.value)}
           placeholder="Price"
-          className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder-[#7b859c] focus:outline-none focus:border-[#58a6ff]/50"
+          className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder-[#7b859c] focus:outline-none focus:border-[#3478b8]/50"
         />
       )}
 
@@ -92,7 +92,7 @@ export function TradingPanel() {
         value={size}
         onChange={e => setSize(e.target.value)}
         placeholder="Size"
-        className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder-[#7b859c] focus:outline-none focus:border-[#58a6ff]/50"
+        className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder-[#7b859c] focus:outline-none focus:border-[#3478b8]/50"
       />
 
       {/* Submit */}
@@ -102,8 +102,8 @@ export function TradingPanel() {
         className={cn(
           "w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border disabled:opacity-30 disabled:cursor-not-allowed",
           side === 'BUY'
-            ? "bg-[#10b981]/15 text-[#10b981] border-[#10b981]/30 hover:bg-[#10b981] hover:text-white"
-            : "bg-[#f43f5e]/15 text-[#f43f5e] border-[#f43f5e]/30 hover:bg-[#f43f5e] hover:text-white"
+            ? "bg-[#1a9448]/15 text-[#1a9448] border-[#1a9448]/30 hover:bg-[#1a9448] hover:text-white"
+            : "bg-[#ae2c2c]/15 text-[#ae2c2c] border-[#ae2c2c]/30 hover:bg-[#ae2c2c] hover:text-white"
         )}
       >
         {killSwitchActive ? 'KILL SWITCH ACTIVE' : `Place ${side} ${orderType}`}

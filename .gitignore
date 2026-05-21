@@ -22,6 +22,9 @@ Thumbs.db
 
 # Trading
 /killswitch
+/journal/
+/replay/
+/core/build_bench/
 
 # Local agent tooling state
 .claude/

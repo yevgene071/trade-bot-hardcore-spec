@@ -17,6 +17,7 @@ struct AccountState {
     double finres_day_start_result_usd{0.0}; // baseline Result from finres_update at UTC reset
     double unrealized_pnl_usd{0.0};
     double free_balance_usd{0.0};
+    double mark_price{0.0};            // last known mark price for slippage check (R15)
     
     int    active_positions{0};
     std::vector<Ticker> active_tickers;

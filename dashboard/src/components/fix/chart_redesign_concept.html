@@ -1,0 +1,309 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+.chart-wrap { background: #080c16; border-radius: 8px; overflow: hidden; font-family: var(--font-mono, monospace); }
+.chart-header { display: flex; align-items: center; gap: 20px; padding: 8px 12px; border-bottom: 1px solid #0f1a2e; }
+.ticker { font-size: 13px; font-weight: 600; color: #fff; letter-spacing: .04em; }
+.price-big { font-size: 20px; font-weight: 700; font-family: var(--font-mono, monospace); }
+.price-big.up { color: #26c26e; }
+.price-big.dn { color: #e05050; }
+.chg { font-size: 11px; padding: 2px 6px; border-radius: 3px; }
+.chg.up { background: rgba(38,194,110,.15); color: #26c26e; }
+.chg.dn { background: rgba(224,80,80,.15); color: #e05050; }
+.stat { display: flex; flex-direction: column; gap: 1px; }
+.stat-label { font-size: 9px; color: #3c4e62; text-transform: uppercase; letter-spacing: .07em; }
+.stat-val { font-size: 11px; color: #7a8fa8; }
+.chart-body { position: relative; height: 260px; }
+.chart-ribbon { height: 60px; position: relative; border-top: 1px solid #0f1a2e; }
+.ribbon-label { position: absolute; top: 4px; left: 8px; font-size: 9px; color: #3c4e62; text-transform: uppercase; letter-spacing: .06em; }
+.ob-side { position: absolute; right: 0; top: 0; width: 56px; height: 100%; border-left: 1px solid #0f1a2e; display: flex; flex-direction: column; }
+.ob-bar { flex: 1; transition: background .1s; }
+.price-label { position: absolute; right: 62px; font-size: 11px; font-family: var(--font-mono); font-weight: 600; pointer-events: none; padding: 1px 5px; border-radius: 2px; }
+.legend { display: flex; gap: 14px; padding: 6px 12px 8px; border-top: 1px solid #0f1a2e; }
+.leg-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #3c4e62; }
+.leg-dot { width: 8px; height: 3px; border-radius: 1px; }
+.annotation { position: absolute; font-size: 9px; font-family: var(--font-mono); color: rgba(255,255,255,.35); pointer-events: none; }
+</style>
+
+<div class="chart-wrap">
+  <div class="chart-header">
+    <span class="ticker">MEZO_USDT</span>
+    <span class="price-big up" id="hdr-price">0.0348</span>
+    <span class="chg up" id="hdr-chg">+2.4%</span>
+    <div style="flex:1"></div>
+    <div class="stat"><span class="stat-label">Spread</span><span class="stat-val">2.0 bps</span></div>
+    <div class="stat"><span class="stat-label">Aggression</span><span class="stat-val" id="agg-val">+0.61</span></div>
+    <div class="stat"><span class="stat-label">Vol 1m</span><span class="stat-val">6.2k</span></div>
+  </div>
+
+  <div class="chart-body">
+    <canvas id="main-canvas" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+    <div id="cur-price-label" class="price-label" style="background:rgba(38,194,110,.2);color:#26c26e;"></div>
+    <div class="annotation" id="ann-wall-bid" style="right:62px;"></div>
+    <div class="annotation" id="ann-wall-ask" style="right:62px;"></div>
+    <div class="ob-side" id="ob-side"></div>
+  </div>
+
+  <div class="chart-ribbon">
+    <canvas id="ribbon-canvas" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+    <div class="ribbon-label">Buy / Sell flow</div>
+  </div>
+
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#26c26e"></div>Price (up momentum)</div>
+    <div class="leg-item"><div class="leg-dot" style="background:#e05050"></div>Price (sell pressure)</div>
+    <div class="leg-item"><div class="leg-dot" style="background:rgba(38,194,110,.25);height:8px;border-radius:2px"></div>Area fill (direction)</div>
+    <div class="leg-item"><div class="leg-dot" style="background:#c08828;width:12px"></div>Bid wall</div>
+    <div class="leg-item"><div class="leg-dot" style="background:#4a7acc;width:12px"></div>OB density</div>
+  </div>
+</div>
+
+<div style="margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+  <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px;">
+    <div style="font-size: 11px; color: var(--color-text-tertiary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .06em;">Сейчас</div>
+    <div style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.8;">
+      ❌ Density — главный визуал<br>
+      ❌ Цена — тонкая линия в шуме<br>
+      ❌ Направление не читается<br>
+      ❌ Текущий прайс — мелкий label<br>
+      ❌ Стены = ещё больше полос
+    </div>
+  </div>
+  <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px;">
+    <div style="font-size: 11px; color: var(--color-text-tertiary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .06em;">Нужно</div>
+    <div style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.8;">
+      ✅ Area fill = направление сразу<br>
+      ✅ Цена — толстая, цветная (up/dn)<br>
+      ✅ OB density — правая колонка<br>
+      ✅ Текущий прайс — крупно, всегда<br>
+      ✅ Стены — только значимые
+    </div>
+  </div>
+</div>
+
+<script>
+const pts = [];
+const N = 200;
+let base = 0.0348;
+
+for (let i = 0; i < N; i++) {
+  const trend = Math.sin(i * 0.04) * 0.003 + Math.sin(i * 0.13) * 0.001;
+  base += trend * 0.15 + (Math.random() - 0.5) * 0.0002;
+  const buyVol = Math.max(0, Math.random() * 0.8 + Math.sin(i * 0.07) * 0.4);
+  const sellVol = Math.max(0, Math.random() * 0.8 - Math.sin(i * 0.07) * 0.4);
+  pts.push({ mid: base, buy: buyVol, sell: sellVol, agg: (buyVol - sellVol) });
+}
+
+const walls = [
+  { price: 0.0370, size: 0.9, side: 'ask' },
+  { price: 0.0348, size: 0.6, side: 'bid' },
+  { price: 0.0330, size: 0.8, side: 'bid' },
+];
+
+function drawMain() {
+  const canvas = document.getElementById('main-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width - 58;
+  const H = rect.height;
+
+  ctx.clearRect(0, 0, rect.width, H);
+  ctx.fillStyle = '#080c16';
+  ctx.fillRect(0, 0, rect.width, H);
+
+  const prices = pts.map(p => p.mid);
+  const mn = Math.min(...prices) * 0.999;
+  const mx = Math.max(...prices) * 1.001;
+  const toY = p => H - ((p - mn) / (mx - mn)) * H;
+  const toX = i => (i / (N - 1)) * W;
+
+  // Grid
+  ctx.setLineDash([2, 8]);
+  ctx.strokeStyle = 'rgba(30,45,65,0.6)';
+  ctx.lineWidth = 1;
+  for (let t = 0; t <= 4; t++) {
+    const price = mn + (t / 4) * (mx - mn);
+    const y = toY(price);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#2a3d55';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(price.toFixed(4), W - 4, y - 3);
+    ctx.setLineDash([2, 8]);
+  }
+  ctx.setLineDash([]);
+
+  // Wall lines — только значимые
+  for (const w of walls) {
+    if (w.price < mn || w.price > mx) continue;
+    const y = toY(w.price);
+    ctx.save();
+    ctx.strokeStyle = w.side === 'bid' ? `rgba(38,194,110,${0.3 + w.size * 0.5})` : `rgba(224,80,80,${0.3 + w.size * 0.5})`;
+    ctx.lineWidth = 1 + w.size * 2;
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Area fill — по направлению
+  const lastPt = pts[N-1];
+  const firstPt = pts[0];
+  const isUp = lastPt.mid > firstPt.mid;
+  const fillColor = isUp ? 'rgba(38,194,110,' : 'rgba(224,80,80,';
+
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(pts[0].mid));
+  for (let i = 1; i < N; i++) ctx.lineTo(toX(i), toY(pts[i].mid));
+  ctx.lineTo(W, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, fillColor + '0.18)');
+  grad.addColorStop(1, fillColor + '0.02)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Price line — толстая, цветная по моментуму
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < N; i++) {
+    const x = toX(i); const y = toY(pts[i].mid);
+    if (i === 0) { ctx.moveTo(x, y); continue; }
+    const agg = pts[i].agg;
+    const prevAgg = pts[i-1].agg;
+    if (Math.sign(agg) !== Math.sign(prevAgg)) {
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(toX(i-1), toY(pts[i-1].mid));
+    }
+    ctx.strokeStyle = agg > 0.1 ? '#26c26e' : agg < -0.1 ? '#e05050' : '#7a8fa8';
+    ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Current price dashed line
+  const curY = toY(lastPt.mid);
+  const curColor = isUp ? '#26c26e' : '#e05050';
+  ctx.save();
+  ctx.setLineDash([3, 4]);
+  ctx.strokeStyle = curColor + '60';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, curY); ctx.lineTo(W, curY); ctx.stroke();
+  ctx.restore();
+
+  // OB density column (правая полоса)
+  const obW = 56;
+  const obX = W + 2;
+  const levels = 40;
+  for (let i = 0; i < levels; i++) {
+    const pct = i / levels;
+    const price = mx - pct * (mx - mn);
+    const y = (pct * H);
+    const rowH = H / levels;
+    const density = Math.random() * 0.6 + (Math.abs(price - 0.035) < 0.002 ? 0.8 : 0.1);
+    const isBid = price < lastPt.mid;
+    ctx.fillStyle = isBid
+      ? `rgba(38,194,110,${density * 0.35})`
+      : `rgba(224,80,80,${density * 0.35})`;
+    ctx.fillRect(obX, y, obW, rowH + 0.5);
+  }
+  ctx.strokeStyle = '#0f1a2e';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(obX, 0, obW, H);
+
+  // OB label
+  ctx.fillStyle = '#1e2d3d';
+  ctx.fillRect(obX + 2, 4, 32, 12);
+  ctx.fillStyle = '#c08828';
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('OB LIVE', obX + 4, 13);
+
+  // Current price label
+  const label = document.getElementById('cur-price-label');
+  if (label) {
+    label.textContent = lastPt.mid.toFixed(4);
+    label.style.top = (curY - 8) + 'px';
+    label.style.background = isUp ? 'rgba(38,194,110,0.25)' : 'rgba(224,80,80,0.25)';
+    label.style.color = curColor;
+  }
+
+  // Current price dot
+  ctx.beginPath();
+  ctx.arc(W - 2, curY, 4, 0, Math.PI * 2);
+  ctx.fillStyle = curColor;
+  ctx.fill();
+}
+
+function drawRibbon() {
+  const canvas = document.getElementById('ribbon-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width - 58;
+  const H = rect.height;
+
+  ctx.fillStyle = '#080c16';
+  ctx.fillRect(0, 0, rect.width, H);
+
+  const maxV = Math.max(...pts.map(p => Math.max(p.buy, p.sell)), 0.01);
+  const mid = H / 2;
+  const barW = W / N;
+
+  ctx.strokeStyle = 'rgba(60,78,98,0.4)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+
+  for (let i = 0; i < N; i++) {
+    const x = i * barW;
+    const buyH = (pts[i].buy / maxV) * (mid - 2);
+    const sellH = (pts[i].sell / maxV) * (mid - 2);
+    const alpha = 0.3 + Math.abs(pts[i].agg) * 0.6;
+    ctx.fillStyle = `rgba(38,194,110,${alpha})`;
+    ctx.fillRect(x, mid - buyH, Math.max(barW - 0.5, 1), buyH);
+    ctx.fillStyle = `rgba(224,80,80,${alpha})`;
+    ctx.fillRect(x, mid, Math.max(barW - 0.5, 1), sellH);
+  }
+}
+
+function animate(t) {
+  pts.shift();
+  const last = pts[pts.length-1].mid;
+  const trend = Math.sin(t * 0.001) * 0.0004 + (Math.random()-0.5) * 0.0003;
+  const newMid = last + trend;
+  const buy = Math.max(0, Math.random()*0.9 + Math.sin(t*0.003)*0.5);
+  const sell = Math.max(0, Math.random()*0.9 - Math.sin(t*0.003)*0.5);
+  pts.push({ mid: newMid, buy, sell, agg: buy-sell });
+
+  drawMain();
+  drawRibbon();
+
+  const last2 = pts[pts.length-1];
+  const first2 = pts[0];
+  const isUp2 = last2.mid > first2.mid;
+  const pctChg = ((last2.mid - first2.mid) / first2.mid * 100);
+  document.getElementById('hdr-price').textContent = last2.mid.toFixed(4);
+  document.getElementById('hdr-price').className = 'price-big ' + (isUp2 ? 'up' : 'dn');
+  document.getElementById('hdr-chg').textContent = (pctChg >= 0 ? '+' : '') + pctChg.toFixed(2) + '%';
+  document.getElementById('hdr-chg').className = 'chg ' + (isUp2 ? 'up' : 'dn');
+  document.getElementById('agg-val').textContent = (last2.agg >= 0 ? '+' : '') + last2.agg.toFixed(2);
+  document.getElementById('agg-val').style.color = last2.agg > 0 ? '#26c26e' : '#e05050';
+
+  setTimeout(() => requestAnimationFrame(animate), 80);
+}
+
+requestAnimationFrame(t => {
+  drawMain();
+  drawRibbon();
+  setTimeout(() => requestAnimationFrame(animate), 500);
+});
+</script>

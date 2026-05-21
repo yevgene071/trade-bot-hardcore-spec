@@ -128,7 +128,8 @@ public:
             std::string side; // "BID" or "ASK"
             double      hidden_size{0.0};
         };
-        std::vector<IcebergEvent> iceberg_events; // last 10
+        std::deque<IcebergEvent>    iceberg_events;
+        // last 10
     };
 
     /// `auth_token` is compared against the `Authorization: Bearer <token>`
@@ -238,6 +239,7 @@ private:
     bool pending_dirty_{false};
     State pending_state_;
     boost::asio::steady_timer conflation_timer_;
+    std::size_t m_max_write_queue_size{8}; // A11: no longer hardcoded
     void schedule_conflation_();
 };
 

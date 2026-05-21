@@ -4,10 +4,11 @@
 #include "strategy/TradePlan.hpp"
 #include "risk/NewsCalendar.hpp"
 #include "universe/TickerUniverse.hpp"
+#include "transport/IClock.hpp"
 
+#include "absl/container/btree_map.h"
 #include <deque>
 #include <mutex>
-#include <unordered_map>
 #include <vector>
 
 namespace trade_bot {
@@ -38,11 +39,15 @@ public:
         
         int    trades_window_min{5};
         int    max_trades_per_window{6};
-        
+        size_t max_trade_history{10000};
+
         int    loss_streak_window_min{15};
         int    max_consecutive_losses{3};
         int    loss_streak_cooloff_min{10};
+        size_t max_loss_history{10000};
         
+        double max_entry_slippage_bps{10.0};
+
         int    news_blackout_min{5};
         int    news_calendar_check_min{60};
         bool   news_calendar_require_fresh{false};
@@ -54,10 +59,12 @@ public:
 
     RiskManager(const TickerUniverse& universe, 
                 const NewsCalendar& news,
-                const Config& cfg);
+                const Config& cfg,
+                std::shared_ptr<IClock> clock = nullptr);
 
     explicit RiskManager(const TickerUniverse& universe, 
-                         const NewsCalendar& news);
+                         const NewsCalendar& news,
+                         std::shared_ptr<IClock> clock = nullptr);
 
     /// Evaluate a TradePlan against R1..R13. Thread-safe — multiple
     /// threads (strategy engine + executor reconciliation) may call this
@@ -86,11 +93,14 @@ private:
     std::deque<std::chrono::system_clock::time_point>               trade_history_;
     std::deque<std::pair<std::chrono::system_clock::time_point, bool>> loss_history_;
     std::chrono::system_clock::time_point                           last_loss_streak_ts_;
-    std::unordered_map<Ticker, std::chrono::system_clock::time_point> funding_times_;
+    absl::btree_map<Ticker, std::chrono::system_clock::time_point> funding_times_;
     // T1-BUGFIX: Track previous funding timestamp for post-funding blackout (#204).
     // funding_times_ holds the NEXT event; prev_funding_times_ holds the most recent
     // PAST event so the post-window survives the immediate WS update of next_funding_time.
-    std::unordered_map<Ticker, std::chrono::system_clock::time_point> prev_funding_times_;
+    absl::btree_map<Ticker, std::chrono::system_clock::time_point> prev_funding_times_;
+    
+    // P0-DETERMINISM: Clock abstraction for replay (injected via constructor)
+    std::shared_ptr<IClock> clock_;
 };
 
 } // namespace trade_bot

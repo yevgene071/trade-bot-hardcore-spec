@@ -231,16 +231,14 @@ export function decodeFlatBuffer(bytes: Uint8Array): Record<string, unknown> {
   // Structs: reuse a single object per array to avoid allocations
   const bids_top20: unknown[] = [];
   const asks_top20: unknown[] = [];
-  if (isFull) {
-    const lvObj = new BookLevel();
-    for (let i = 0; i < s.bidsTop20Length(); i++) {
-      const lv = s.bidsTop20(i, lvObj);
-      if (lv) bids_top20.push({ price: lv.price(), size: lv.size() });
-    }
-    for (let i = 0; i < s.asksTop20Length(); i++) {
-      const lv = s.asksTop20(i, lvObj);
-      if (lv) asks_top20.push({ price: lv.price(), size: lv.size() });
-    }
+  const lvObj = new BookLevel();
+  for (let i = 0; i < s.bidsTop20Length(); i++) {
+    const lv = s.bidsTop20(i, lvObj);
+    if (lv) bids_top20.push({ price: lv.price(), size: lv.size() });
+  }
+  for (let i = 0; i < s.asksTop20Length(); i++) {
+    const lv = s.asksTop20(i, lvObj);
+    if (lv) asks_top20.push({ price: lv.price(), size: lv.size() });
   }
 
   const equity_history: unknown[] = [];
@@ -274,15 +272,18 @@ export function decodeFlatBuffer(bytes: Uint8Array): Record<string, unknown> {
     selected_ticker: s.selectedTicker() ?? '',
   };
 
+  // C1-FIX: bids/asks MUST be outside isFull gate — ladder needs every-tick updates.
+  // chart_history, density_history also move out so AdvancedChart gets fast data.
+  result.bids_top20 = bids_top20;
+  result.asks_top20 = asks_top20;
+  result.chart_history = chart_history;
+  result.density_history = density_history;
+
   if (isFull) {
     result.recent_journal = recent_journal;
     result.strategy_stats = strategy_stats;
     result.funding_info = funding_info;
     result.strategy_states = strategy_states;
-    result.chart_history = chart_history;
-    result.density_history = density_history;
-    result.bids_top20 = bids_top20;
-    result.asks_top20 = asks_top20;
     result.equity_history = equity_history;
   }
 

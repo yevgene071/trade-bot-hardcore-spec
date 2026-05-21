@@ -52,8 +52,9 @@ RestOrder make_server_order(int64_t server_id, double price = 100.0, double size
 TEST_F(OrderReconciliatorTest, EnterRegistersIntentOnce) {
     OrderReconciliator r;
     auto intent = make_intent(42);
-    EXPECT_TRUE(r.enter_submit_unknown(intent));
-    EXPECT_FALSE(r.enter_submit_unknown(intent));  // duplicate id
+    auto now = std::chrono::system_clock::now();
+    EXPECT_TRUE(r.enter_submit_unknown(intent, now));
+    EXPECT_FALSE(r.enter_submit_unknown(intent, now));  // duplicate id
     EXPECT_EQ(r.pending_count(), 1u);
     EXPECT_TRUE(r.has_pending("BTCUSDT"));
     EXPECT_FALSE(r.has_pending("ETHUSDT"));
@@ -61,8 +62,9 @@ TEST_F(OrderReconciliatorTest, EnterRegistersIntentOnce) {
 
 TEST_F(OrderReconciliatorTest, PollWithoutFetcherReturnsEmpty) {
     OrderReconciliator r;
-    r.enter_submit_unknown(make_intent());
-    auto results = r.poll_open_orders("BTCUSDT");
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(), now);
+    auto results = r.poll_open_orders("BTCUSDT", now);
     EXPECT_TRUE(results.empty());
     // Intent stays pending — poll without fetcher must not silently drop it.
     EXPECT_TRUE(r.has_pending("BTCUSDT"));
@@ -73,9 +75,10 @@ TEST_F(OrderReconciliatorTest, PollResolvesMatchingOrder) {
     r.set_fetch_open_orders([](const Ticker&) {
         return std::vector<RestOrder>{make_server_order(/*server_id=*/777)};
     });
-    r.enter_submit_unknown(make_intent(42));
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(42), now);
 
-    auto results = r.poll_open_orders("BTCUSDT");
+    auto results = r.poll_open_orders("BTCUSDT", now);
     ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].outcome, ReconcileOutcome::Resolved);
     EXPECT_EQ(results[0].local_order_id, 42);
@@ -89,8 +92,9 @@ TEST_F(OrderReconciliatorTest, PollPendingWhenNoMatch) {
     r.set_fetch_open_orders([](const Ticker&) {
         return std::vector<RestOrder>{};  // no orders
     });
-    r.enter_submit_unknown(make_intent());
-    auto results = r.poll_open_orders("BTCUSDT");
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(), now);
+    auto results = r.poll_open_orders("BTCUSDT", now);
     ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].outcome, ReconcileOutcome::Pending);
     EXPECT_TRUE(r.has_pending("BTCUSDT"));
@@ -105,8 +109,9 @@ TEST_F(OrderReconciliatorTest, MatchSkipsDifferentTickerSideOrType) {
         orders.push_back(make_server_order(/*id=*/3, 100.0, 1.0, Side::Buy, OrderType::Limit, "ETHUSDT"));
         return orders;
     });
-    r.enter_submit_unknown(make_intent());
-    auto results = r.poll_open_orders("BTCUSDT");
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(), now);
+    auto results = r.poll_open_orders("BTCUSDT", now);
     ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].outcome, ReconcileOutcome::Pending);  // none matched
 }
@@ -122,9 +127,10 @@ TEST_F(OrderReconciliatorTest, MatchHonoursPriceAndSizeTolerances) {
     r.set_fetch_open_orders([](const Ticker&) {
         return std::vector<RestOrder>{make_server_order(/*id=*/9, 100.04, 0.991)};
     });
-    r.enter_submit_unknown(make_intent(7));
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(7), now);
 
-    auto results = r.poll_open_orders("BTCUSDT");
+    auto results = r.poll_open_orders("BTCUSDT", now);
     ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].outcome, ReconcileOutcome::Resolved);
     EXPECT_EQ(*results[0].server_order_id, 9);
@@ -142,16 +148,17 @@ TEST_F(OrderReconciliatorTest, FetchExceptionTreatedAsTransientThenTimeout) {
         ++call_count;
         throw std::runtime_error("timeout");
     });
-    r.enter_submit_unknown(make_intent());
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(), now);
 
     // First poll → Pending (after exception).
-    auto first = r.poll_open_orders("BTCUSDT");
+    auto first = r.poll_open_orders("BTCUSDT", now);
     ASSERT_EQ(first.size(), 1u);
     EXPECT_EQ(first[0].outcome, ReconcileOutcome::Pending);
 
     // Sleep past total_timeout, poll again → NotFoundTimeout.
     std::this_thread::sleep_for(60ms);
-    auto second = r.poll_open_orders("BTCUSDT");
+    auto second = r.poll_open_orders("BTCUSDT", std::chrono::system_clock::now());
     ASSERT_EQ(second.size(), 1u);
     EXPECT_EQ(second[0].outcome, ReconcileOutcome::NotFoundTimeout);
     EXPECT_FALSE(r.has_pending("BTCUSDT"));
@@ -160,7 +167,8 @@ TEST_F(OrderReconciliatorTest, FetchExceptionTreatedAsTransientThenTimeout) {
 
 TEST_F(OrderReconciliatorTest, ResolveOrderManualPath) {
     OrderReconciliator r;
-    r.enter_submit_unknown(make_intent(123));
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(123), now);
     EXPECT_TRUE(r.resolve_order(123, /*server=*/4242));
     EXPECT_FALSE(r.has_pending("BTCUSDT"));
     EXPECT_FALSE(r.resolve_order(123, 9999));  // already gone
@@ -174,11 +182,12 @@ TEST_F(OrderReconciliatorTest, MultipleIntentsPerTickerPolledTogether) {
             make_server_order(/*id=*/200, 101.0, 1.0),
         };
     });
-    r.enter_submit_unknown(make_intent(1, /*price=*/99.0));
-    r.enter_submit_unknown(make_intent(2, /*price=*/101.0));
-    r.enter_submit_unknown(make_intent(3, /*price=*/200.0));  // no match
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(1, /*price=*/99.0), now);
+    r.enter_submit_unknown(make_intent(2, /*price=*/101.0), now);
+    r.enter_submit_unknown(make_intent(3, /*price=*/200.0), now);  // no match
 
-    auto results = r.poll_open_orders("BTCUSDT");
+    auto results = r.poll_open_orders("BTCUSDT", now);
     ASSERT_EQ(results.size(), 3u);
 
     int resolved = 0, pending = 0;
@@ -204,10 +213,11 @@ TEST_F(OrderReconciliatorTest, BackoffPreventsImmediateRepoll) {
         ++call_count;
         return std::vector<RestOrder>{};
     });
-    r.enter_submit_unknown(make_intent());
-    r.poll_open_orders("BTCUSDT");          // first poll, fetches
+    auto now = std::chrono::system_clock::now();
+    r.enter_submit_unknown(make_intent(), now);
+    r.poll_open_orders("BTCUSDT", now);          // first poll, fetches
     EXPECT_EQ(call_count, 1);
 
-    r.poll_open_orders("BTCUSDT");          // immediate repoll skipped due to backoff
+    r.poll_open_orders("BTCUSDT", now);          // immediate repoll skipped due to backoff
     EXPECT_EQ(call_count, 1);
 }

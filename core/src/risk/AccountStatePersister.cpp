@@ -8,6 +8,8 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <unistd.h>
+#include <thread>
+#include <chrono>
 
 namespace trade_bot {
 
@@ -24,11 +26,19 @@ AccountStatePersister::AccountStatePersister(std::string path)
     if (lock_fd_ < 0) {
         LOG_WARN("AccountStatePersister: cannot open lock file {} — running without lock",
                  lock_path);
-    } else if (::flock(lock_fd_, LOCK_EX | LOCK_NB) != 0) {
-        ::close(lock_fd_);
-        lock_fd_ = -1;
-        throw std::runtime_error(
-            "AccountStatePersister: another instance is using " + path_);
+    } else {
+        // Retry up to 3s in 300ms steps — handles quick restart after SIGTERM
+        bool acquired = false;
+        for (int i = 0; i < 10; ++i) {
+            if (::flock(lock_fd_, LOCK_EX | LOCK_NB) == 0) { acquired = true; break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        }
+        if (!acquired) {
+            ::close(lock_fd_);
+            lock_fd_ = -1;
+            throw std::runtime_error(
+                "AccountStatePersister: another instance is using " + path_);
+        }
     }
 }
 
@@ -49,12 +59,32 @@ void AccountStatePersister::save(const PersistedData& data) {
     j["kill_switch_triggered"] = data.kill_switch_triggered;
     j["kill_switch_reason"] = data.kill_switch_reason;
 
+    std::lock_guard lock(save_mtx_);
+
     std::string tmp_path = path_ + ".tmp";
-    {
-        std::ofstream out(tmp_path);
-        out << j.dump(2);
+    std::string content = j.dump(2);
+
+    // Write tmp + fdatasync so the content survives a power loss before rename.
+    int fd = ::open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        LOG_ERROR("AccountStatePersister: open tmp failed: {}", tmp_path);
+        return;
     }
+    if (::write(fd, content.data(), content.size()) < 0) {
+        LOG_ERROR("AccountStatePersister: write tmp failed: {}", tmp_path);
+        ::close(fd);
+        return;
+    }
+    ::fdatasync(fd);
+    ::close(fd);
+
     std::filesystem::rename(tmp_path, path_);
+
+    // fsync the directory so the rename itself is durable.
+    auto dir = std::filesystem::path(path_).parent_path().string();
+    if (dir.empty()) dir = ".";
+    int dfd = ::open(dir.c_str(), O_RDONLY);
+    if (dfd >= 0) { ::fsync(dfd); ::close(dfd); }
 }
 
 std::optional<AccountStatePersister::PersistedData> AccountStatePersister::load() {

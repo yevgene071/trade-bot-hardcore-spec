@@ -7,11 +7,14 @@
 #include "trading/OrderReconciliator.hpp"
 
 #include <map>
+#include <memory>
 #include <mutex>
 #include <vector>
 #include <atomic>
 
 namespace trade_bot {
+
+class TickerUniverse;
 
 /**
  * T4-EXECUTOR: Live order management.
@@ -28,8 +31,8 @@ public:
         double max_single_position_loss_pct{1.5};
     };
 
-    LiveExecutor(int connection_id, IOrderGateway& gateway, MarketDataFeed& feed, Config cfg);
-    LiveExecutor(int connection_id, IOrderGateway& gateway, MarketDataFeed& feed);
+    LiveExecutor(int connection_id, IOrderGateway& gateway, MarketDataFeed& feed, const TickerUniverse& universe, Config cfg);
+    LiveExecutor(int connection_id, IOrderGateway& gateway, MarketDataFeed& feed, const TickerUniverse& universe);
 
     // IExecutor
     void submit(const TradePlan& plan) override;
@@ -50,7 +53,8 @@ public:
     void on_error(const std::string& msg) override;
 
     void tick(std::chrono::system_clock::time_point now) override;
-    void set_mark_prices(const std::unordered_map<Ticker, double>& marks) override;
+    void set_mark_prices(const absl::btree_map<Ticker, double>& marks) override;
+    void set_mark_price(const Ticker& ticker, double price) override;
 
     void set_alert_callback(std::function<void(const std::string&)> cb) { alert_cb_ = cb; }
 
@@ -63,15 +67,26 @@ private:
     void record_emergency_close_(const ActiveTrade& trade, const FixedString<32>& reason);
     void update_balance_reservation_(double amount, bool add);
 
+    // Rebuilds the lock-free snapshot served by get_active_trades().
+    // MUST be called with mutex_ held; publishes via atomic store-release.
+    void rebuild_active_snapshot_();
+
     int connection_id_;
     IOrderGateway& gateway_;
     MarketDataFeed& feed_;
+    const TickerUniverse& universe_;
     Config cfg_;
 
     mutable std::mutex mutex_;
     std::map<Ticker, std::vector<ActiveTrade>> trades_;
     std::vector<ClosedTrade> closed_trades_;
-    std::unordered_map<Ticker, double> mark_prices_;
+    absl::btree_map<Ticker, double> mark_prices_;
+
+    // Lock-free snapshot of active trades (with uPNL) for get_active_trades().
+    // Written under mutex_ by mutating methods, read without any lock by the
+    // dashboard/main thread — eliminates main↔processor↔WS mutex contention.
+    std::atomic<std::shared_ptr<const std::vector<ActiveTrade>>> active_snapshot_{
+        std::make_shared<const std::vector<ActiveTrade>>()};
     
     OrderReconciliator reconciliator_;
     std::atomic<int> error_streak_{0};

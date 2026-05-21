@@ -188,20 +188,26 @@ int main(int argc, char* argv[]) {
             try {
                 if (type == "trade_update" && data.value("Ticker", "") == ticker) {
                     auto trades = trade_bot::MetaScalpCodec::parse_trade_update(data);
-                    for (const auto& tr : trades) {
-                        stream.on_trade(tr);
-                        for (auto* d : detectors) d->on_trade(tr);
+                    if (trades) {
+                        for (const auto& tr : *trades) {
+                            stream.on_trade(tr);
+                            for (auto* d : detectors) d->on_trade(tr);
+                        }
                     }
                 } else if (type == "orderbook_snapshot" && data.value("Ticker", "") == ticker) {
                     auto snap = trade_bot::MetaScalpCodec::parse_orderbook_snapshot(data, ticker);
-                    book.apply_snapshot(snap);
-                    // Notify detectors about full reset
-                    trade_bot::OrderBookUpdate dummy{ticker, {}, ts};
-                    for (auto* d : detectors) d->on_book_update(dummy);
+                    if (snap) {
+                        book.apply_snapshot(*snap);
+                        // Notify detectors about full reset
+                        trade_bot::OrderBookUpdate dummy{ticker, {}, ts};
+                        for (auto* d : detectors) d->on_book_update(dummy);
+                    }
                 } else if (type == "orderbook_update" && data.value("Ticker", "") == ticker) {
                     auto upd = trade_bot::MetaScalpCodec::parse_orderbook_update(data, ticker);
-                    book.apply_update(upd);
-                    for (auto* d : detectors) d->on_book_update(upd);
+                    if (upd) {
+                        book.apply_update(*upd);
+                        for (auto* d : detectors) d->on_book_update(*upd);
+                    }
                 }
             } catch (...) {}
         }

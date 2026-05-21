@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Types.hpp"
+#include "perf/LatencyTracer.hpp"
 #include "utils/FixedString.hpp"
 #include <chrono>
 #include <functional>
@@ -72,6 +73,7 @@ struct Signal {
     double price;                // цена, к которой привязан сигнал
     double confidence;           // [0, 1], внутренняя уверенность детектора
     SignalPayload payload;       // детали (размер плотности, окно расчёта...)
+    TraceId trigger_trace_id{0}; // trace ID события, вызвавшего сигнал (для e2e latency)
 
     bool operator==(const Signal&) const = default;
 };

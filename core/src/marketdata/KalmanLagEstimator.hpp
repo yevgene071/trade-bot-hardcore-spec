@@ -31,6 +31,7 @@ public:
         double q_drift{0.01};                // process noise on drift ((ms/s)²/s)
         double r_obs{2500.0};                // observation variance (ms²) ≈ σ=50 ms
         double confidence_scale{2500.0};
+        double outlier_cutoff_ms{5000.0};    // U1: move hardcoded outlier cutoff to config
     };
 
     KalmanLagEstimator();

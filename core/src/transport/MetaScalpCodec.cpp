@@ -8,22 +8,30 @@ namespace trade_bot {
 
 using namespace api;
 
-void MetaScalpCodec::check_required(const nlohmann::json& j, std::string_view field) {
-    if (j.contains(field)) return;
+bool MetaScalpCodec::has_required(const nlohmann::json& j, std::string_view field) {
+    if (j.contains(field)) return true;
     std::string alt(field);
     if (!alt.empty()) {
         if (std::isupper(alt[0])) alt[0] = std::tolower(alt[0]);
         else alt[0] = std::toupper(alt[0]);
-        if (j.contains(alt)) return;
+        if (j.contains(alt)) return true;
     }
-    throw CodecError("Missing required field: " + std::string(field));
+    return false;
+}
+
+void MetaScalpCodec::check_required(const nlohmann::json& j, std::string_view field) {
+    if (!has_required(j, field)) {
+        throw CodecError(std::string("Missing required field: ") + std::string(field));
+    }
 }
 
 Side MetaScalpCodec::parse_side(const nlohmann::json& v) {
     if (v.is_string()) {
         std::string s = v.get<std::string>();
-        if (s == "Buy") return Side::Buy;
-        if (s == "Sell") return Side::Sell;
+        // orderbook_update encodes side in `Type` as Bid/Ask; trades/orders
+        // use Buy/Sell. Accept both (bid == buy side, ask == sell side).
+        if (s == "Buy"  || s == "buy"  || s == "Bid" || s == "bid" || s == "BestBid" || s == "bestbid") return Side::Buy;
+        if (s == "Sell" || s == "sell" || s == "Ask" || s == "ask" || s == "BestAsk" || s == "bestask") return Side::Sell;
     } else if (v.is_number()) {
         int i = v.get<int>();
         if (i == 1) return Side::Buy;
@@ -53,6 +61,27 @@ OrderType MetaScalpCodec::parse_order_type(const nlohmann::json& v) {
     throw CodecError("Unknown OrderType: " + v.dump());
 }
 
+std::expected<OrderType, std::string> MetaScalpCodec::parse_order_type_checked(const nlohmann::json& v) {
+    if (v.is_string()) {
+        std::string s = v.get<std::string>();
+        if (s == "Limit") return OrderType::Limit;
+        if (s == "Stop") return OrderType::Stop;
+        if (s == "StopLoss") return OrderType::StopLoss;
+        if (s == "TakeProfit") return OrderType::TakeProfit;
+        if (s == "Market") return OrderType::Market;
+    } else if (v.is_number()) {
+        int i = v.get<int>();
+        switch (i) {
+            case 0: return OrderType::Limit;
+            case 1: return OrderType::Stop;
+            case 2: return OrderType::StopLoss;
+            case 3: return OrderType::TakeProfit;
+            case 4: return OrderType::Market;
+        }
+    }
+    return std::unexpected("Unknown OrderType: " + v.dump());
+}
+
 OrderStatus MetaScalpCodec::parse_order_status(const nlohmann::json& v) {
     if (v.is_string()) {
         std::string s = v.get<std::string>();
@@ -67,7 +96,8 @@ OrderStatus MetaScalpCodec::parse_order_status(const nlohmann::json& v) {
             case 2: return OrderStatus::Closed;
         }
     }
-    return OrderStatus::New;
+    // R5: unknown status → Closed (safe: won't reactivate a cancelled/rejected order as New)
+    return OrderStatus::Closed;
 }
 
 PositionStatus MetaScalpCodec::parse_position_status(const nlohmann::json& v) {
@@ -84,7 +114,8 @@ PositionStatus MetaScalpCodec::parse_position_status(const nlohmann::json& v) {
             case 2: return PositionStatus::Closed;
         }
     }
-    return PositionStatus::New;
+    // R5: unknown status → Closed (safe: won't keep a dead position marked as New)
+    return PositionStatus::Closed;
 }
 
 std::chrono::system_clock::time_point MetaScalpCodec::parse_timestamp(const std::string& ts_str) {
@@ -117,27 +148,51 @@ std::chrono::system_clock::time_point MetaScalpCodec::parse_timestamp(const std:
     };
     
     auto tp = std::chrono::system_clock::from_time_t(time_utc(&tm));
-    
+
+    // R7: parse up to 6 sub-second digits (microsecond precision)
+    size_t tz_start_idx = 19;
     if (ts_str.size() > 20 && ts_str[19] == '.') {
-        int ms = 0;
-        if (std::isdigit(ts_str[20])) ms += (ts_str[20] - '0') * 100;
-        if (ts_str.size() > 21 && std::isdigit(ts_str[21])) ms += (ts_str[21] - '0') * 10;
-        if (ts_str.size() > 22 && std::isdigit(ts_str[22])) ms += (ts_str[22] - '0');
-        tp += std::chrono::milliseconds(ms);
+        int64_t sub_us = 0;
+        int digits = 0;
+        size_t i = 20;
+        for (; i < ts_str.size() && std::isdigit(static_cast<unsigned char>(ts_str[i])); ++i) {
+            if (digits < 6) {
+                sub_us = sub_us * 10 + (ts_str[i] - '0');
+                ++digits;
+            }
+        }
+        while (digits < 6) { sub_us *= 10; ++digits; }
+        tp += std::chrono::microseconds(sub_us);
+        tz_start_idx = i;
     }
-    
+
+    // R4: handle TZ offset (Z = UTC, ±HH:MM = apply offset to get UTC)
+    for (size_t i = tz_start_idx; i < ts_str.size(); ++i) {
+        if (ts_str[i] == 'Z') break;  // already UTC
+        if ((ts_str[i] == '+' || ts_str[i] == '-') && i + 5 <= ts_str.size()) {
+            int sign = (ts_str[i] == '+') ? 1 : -1;
+            int tz_h = p2(&ts_str[i + 1]);
+            int tz_m = p2(&ts_str[i + 4]);
+            tp -= std::chrono::minutes(sign * (tz_h * 60 + tz_m));
+            break;
+        }
+    }
+
     return tp;
 }
 
-OrderUpdate MetaScalpCodec::parse_order_update(const nlohmann::json& j) {
-    check_required(j, fields::kOrderId);
-    check_required(j, fields::kTicker);
-    
+std::expected<OrderUpdate, std::string> MetaScalpCodec::parse_order_update(const nlohmann::json& j) {
+    if (!has_required(j, fields::kOrderId)) return std::unexpected("Missing required field: OrderId");
+    if (!has_required(j, fields::kTicker))  return std::unexpected("Missing required field: Ticker");
+
+    auto type = parse_order_type_checked(get_val<nlohmann::json>(j, fields::kType, nlohmann::json()));
+    if (!type) return std::unexpected(type.error());
+
     return OrderUpdate {
         .order_id = get_val<int64_t>(j, fields::kOrderId, 0L),
         .ticker = get_val<std::string>(j, fields::kTicker, ""),
         .side = parse_side(get_val<nlohmann::json>(j, fields::kSide, nlohmann::json())),
-        .type = parse_order_type(get_val<nlohmann::json>(j, fields::kType, nlohmann::json())),
+        .type = *type,
         .price = get_val<double>(j, fields::kPrice, 0.0),
         .filled_price = get_val<double>(j, fields::kFilledPrice, 0.0),
         .size = get_val<double>(j, fields::kSize, 0.0),
@@ -145,7 +200,8 @@ OrderUpdate MetaScalpCodec::parse_order_update(const nlohmann::json& j) {
         .fee = get_val<double>(j, fields::kFee, 0.0),
         .fee_currency = get_val<std::string>(j, fields::kFeeCurrency, ""),
         .status = parse_order_status(get_val<nlohmann::json>(j, fields::kStatus, nlohmann::json())),
-        .time = parse_timestamp(get_val<std::string>(j, fields::kTime, ""))
+        .time = parse_timestamp(get_val<std::string>(j, fields::kTime, "")),
+        .client_order_id = get_val<std::string>(j, fields::kClientId, "")
     };
 }
 
@@ -187,10 +243,10 @@ PlaceOrderResult MetaScalpCodec::parse_place_order_result(const nlohmann::json& 
     };
 }
 
-PositionUpdate MetaScalpCodec::parse_position_update(const nlohmann::json& j) {
-    check_required(j, fields::kId);
-    check_required(j, fields::kTicker);
-    
+std::expected<PositionUpdate, std::string> MetaScalpCodec::parse_position_update(const nlohmann::json& j) {
+    if (!has_required(j, fields::kId))     return std::unexpected("Missing required field: Id");
+    if (!has_required(j, fields::kTicker)) return std::unexpected("Missing required field: Ticker");
+
     return PositionUpdate {
         .connection_id = get_val<int>(j, fields::kConnectionId, 0),
         .position_id = get_val<int64_t>(j, fields::kId, 0L),
@@ -205,15 +261,17 @@ PositionUpdate MetaScalpCodec::parse_position_update(const nlohmann::json& j) {
     };
 }
 
-BalanceUpdate MetaScalpCodec::parse_balance_update(const nlohmann::json& j) {
+std::expected<BalanceUpdate, std::string> MetaScalpCodec::parse_balance_update(const nlohmann::json& j) {
     std::vector<BalanceEntry> balances;
     std::string key = fields::kBalances;
     const nlohmann::json* ja_ptr = nullptr;
     if (j.contains(key)) ja_ptr = &j[key];
     else {
         std::string alt = key;
-        alt[0] = std::tolower(alt[0]);
-        if (j.contains(alt)) ja_ptr = &j[alt];
+        if (!alt.empty() && std::isupper(static_cast<unsigned char>(alt[0]))) {
+            alt[0] = std::tolower(static_cast<unsigned char>(alt[0]));
+            if (j.contains(alt)) ja_ptr = &j[alt];
+        }
     }
 
     if (ja_ptr && ja_ptr->is_array()) {
@@ -234,15 +292,17 @@ BalanceUpdate MetaScalpCodec::parse_balance_update(const nlohmann::json& j) {
     };
 }
 
-std::vector<Trade> MetaScalpCodec::parse_trade_update(const nlohmann::json& j) {
+std::expected<std::vector<Trade>, std::string> MetaScalpCodec::parse_trade_update(const nlohmann::json& j) {
     std::vector<Trade> trades;
     std::string key = fields::kTrades;
     const nlohmann::json* ja_ptr = nullptr;
     if (j.contains(key)) ja_ptr = &j[key];
     else {
         std::string alt = key;
-        alt[0] = std::tolower(alt[0]);
-        if (j.contains(alt)) ja_ptr = &j[alt];
+        if (!alt.empty() && std::isupper(static_cast<unsigned char>(alt[0]))) {
+            alt[0] = std::tolower(static_cast<unsigned char>(alt[0]));
+            if (j.contains(alt)) ja_ptr = &j[alt];
+        }
     }
 
     if (ja_ptr && ja_ptr->is_array()) {
@@ -260,7 +320,7 @@ std::vector<Trade> MetaScalpCodec::parse_trade_update(const nlohmann::json& j) {
     return trades;
 }
 
-OrderBookSnapshot MetaScalpCodec::parse_orderbook_snapshot(const nlohmann::json& j, const Ticker& ticker) {
+std::expected<OrderBookSnapshot, std::string> MetaScalpCodec::parse_orderbook_snapshot(const nlohmann::json& j, const Ticker& ticker) {
     std::vector<PriceLevel> asks, bids;
     
     auto parse_levels = [&](const std::string& key, std::vector<PriceLevel>& target, Side side) {
@@ -268,8 +328,10 @@ OrderBookSnapshot MetaScalpCodec::parse_orderbook_snapshot(const nlohmann::json&
         if (j.contains(key)) ja_ptr = &j[key];
         else {
             std::string alt = key;
-            if (!alt.empty()) alt[0] = std::tolower(alt[0]);
-            if (j.contains(alt)) ja_ptr = &j[alt];
+            if (!alt.empty() && std::isupper(static_cast<unsigned char>(alt[0]))) {
+                alt[0] = std::tolower(static_cast<unsigned char>(alt[0]));
+                if (j.contains(alt)) ja_ptr = &j[alt];
+            }
         }
         
         if (ja_ptr && ja_ptr->is_array()) {
@@ -300,32 +362,41 @@ OrderBookSnapshot MetaScalpCodec::parse_orderbook_snapshot(const nlohmann::json&
     };
 }
 
-OrderBookUpdate MetaScalpCodec::parse_orderbook_update(const nlohmann::json& j, const Ticker& ticker) {
+std::expected<OrderBookUpdate, std::string> MetaScalpCodec::parse_orderbook_update(const nlohmann::json& j, const Ticker& ticker) {
     std::vector<PriceLevel> changes;
     std::string key = fields::kUpdates;
     const nlohmann::json* ja_ptr = nullptr;
     if (j.contains(key)) ja_ptr = &j[key];
     else {
         std::string alt = key;
-        if (!alt.empty()) alt[0] = std::tolower(alt[0]);
-        if (j.contains(alt)) ja_ptr = &j[alt];
+        if (!alt.empty() && std::isupper(static_cast<unsigned char>(alt[0]))) {
+            alt[0] = std::tolower(static_cast<unsigned char>(alt[0]));
+            if (j.contains(alt)) ja_ptr = &j[alt];
+        }
     }
 
     if (ja_ptr && ja_ptr->is_array()) {
         const auto& ja = *ja_ptr;
         changes.reserve(ja.size());
         for (const auto& item : ja) {
+            // MetaScalp API: orderbook_update levels carry side in `Type`
+            // (numeric 1=bid / 2=ask), NOT `Side`. Reading the wrong field
+            // yields Side::None, which apply_change_ silently drops — the
+            // book then never updates past the initial snapshot.
             changes.push_back(PriceLevel {
                 .price = get_val<double>(item, fields::kPrice, 0.0),
                 .size = get_val<double>(item, fields::kSize, 0.0),
-                .side = parse_side(get_val<nlohmann::json>(item, fields::kSide, nlohmann::json()))
+                .side = parse_side(get_val<nlohmann::json>(item, fields::kType, nlohmann::json()))
             });
         }
     }
+    // R1: prefer server timestamp over local now() for deterministic replay
+    std::string ts_str = get_val<std::string>(j, fields::kTime, "");
+    auto ts = ts_str.empty() ? std::chrono::system_clock::now() : parse_timestamp(ts_str);
     return OrderBookUpdate {
         .ticker = ticker,
         .changes = changes,
-        .ts = std::chrono::system_clock::now()
+        .ts = ts
     };
 }
 
@@ -378,15 +449,17 @@ Ticker MetaScalpCodec::normalize_ticker(const Ticker& raw) {
     return raw;
 }
 
-FinresUpdate MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
+std::expected<FinresUpdate, std::string> MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
     std::vector<FinresEntry> finreses;
     std::string key = fields::kFinreses;
     const nlohmann::json* ja_ptr = nullptr;
     if (j.contains(key)) ja_ptr = &j[key];
     else {
         std::string alt = key;
-        if (!alt.empty()) alt[0] = std::tolower(alt[0]);
-        if (j.contains(alt)) ja_ptr = &j[alt];
+        if (!alt.empty() && std::isupper(static_cast<unsigned char>(alt[0]))) {
+            alt[0] = std::tolower(static_cast<unsigned char>(alt[0]));
+            if (j.contains(alt)) ja_ptr = &j[alt];
+        }
     }
 
     if (ja_ptr && ja_ptr->is_array()) {
@@ -430,6 +503,7 @@ Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
         .ticker = ticker,
         .price = get_val<double>(j, fields::kPrice, 0.0),
         .size = get_val<double>(j, fields::kSize, 0.0),
+        .level_id = (kind == NotificationKind::SignalLevel) ? get_val<int64_t>(j, fields::kSize, 0) : 0,
         .timestamp = parse_timestamp(get_val<std::string>(j, fields::kDate, ""))
     };
 }
@@ -470,7 +544,7 @@ int MetaScalpCodec::parse_market_type(const nlohmann::json& v) {
 
 SignalLevel MetaScalpCodec::parse_signal_level(const nlohmann::json& j) {
     return SignalLevel {
-        .id = get_val<int>(j, fields::kId, 0),
+        .id = get_val<int64_t>(j, fields::kId, 0),
         .ticker = get_val<std::string>(j, fields::kTicker, ""),
         .price = get_val<double>(j, fields::kPrice, 0.0),
         .triggered = get_val<bool>(j, fields::kTriggered, false),
@@ -487,10 +561,12 @@ OrderbookSettings MetaScalpCodec::parse_orderbook_settings(const nlohmann::json&
 }
 
 SignalLevelTriggered MetaScalpCodec::parse_signal_level_triggered(const nlohmann::json& j) {
+    // R3: use server timestamp if present for replay determinism
+    std::string ts_str = get_val<std::string>(j, fields::kTime, "");
     return SignalLevelTriggered {
         .ticker = get_val<std::string>(j, fields::kTicker, ""),
         .price = get_val<double>(j, fields::kPrice, 0.0),
-        .timestamp = std::chrono::system_clock::now() // Usually triggered events are real-time
+        .timestamp = ts_str.empty() ? std::chrono::system_clock::now() : parse_timestamp(ts_str)
     };
 }
 
@@ -505,8 +581,10 @@ ClusterSnapshot MetaScalpCodec::parse_cluster_snapshot(const nlohmann::json& j) 
     if (j.contains(key)) ja_ptr = &j[key];
     else {
         std::string alt = key;
-        if (!alt.empty()) alt[0] = std::tolower(alt[0]);
-        if (j.contains(alt)) ja_ptr = &j[alt];
+        if (!alt.empty() && std::isupper(static_cast<unsigned char>(alt[0]))) {
+            alt[0] = std::tolower(static_cast<unsigned char>(alt[0]));
+            if (j.contains(alt)) ja_ptr = &j[alt];
+        }
     }
 
     if (ja_ptr && ja_ptr->is_array()) {
@@ -525,7 +603,11 @@ ClusterSnapshot MetaScalpCodec::parse_cluster_snapshot(const nlohmann::json& j) 
         .timeframe  = get_val<std::string>(j, fields::kTimeFrame, ""),
         .zoom_index = get_val<int>(j, fields::kZoomIndex, 0),
         .items      = std::move(items),
-        .ts         = std::chrono::system_clock::now()
+        // R3: use server timestamp if present for replay determinism
+        .ts         = [&]() {
+            std::string ts_str = get_val<std::string>(j, fields::kTime, "");
+            return ts_str.empty() ? std::chrono::system_clock::now() : parse_timestamp(ts_str);
+        }()
     };
 }
 

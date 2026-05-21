@@ -51,7 +51,7 @@ public:
     Stats  stats()   const;
 
 private:
-    void dispatch_message_(const std::string& raw_message);
+    void dispatch_message_(const std::string& raw_message, int64_t recv_ts_ns);
 
     std::vector<IMarketDataListener*> snapshot_listeners_();
 
@@ -59,9 +59,10 @@ private:
     std::shared_ptr<IClock>           clock_;
     double                            speed_;
     std::vector<IMarketDataListener*> listeners_;
-    mutable std::mutex                mtx_;
+    mutable std::recursive_mutex      mtx_;
     std::atomic<bool>                 running_{false};
     Stats                             stats_;
+    int64_t                           system_time_offset_ns_{0};
 };
 
 }  // namespace trade_bot

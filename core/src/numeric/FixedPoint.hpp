@@ -22,6 +22,11 @@ struct PriceTick {
 
     static PriceTick from_price_inv(double price, double inv_increment) {
         if (!std::isfinite(price) || price <= 0) return {0};
+        // B9-FIX: Check for potential overflow BEFORE multiplication
+        constexpr double kMaxInt64 = 9.223372036854775807e18;
+        if (price * inv_increment > kMaxInt64) {
+            return { static_cast<int64_t>(1e15) };  // Return clamped max
+        }
         double t = std::round(price * inv_increment);
         return { static_cast<int64_t>(std::clamp(t, 0.0, 1e15)) };
     }

@@ -1,0 +1,293 @@
+// FlatBuffers schema for Trade Bot Dashboard WebSocket protocol
+// Phase 2: Binary protocol optimization
+//
+// Usage:
+//   flatc --cpp --ts -o core/src/control/generated schema/market_data.fbs
+//   flatc --ts -o dashboard/src/generated schema/market_data.fbs
+
+namespace TradeBotDashboard;
+
+// ============================================================================
+// Domain Types
+// ============================================================================
+
+enum TradeSide : byte {
+  Buy = 0,
+  Sell = 1
+}
+
+enum ReadyState : byte {
+  NotReady = 0,
+  Warming = 1,
+  Ready = 2
+}
+
+// ============================================================================
+// Account State
+// ============================================================================
+
+table AccountState {
+  equity_usd: double;
+  realized_pnl_today_usd: double;
+  unrealized_pnl_usd: double;
+  free_balance_usd: double;
+  starting_equity_usd: double;
+}
+
+// ============================================================================
+// Trade Plan & Execution
+// ============================================================================
+
+table TradePlan {
+  ticker: string;
+  side: TradeSide;
+  strategy_name: string;
+  stop_price: double;
+  tp1_price: double;
+  size_coin: double;
+  entry_price: double;
+}
+
+table OpenTrade {
+  plan: TradePlan;
+  executed_size: double;
+  avg_entry_price: double;
+  unrealized_pnl: double;
+}
+
+table JournalEntry {
+  plan: TradePlan;
+  pnl_usd: double;
+  exit_price: double;
+  cause_of_exit: string;
+  ts_unix_ms: int64;
+}
+
+// ============================================================================
+// MetaScalp Connection
+// ============================================================================
+
+table MetaScalpState {
+  connected: bool;
+  latency_ms: int32;
+  connection_name: string;
+}
+
+// ============================================================================
+// Universe & Signals
+// ============================================================================
+
+table UniverseRow {
+  ticker: string;
+  strategies: [string];
+  boosted: bool;
+  mark_price: double;
+}
+
+table RecentSignal {
+  kind: string;
+  ticker: string;
+  price: double;
+  confidence: double;
+  time_str: string;
+  side: string;
+}
+
+// ============================================================================
+// Strategy Stats & State
+// ============================================================================
+
+table StrategyStats {
+  name: string;
+  total_trades: int32;
+  wins: int32;
+  losses: int32;
+  total_pnl: double;
+  best_pnl: double;
+  worst_pnl: double;
+  gross_profit: double;
+  gross_loss: double;
+}
+
+table StrategyCondition {
+  name: string;
+  current: double;
+  target: double;
+  met: bool;
+  unit: string;
+}
+
+table StrategyState {
+  ticker: string;
+  strategy_name: string;
+  ready_state: ReadyState;
+  readiness_pct: double;
+  conditions: [StrategyCondition];
+  last_reject_reason: string;
+  seconds_since_last_reject: int32;
+  signals_last_60s: int32;
+}
+
+// ============================================================================
+// Funding Info
+// ============================================================================
+
+table FundingInfo {
+  ticker: string;
+  rate: double;
+  next_funding_unix: int64;
+}
+
+// ============================================================================
+// Risk Metrics
+// ============================================================================
+
+table RiskMetrics {
+  margin_used_pct: double;
+  exposure_pct: double;
+  total_trades_today: int32;
+  consecutive_losses: int32;
+  daily_pnl_pct: double;
+  current_drawdown_pct: double;
+  max_positions: int32;
+}
+
+// ============================================================================
+// Chart History (Time Series)
+// ============================================================================
+
+table ChartPoint {
+  ts_unix_ms: int64;
+  mid: double;
+  best_bid: double;
+  best_ask: double;
+  spread_bps: double;
+  buy_vol_5s: double;
+  sell_vol_5s: double;
+  volatility_1min_bps: double;
+  tape_aggression: double;
+  leader_change_1s: double;
+  leader_correlation: double;
+  leader_lag_ms: double;
+  imbalance: double;
+  prints_per_sec: double;
+}
+
+// ============================================================================
+// Density History (Liquidity Topology)
+// ============================================================================
+
+table DensityColumn {
+  ts_unix_ms: int64;
+  lo: double;
+  hi: double;
+  bins: [ubyte];  // kDensityBins = 40 bins per column
+}
+
+// ============================================================================
+// Order Book Snapshot
+// ============================================================================
+
+struct BookLevel {
+  price: double;
+  size: double;
+}
+
+// ============================================================================
+// Iceberg Events (Transient)
+// ============================================================================
+
+table IcebergEvent {
+  ts_ms: int64;
+  price: double;
+  side: string;
+  hidden_size: double;
+}
+
+// ============================================================================
+// Equity History
+// ============================================================================
+
+struct EquityPoint {
+  ts: int64;
+  equity: double;
+}
+
+// ============================================================================
+// Main State Message
+// ============================================================================
+
+table DashboardState {
+  // Metadata
+  version: string;
+  state_gen: int64;
+  is_full_update: bool;
+  server_time_unix: int64;
+  
+  // Kill switch
+  kill_switch_active: bool;
+  
+  // Account
+  account: AccountState;
+  
+  // Signal counts (map<string, int> → parallel arrays)
+  signal_count_keys: [string];
+  signal_count_values: [int32];
+  
+  // Open trades
+  open_trades: [OpenTrade];
+  
+  // Recent journal (full update only)
+  recent_journal: [JournalEntry];
+  
+  // MetaScalp connection
+  metascalp: MetaScalpState;
+  
+  // Universe
+  universe_rows: [UniverseRow];
+  
+  // Recent signals
+  recent_signals: [RecentSignal];
+  
+  // Strategy stats (full update only)
+  strategy_stats: [StrategyStats];
+  
+  // Funding info (full update only)
+  funding_info: [FundingInfo];
+  
+  // Risk metrics
+  risk: RiskMetrics;
+  
+  // Recorder state
+  recorder_active: bool;
+  recorder_path: string;
+  
+  // Iceberg events (always sent)
+  iceberg_events: [IcebergEvent];
+  
+  // Strategy states (full update only)
+  strategy_states: [StrategyState];
+  
+  // Chart history (full update only)
+  chart_history: [ChartPoint];
+  
+  // Density history (full update only, last 300 columns)
+  density_history: [DensityColumn];
+  
+  // Order book snapshot (full update only)
+  bids_top20: [BookLevel];
+  asks_top20: [BookLevel];
+  
+  // Order book metrics (always sent)
+  ob_mid: double;
+  ob_spread_bps: double;
+  ob_imbalance: double;
+  
+  // Selected ticker (always sent)
+  selected_ticker: string;
+  
+  // Equity history (full update only)
+  equity_history: [EquityPoint];
+}
+
+root_type DashboardState;

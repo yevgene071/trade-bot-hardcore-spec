@@ -1,4 +1,5 @@
 #include "FeatureExtractor.hpp"
+#include "perf/TraceContext.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -17,6 +18,7 @@ FeatureExtractor::FeatureExtractor(Ticker ticker, Config cfg)
     , cfg_(cfg)
     , hist_book_(cfg.latency_max_us, cfg.hdr_significant_digits)
     , hist_total_(cfg.latency_max_us, cfg.hdr_significant_digits) {
+    if (cfg_.reserve_history == 0) cfg_.reserve_history = 1; // W1: guard against %0 UB
     mid_history_.resize(cfg_.reserve_history);
 }
 
@@ -34,6 +36,7 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
     FeatureFrame f{};
     f.ticker    = ticker_;
     f.timestamp = now;
+    f.derived_from = current_trace_context().trace_id;
 
     // ----- Order book stage (timed) -----
     const auto t_book_start = std::chrono::high_resolution_clock::now();
@@ -48,7 +51,7 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
             f.spread_abs = *ba - *bb;
             if (f.spread_abs < 0.0) {
                 // Crossed book (ask < bid) — refuse to trade, signal wide spread
-                f.spread_bps = 999.0;
+                f.spread_bps = kCrossedBookSpreadBps;
                 f.spread_abs = -f.spread_abs; // store absolute magnitude for diagnostics
             } else if (f.mid > 0.0) {
                 f.spread_bps = f.spread_abs / f.mid * kBpsScale;
@@ -147,6 +150,8 @@ FeatureFrame FeatureExtractor::extract(std::chrono::system_clock::time_point now
         // leader_change_*s are populated by the caller pipeline (we have only
         // the follower's own mid history here).
     }
+
+    f.valid = (f.mid > 0.0);
 
     const auto t_total_end = std::chrono::high_resolution_clock::now();
     hist_total_.record(std::chrono::duration_cast<std::chrono::microseconds>(

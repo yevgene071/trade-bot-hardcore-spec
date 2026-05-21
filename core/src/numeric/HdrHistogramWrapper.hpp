@@ -1,6 +1,6 @@
 #pragma once
 
-#include <hdr/hdr_histogram.h>
+#include <hdr_histogram.h>
 #include <cstdint>
 #include <cstdlib>
 

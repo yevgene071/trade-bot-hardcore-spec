@@ -35,7 +35,7 @@ ApproachAnalyzer::ApproachAnalyzer(Ticker ticker,
     , book_(book)
     , level_detector_(level_detector)
     , cfg_(cfg)
-    , hmm_(cfg.hmm_params.start_probs[0] == 0 ? get_default_params() : cfg.hmm_params) {}
+    , hmm_(cfg.hmm_use_default_params ? get_default_params() : cfg.hmm_params) {} // AB3
 
 ApproachAnalyzer::ApproachAnalyzer(Ticker ticker,
                                  SignalBus& bus,
@@ -45,6 +45,7 @@ ApproachAnalyzer::ApproachAnalyzer(Ticker ticker,
 
 void ApproachAnalyzer::on_frame(const FeatureFrame& frame) {
     if (frame.ticker != ticker_) return;
+    if (!frame.valid) return;
     
     history_.push_back({frame.timestamp, frame.mid});
 }
@@ -52,24 +53,38 @@ void ApproachAnalyzer::on_frame(const FeatureFrame& frame) {
 void ApproachAnalyzer::on_trade(const Trade& /*trade*/) {}
 void ApproachAnalyzer::on_book_update(const OrderBookUpdate& /*update*/) {}
 
-ApproachAnalyzer::Analysis ApproachAnalyzer::analyze(double level_price, 
+ApproachAnalyzer::Analysis ApproachAnalyzer::analyze(double level_price,
                                                    std::chrono::system_clock::time_point now) const {
-    (void)level_price; (void)now;
-    if (history_.size() < 10) return {ApproachType::Unknown, 0, 0, 0, 0, 0};
+    (void)level_price;
+    const auto cutoff = now - cfg_.window;
 
-    std::vector<double> prices(history_.size());
+    // Collect only entries within the configured approach window
+    std::vector<double> prices;
+    prices.reserve(history_.size());
+    std::chrono::system_clock::time_point first_ts{};
     for (size_t i = 0; i < history_.size(); ++i) {
-        prices[i] = history_[i].second;
+        const auto& [ts, price] = history_[i];
+        if (ts < cutoff) continue;
+        if (first_ts == std::chrono::system_clock::time_point{}) first_ts = ts;
+        prices.push_back(price);
     }
 
+    if (prices.size() < 10) return {ApproachType::Unknown, 0, 0, 0, 0, 0};
+
     auto peaks = ZigZag::calculate(prices, cfg_.pullback_min_bps);
-    int pullbacks = static_cast<int>(std::count_if(peaks.begin(), peaks.end(), [](const auto& p) { return !p.is_high; }));
-    double duration = std::chrono::duration<double>(history_.back().first - history_.front().first).count();
-    double dist_bps = std::abs(history_.back().second - history_.front().second) / history_[0].second * kBpsBase;
+    // For a downward approach (from above), pullbacks are temporary rallies → High pivots.
+    // For an upward approach (from below), pullbacks are temporary dips → Low pivots.
+    bool approaching_from_above = prices.front() > prices.back();
+    int pullbacks = static_cast<int>(std::count_if(peaks.begin(), peaks.end(),
+        [approaching_from_above](const auto& p) {
+            return approaching_from_above ? p.is_high : !p.is_high;
+        }));
+    double duration = std::chrono::duration<double>(now - first_ts).count();
+    double dist_bps = std::abs(prices.back() - prices.front()) / prices.front() * kBpsBase;
     double speed = dist_bps / std::max(0.1, duration);
 
-    // Repeating observation 5 times effectively sharpens the posterior.
-    std::vector<std::array<double, 3>> obs(5, {speed, static_cast<double>(pullbacks), dist_bps});
+    // AB1: single observation — repeating the same sample inflates posterior confidence
+    std::vector<std::array<double, 3>> obs(1, {speed, static_cast<double>(pullbacks), dist_bps});
     auto probs = hmm_.predict(obs);
 
     Analysis a;

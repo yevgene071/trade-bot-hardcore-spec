@@ -4,7 +4,7 @@
 #include <vector>
 #include <map>
 #include <atomic>
-#include <mutex>
+#include <shared_mutex>
 #include <chrono>
 
 namespace trade_bot {
@@ -43,7 +43,7 @@ private:
         uint64_t count{0};
     };
 
-    mutable std::mutex mtx_;
+    mutable std::shared_mutex rw_mtx_;
     std::map<MetricKey, std::atomic<double>> counters_;
     std::map<MetricKey, std::atomic<double>> gauges_;
     std::map<MetricKey, Histogram> histograms_;

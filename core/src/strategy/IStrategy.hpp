@@ -4,6 +4,7 @@
 #include "features/FeatureFrame.hpp"
 #include "signals/Signal.hpp"
 #include "TradePlan.hpp"
+#include "transport/IClock.hpp"
 
 #include <optional>
 #include <string>
@@ -50,6 +51,9 @@ struct StrategyState {
 
 /**
  * Base interface for all trading strategies.
+ * 
+ * P0 DETERMINISM: Strategies must use the injected IClock instead of
+ * std::chrono::system_clock::now() to enable deterministic replay.
  */
 class IStrategy {
 public:
@@ -63,11 +67,21 @@ public:
     /// Process periodic feature update.
     virtual void on_frame(const FeatureFrame& frame) = 0;
 
-    /// Process a signal from any detector.
-    virtual void on_signal(const Signal& signal) = 0;
+    /// Process a signal from any detector. Can return a TradePlan immediately
+    /// for event-driven strategies (e.g. BounceFromDensity reacting to LevelApproach).
+    /// Strategies that require waiting (e.g. LeaderLag with delay) return nullopt
+    /// and generate plans in tick() instead.
+    /// @param signal The signal to process
+    /// @param now Current time from injected clock (deterministic in replay mode)
+    virtual std::optional<TradePlan> on_signal(const Signal& signal, std::chrono::system_clock::time_point now) = 0;
 
     /// Core logic tick. Returns a TradePlan if entry conditions are met.
+    /// Used for TTL-based logic (timeouts, waiting periods) and strategies
+    /// that don't react to specific signals.
+    /// @param now Current time from injected clock (deterministic in replay mode)
     virtual std::optional<TradePlan> tick(std::chrono::system_clock::time_point now) = 0;
+
+    // P0 DETERMINISM: Clock is now injected via constructor (removed set_clock())
 
     /// Returns true if this strategy currently has an active (pending) plan.
     /// Used by StrategyEngine to determine if a fallback plan should be tried.

@@ -2,6 +2,7 @@
 
 #include "domain/Types.hpp"
 
+#include "absl/container/btree_map.h"
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -9,7 +10,6 @@
 #include <optional>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace trade_bot {
@@ -73,7 +73,8 @@ public:
     void set_fetch_open_orders(FetchOpenOrders fn);
 
     /// Register a local intent as `SubmitUnknown`. Returns false if already tracked.
-    bool enter_submit_unknown(const OrderIntent& intent);
+    /// In replay or live mode, we initialize started_at with the current time.
+    bool enter_submit_unknown(const OrderIntent& intent, std::chrono::system_clock::time_point now);
 
     /// Manually resolve `local_order_id` with a known server `OrderId`.
     /// Returns false if the local id was not tracked.
@@ -82,7 +83,7 @@ public:
     /// Run one polling round for `ticker`. Returns one result per tracked intent
     /// for this ticker. Resolved/NotFoundTimeout entries are removed from the
     /// tracker after this call.
-    std::vector<ReconcileResult> poll_open_orders(const Ticker& ticker);
+    std::vector<ReconcileResult> poll_open_orders(const Ticker& ticker, std::chrono::system_clock::time_point now_time);
 
     bool   has_pending(const Ticker& ticker) const;
     size_t pending_count() const;
@@ -90,8 +91,8 @@ public:
 private:
     struct PendingIntent {
         OrderIntent                            intent;
-        std::chrono::steady_clock::time_point  started_at;
-        std::chrono::steady_clock::time_point  next_poll_at;
+        std::chrono::system_clock::time_point  started_at;
+        std::chrono::system_clock::time_point  next_poll_at;
         std::chrono::milliseconds              current_backoff;
     };
 
@@ -100,8 +101,8 @@ private:
     Config              cfg_;
     FetchOpenOrders     fetch_;
     mutable std::mutex  mtx_;
-    std::unordered_map<int64_t, PendingIntent>   pending_;     // local_order_id -> state
-    std::unordered_map<Ticker, std::set<int64_t>> by_ticker_;  // ticker -> local_order_ids
+    absl::btree_map<int64_t, PendingIntent>      pending_;     // local_order_id -> state
+    absl::btree_map<Ticker, std::set<int64_t>>   by_ticker_;  // ticker -> local_order_ids
 };
 
 } // namespace trade_bot

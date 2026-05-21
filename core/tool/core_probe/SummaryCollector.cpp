@@ -1,0 +1,207 @@
+#include "SummaryCollector.hpp"
+#include <iomanip>
+#include <sstream>
+#include <cmath>
+
+namespace trade_bot::probe {
+
+void SummaryCollector::record_signal(const std::string& kind) {
+    ++signals_by_kind_[kind];
+}
+
+void SummaryCollector::record_plan(const std::string& strategy_name) {
+    ++plans_by_strategy_[strategy_name];
+}
+
+void SummaryCollector::record_risk_decision(bool accepted, const std::string& reason) {
+    if (accepted) {
+        ++plans_accepted_;
+    } else {
+        ++plans_rejected_;
+        ++rejections_by_reason_[reason];
+    }
+}
+
+void SummaryCollector::record_close(double pnl_usd) {
+    ++closed_;
+    realized_pnl_ += pnl_usd;
+}
+
+void SummaryCollector::record_invariant(const std::string& code) {
+    ++invariant_total_;
+    ++invariants_by_code_[code];
+}
+
+// ---------------------------------------------------------------------------
+// to_json — machine-readable summary for JSONL output
+// ---------------------------------------------------------------------------
+nlohmann::json SummaryCollector::to_json() const {
+    nlohmann::json j;
+    j["stage"] = "summary";
+
+    // Source
+    if (!source_description_.empty()) {
+        j["source"] = source_description_;
+    }
+
+    // Timing
+    j["start_ts_ns"] = start_ts_ns_;
+    j["end_ts_ns"] = end_ts_ns_;
+    j["market_duration_sec"] = market_duration_sec_;
+    j["wall_duration_sec"] = wall_duration_sec_;
+
+    // Messages
+    j["messages_parsed"] = messages_parsed_;
+    j["parse_errors"] = parse_errors_;
+    j["dropped"] = dropped_;
+
+    // Signals
+    j["signals_by_kind"] = signals_by_kind_;
+
+    // Plans
+    j["plans_by_strategy"] = plans_by_strategy_;
+    j["plans_accepted"] = plans_accepted_;
+    j["plans_rejected"] = plans_rejected_;
+    j["rejections_by_reason"] = rejections_by_reason_;
+
+    // Executor
+    j["submitted"] = submitted_;
+    j["closed"] = closed_;
+    j["open_at_end"] = open_at_end_;
+    j["realized_pnl_usd"] = realized_pnl_;
+    j["unrealized_pnl_usd"] = unrealized_pnl_;
+
+    // Invariants
+    j["invariant_total"] = invariant_total_;
+    j["invariants_by_code"] = invariants_by_code_;
+
+    return j;
+}
+
+// ---------------------------------------------------------------------------
+// to_human_string — terminal-friendly summary block
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Right-aligned count column, padded to width.
+std::string fmt_count(uint64_t n, int width = 8) {
+    std::ostringstream ss;
+    ss << std::right << std::setw(width) << n;
+    return ss.str();
+}
+
+/// Format PnL with sign and 2 decimal places.
+std::string fmt_pnl(double pnl) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%+.2f", pnl);
+    return std::string(buf);
+}
+
+/// Seconds to a compact human string (e.g. "12.3s", "2m 05s", "1h 03m").
+std::string fmt_duration(double sec) {
+    if (sec < 0.0) return "0.0s";
+    if (sec < 60.0) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.1fs", sec);
+        return std::string(buf);
+    }
+    int total = static_cast<int>(sec);
+    int h = total / 3600;
+    int m = (total % 3600) / 60;
+    int s = total % 60;
+    std::ostringstream ss;
+    if (h > 0) {
+        ss << h << "h " << std::setfill('0') << std::setw(2) << m << "m";
+    } else {
+        ss << m << "m " << std::setfill('0') << std::setw(2) << s << "s";
+    }
+    return ss.str();
+}
+
+/// Label + count line for a sub-section, with 2-space indent.
+std::string fmt_line(const std::string& label, uint64_t count, int label_width = 22) {
+    std::ostringstream ss;
+    ss << "  " << std::left << std::setw(label_width) << label << fmt_count(count);
+    return ss.str();
+}
+
+} // anonymous namespace
+
+std::string SummaryCollector::to_human_string() const {
+    std::ostringstream out;
+
+    out << "=== Summary ===\n";
+
+    // Source
+    if (!source_description_.empty()) {
+        out << "Source:      " << source_description_ << "\n";
+    }
+
+    // Duration
+    out << "Duration:    " << fmt_duration(market_duration_sec_) << " of market time, "
+        << fmt_duration(wall_duration_sec_) << " wall time\n";
+
+    // Messages
+    out << "Messages:    " << messages_parsed_ << " parsed, "
+        << parse_errors_ << " parse errors, "
+        << dropped_ << " dropped\n";
+
+    // Signals
+    if (!signals_by_kind_.empty()) {
+        out << "\nSignals by kind:\n";
+        for (const auto& [kind, count] : signals_by_kind_) {
+            out << fmt_line(kind, count) << "\n";
+        }
+    }
+
+    // Plans
+    {
+        uint64_t total_plans = 0;
+        for (const auto& [_, count] : plans_by_strategy_) {
+            total_plans += count;
+        }
+        if (total_plans > 0 || plans_accepted_ > 0 || plans_rejected_ > 0) {
+            out << "\nPlans:\n";
+            if (!plans_by_strategy_.empty()) {
+                out << "  Generated by strategy:\n";
+                for (const auto& [name, count] : plans_by_strategy_) {
+                    out << "    " << std::left << std::setw(20) << name << fmt_count(count) << "\n";
+                }
+            }
+            out << "  Risk decisions:\n";
+            out << "    " << std::left << std::setw(20) << "Accepted" << fmt_count(plans_accepted_) << "\n";
+            out << "    " << std::left << std::setw(20) << "Rejected" << fmt_count(plans_rejected_) << "\n";
+            if (!rejections_by_reason_.empty()) {
+                for (const auto& [reason, count] : rejections_by_reason_) {
+                    out << "      " << std::left << std::setw(18) << reason << fmt_count(count) << "\n";
+                }
+            }
+        }
+    }
+
+    // Executor
+    if (submitted_ > 0 || closed_ > 0 || open_at_end_ > 0) {
+        out << "\nExecutor (paper):\n";
+        out << fmt_line("Submitted", submitted_) << "\n";
+        out << fmt_line("Closed", closed_) << "\n";
+        out << fmt_line("Open at end", open_at_end_) << "\n";
+        out << "  " << std::left << std::setw(22) << "Realized PnL"
+            << fmt_pnl(realized_pnl_) << " USD\n";
+        out << "  " << std::left << std::setw(22) << "Unrealized PnL"
+            << fmt_pnl(unrealized_pnl_) << " USD\n";
+    }
+
+    // Invariants
+    if (invariant_total_ > 0) {
+        out << "\nInvariants:\n";
+        out << fmt_line("Total", invariant_total_) << "\n";
+        for (const auto& [code, count] : invariants_by_code_) {
+            out << fmt_line(code, count) << "\n";
+        }
+    }
+
+    return out.str();
+}
+
+} // namespace trade_bot::probe

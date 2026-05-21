@@ -3,6 +3,7 @@
 #include "AccountState.hpp"
 #include "trading/ActiveTrade.hpp"
 #include <nlohmann/json.hpp>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <optional>
@@ -34,6 +35,7 @@ public:
 private:
     std::string path_;
     int         lock_fd_{-1};   // advisory exclusive lock — see ctor
+    std::mutex  save_mtx_;      // serialises concurrent save() calls
 };
 
 // JSON serialization helpers

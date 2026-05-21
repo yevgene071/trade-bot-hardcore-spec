@@ -2,12 +2,13 @@
 
 #include "domain/Types.hpp"
 #include "numeric/HdrHistogramWrapper.hpp"
+#include "perf/PerfRegistry.hpp"
 #include "transport/MarketDataFeed.hpp"
 
+#include "absl/container/btree_map.h"
 #include <chrono>
 #include <cstdint>
 #include <mutex>
-#include <unordered_map>
 
 namespace trade_bot {
 
@@ -55,6 +56,11 @@ public:
     int64_t latency_p50_us() const;
     double  jitter_us() const;     // = stddev of latency distribution
     int64_t sample_count() const;
+    
+    // Same-stream inter-event jitter (T0-MONITOR-TIMESTAMPS extension)
+    int64_t latency_trade_to_trade_p99_us() const;
+    int64_t latency_book_to_book_p99_us() const;
+    
     void    reset();
 
 private:
@@ -70,12 +76,20 @@ private:
         clock::time_point last_book{};
         bool has_trade{false};
         bool has_book{false};
+        
+        // Same-stream inter-event jitter tracking
+        clock::time_point last_same_trade{};
+        clock::time_point last_same_book{};
     };
 
     mutable std::mutex mtx_;
     HdrHistogram latency_;
-    std::unordered_map<Ticker, TickerState> per_ticker_;
+    absl::btree_map<Ticker, TickerState> per_ticker_;
     int64_t samples_since_check_{0};
+    
+    // Same-stream inter-event jitter histograms (registered in PerfRegistry)
+    HdrHistogram* trade_to_trade_hist_{nullptr};
+    HdrHistogram* book_to_book_hist_{nullptr};
 };
 
 } // namespace trade_bot

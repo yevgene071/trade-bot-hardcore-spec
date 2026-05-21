@@ -24,7 +24,7 @@ public:
     void connect(const std::string&) override {}
     void send(std::string_view) override {}
     void disconnect() override {}
-    void set_on_message(std::function<void(const nlohmann::json&)>) override {}
+    void set_on_message(std::function<void(const nlohmann::json&, uint64_t, TraceId)>) override {}
     void set_on_close(std::function<void(int, const std::string&)>) override {}
     void set_on_error(std::function<void(const std::string&)>) override {}
     void set_on_connect(std::function<void()>) override {}

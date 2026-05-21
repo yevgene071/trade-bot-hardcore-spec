@@ -20,8 +20,9 @@ public:
     struct Config {
         std::chrono::seconds window{30};
         double pullback_min_bps{5.0};
-        
-        // HMM params (learned or default)
+
+        // AB3: explicit flag prevents fragile start_probs[0]==0 sentinel
+        bool hmm_use_default_params{true};
         ApproachHmm::Params hmm_params;
     };
 
@@ -39,6 +40,8 @@ public:
     void on_frame(const FeatureFrame& frame) override;
     void on_trade(const Trade& trade) override;
     void on_book_update(const OrderBookUpdate& update) override;
+    
+    const char* perf_stage_name() const noexcept override { return "approach_eval_us"; }
 
     enum class ApproachType { Impulse, Slow, Consolidation, Unknown };
     

@@ -1,4 +1,6 @@
 #include "app/BotApp.hpp"
+#include "app/PipelineProcessor.hpp"
+#include <unordered_map>
 
 #include "control/ClockDriftMonitor.hpp"
 #include "control/SntpClient.hpp"
@@ -12,6 +14,8 @@
 #include "metrics/AlertWebhook.hpp"
 #include "metrics/MetricsExporter.hpp"
 #include "metrics/MetricsRegistry.hpp"
+#include "perf/LatencyTracer.hpp"
+#include "perf/PerfRegistry.hpp"
 #include "risk/AccountStatePersister.hpp"
 #include "risk/TradingDay.hpp"
 #include "signals/SignalLevelBridge.hpp"
@@ -30,6 +34,7 @@
 #include "transport/OrderGateway.hpp"
 #include "transport/SignalLevelGateway.hpp"
 #include "transport/external/ExternalIoContext.hpp"
+#include "transport/external/ExternalFeedRegistry.hpp"
 #include "universe/OrderbookSettingsLoader.hpp"
 #include "universe/UniverseFilters.hpp"
 
@@ -41,6 +46,8 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <pthread.h>
+#include <signal.h>
 #include <sstream>
 #include <thread>
 #include <spdlog/fmt/ranges.h>
@@ -54,23 +61,40 @@ namespace trade_bot {
 BotApp::BotApp(boost::asio::io_context& ioc)
     : ioc_(ioc)
     , timer_(ioc)
+    , dashboard_timer_(ioc)
     , pool_fallback_timer_(ioc)
     , last_reset_day_(TradingDay::current_date_utc())
     , last_persist_(std::chrono::system_clock::now())
     , last_dash_update_(std::chrono::system_clock::now())
     , last_slow_dash_update_(std::chrono::system_clock::time_point{})
-    , kill_switch_(&KillSwitch::instance()) {}
+    , kill_switch_(&KillSwitch::instance())
+    , system_clock_(std::make_shared<WallClock>()) {}
 
 BotApp::~BotApp() {
+    // Dump performance report on normal shutdown
+    dump_perf_report_();
+
+    // Stop main ioc first so no async handlers fire against half-destroyed members.
+    ioc_.stop();
+
+    // Clear registry to destroy external clients and their Asio timers safely while ExternalIoContext is still running.
+    ExternalFeedRegistry::instance().clear();
+    ExternalIoContext::instance().stop();
+
     dashboard_ioc_.stop();
     if (dashboard_thread_.joinable()) {
-        dashboard_thread_.join();
+        try {
+            dashboard_thread_.join();
+        } catch (const std::system_error& e) {
+            LOG_WARN("dashboard_thread join error: {}", e.what());
+        }
     }
 }
 
 void BotApp::run() {
     init_components();
     schedule_tick();
+    schedule_dashboard_tick();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -198,15 +222,25 @@ void BotApp::start_dashboard_thread_() {
             }
             return {{"ok", false}, {"error", "Invalid order format"}};
         } else if (token == "strategy") {
-            std::string action, ticker;
+            std::string action, ticker, class_name;
             if (iss >> action >> ticker) {
-                if (action == "enable") {
-                    universe_.override_affinity(ticker, "bounce", true);
-                    return {{"ok", true}};
-                } else if (action == "disable") {
-                    universe_.override_affinity(ticker, "bounce", false);
-                    return {{"ok", true}};
+                iss >> class_name; // optional: specific strategy class name
+                // Reverse-map class name → short affinity key
+                auto to_short = [](const std::string& cls) -> std::string {
+                    if (cls == "BounceFromDensity")  return "bounce";
+                    if (cls == "BreakoutEatThrough") return "breakout";
+                    if (cls == "LeaderLag")          return "leaderlag";
+                    if (cls == "FlushReversal")      return "flushreversal";
+                    return cls; // pass through if already short name or unknown
+                };
+                bool enabled = (action == "enable");
+                if (!class_name.empty()) {
+                    universe_.override_affinity(ticker, to_short(class_name), enabled);
+                } else {
+                    for (const char* s : {"bounce","breakout","leaderlag","flushreversal"})
+                        universe_.override_affinity(ticker, s, enabled);
                 }
+                return {{"ok", true}};
             }
             return {{"ok", false}, {"error", "Invalid strategy command"}};
         } else if (token == "close") {
@@ -229,6 +263,11 @@ void BotApp::start_dashboard_thread_() {
     metrics_exporter_->start();
 
     dashboard_thread_ = std::thread([this]() {
+        // M2: Block SIGPIPE in worker threads; only main thread handles signals.
+        sigset_t mask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGPIPE);
+        pthread_sigmask(SIG_BLOCK, &mask, nullptr);
         auto work = boost::asio::make_work_guard(dashboard_ioc_);
         dashboard_ioc_.run();
     });
@@ -236,7 +275,16 @@ void BotApp::start_dashboard_thread_() {
 
 void BotApp::subscribe_signal_bus_() {
     signal_bus_ = std::make_unique<SignalBus>();
-    signal_bus_->subscribe([&](const Signal& s) {
+
+    // Per-(ticker,kind) cooldown for the dashboard ring buffer.
+    // Prevents high-frequency detectors (LevelApproach, LeaderMove) from
+    // flooding the panel. Actual signal bus is NOT throttled — strategies
+    // receive every signal. Only the dashboard display is deduplicated.
+    using Clock = std::chrono::system_clock;
+    static constexpr int kDashCooloffMs = 3000;
+    std::unordered_map<std::string, Clock::time_point> dash_cooloffs;
+
+    signal_bus_->subscribe([&, dash_cooloffs = std::move(dash_cooloffs)](const Signal& s) mutable {
         MetricsRegistry::instance().counter_inc(
             "trade_bot_signals_total",
             {{"kind", std::to_string(static_cast<int>(s.kind))}});
@@ -247,6 +295,25 @@ void BotApp::subscribe_signal_bus_() {
         const auto idx = static_cast<std::size_t>(s.kind);
         const char* kind_name = idx < std::size(kKindNames) ? kKindNames[idx] : "Unknown";
         signal_counts_[kind_name]++;
+
+        // Dashboard cooldown: skip if same (ticker, kind) was added within kDashCooloffMs.
+        std::string dash_key = s.ticker + "|" + kind_name;
+        auto now = s.timestamp;
+        auto it = dash_cooloffs.find(dash_key);
+        bool in_cooloff = (it != dash_cooloffs.end()) &&
+            (std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second).count()
+             < kDashCooloffMs);
+        if (in_cooloff) return;
+
+        // NEW-02 fix: prune stale entries as tickers rotate in/out of the universe.
+        if (dash_cooloffs.size() > 500) {
+            auto cutoff = now - std::chrono::milliseconds(kDashCooloffMs * 2);
+            for (auto map_it = dash_cooloffs.begin(); map_it != dash_cooloffs.end(); ) {
+                if (map_it->second < cutoff) map_it = dash_cooloffs.erase(map_it);
+                else ++map_it;
+            }
+        }
+        dash_cooloffs[dash_key] = now;
 
         // Ring buffer for dashboard feed — called on ioc_ thread, no mutex needed.
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -264,8 +331,18 @@ void BotApp::subscribe_signal_bus_() {
         ev.price      = s.price;
         ev.confidence = s.confidence;
         ev.time_str   = tbuf;
+        ev.side       = std::string(s.payload.side);
         recent_signals_.push_front(std::move(ev));
         if (recent_signals_.size() > 60) recent_signals_.pop_back();
+
+        // Iceberg sonar: push to DashboardServer sonar ring directly
+        if (s.kind == SignalKind::IcebergSuspected && dashboard_) {
+            auto ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                s.timestamp.time_since_epoch()).count();
+            std::string ice_side = (std::string_view(s.payload.side) == "Bid") ? "BID" : "ASK";
+            dashboard_->push_iceberg_event(ts_ms, s.price, std::move(ice_side),
+                                           s.payload.total_eaten_usd);
+        }
     });
 }
 
@@ -310,6 +387,11 @@ void BotApp::load_account_state_() {
         last_reset_day_ = TradingDay::current_date_utc();
         LOG_INFO("No persisted state found, initialized with 10000.0");
     }
+    
+    // P0 DETERMINISM: Initialize Kahan accumulators with loaded state
+    realized_pnl_accumulator_.add(account_state_.realized_pnl_today_usd);
+    equity_accumulator_.add(account_state_.equity_usd);
+    free_balance_accumulator_.add(account_state_.free_balance_usd);
     account_state_.trading_day_start = std::chrono::system_clock::now();
 }
 
@@ -412,7 +494,7 @@ BotApp::StrategyConfigs BotApp::load_strategy_configs_() {
 void BotApp::init_feed_and_executor_(std::shared_ptr<BeastWsClient> ws, int port,
                                       int connection_id,
                                       std::shared_ptr<OrderGateway> gateway) {
-    finres_handler_ = std::make_unique<FinresHandler>();
+    finres_handler_ = std::make_unique<FinresHandler>(system_clock_);
     feed_ = std::make_unique<MarketDataFeed>(ws, connection_id);
     feed_->add_listener(finres_handler_.get());
     m_connection_id_for_tick = connection_id;
@@ -429,8 +511,9 @@ void BotApp::init_feed_and_executor_(std::shared_ptr<BeastWsClient> ws, int port
 
     const std::string mode = Config::get_or<std::string>("executor.mode", "paper");
     live_executor_ = (mode == "live");
+    gateway_ = gateway;
     if (live_executor_) {
-        executor_ = std::make_unique<LiveExecutor>(connection_id, *gateway, *feed_);
+        executor_ = std::make_unique<LiveExecutor>(connection_id, *gateway, *feed_, universe_);
     } else {
         executor_ = std::make_unique<PaperExecutor>(books_for_executor_);
     }
@@ -444,7 +527,22 @@ void BotApp::init_feed_and_executor_(std::shared_ptr<BeastWsClient> ws, int port
 
 void BotApp::setup_strategy_engine_callbacks_() {
     strategy_engine_->set_on_plan([&](const TradePlan& plan) {
-        auto decision = risk_manager_->evaluate(plan, account_state_);
+        // FEAT-06: §0.7 affinity_stable_min — ticker must be in pool for ≥5 min before first trade
+        static constexpr std::chrono::seconds kAffinityStableMin{300};
+        if (!universe_.is_affinity_stable(plan.ticker, kAffinityStableMin,
+                                          system_clock_->now())) {
+            LOG_INFO("[Risk] Plan REJECTED for {}: affinity too recent (need {}s stable)",
+                     plan.ticker, kAffinityStableMin.count());
+            strategy_engine_->reset_strategy_plan(plan.ticker, plan.strategy_name.c_str());
+            return;
+        }
+        static auto& plan_to_risk_hist = PerfRegistry::instance().get_or_create(kStagePlanToRisk);
+        static auto& risk_to_submit_hist = PerfRegistry::instance().get_or_create(kStageRiskToSubmit);
+        
+        auto decision = [&]() {
+            LatencyTracer trace(plan_to_risk_hist);
+            return risk_manager_->evaluate(plan, account_state_);
+        }();
         if (decision.accepted) {
             TradePlan accepted_plan = plan;
             accepted_plan.size_coin = decision.adjusted_size_coin;
@@ -463,7 +561,10 @@ void BotApp::setup_strategy_engine_callbacks_() {
             LOG_INFO("[Strategy] SUBMITTING plan for {}: {} @ {}, size={}",
                      plan.ticker, plan.side == Side::Buy ? "BUY" : "SELL",
                      accepted_plan.entry_price, accepted_plan.size_coin);
-            executor_->submit(accepted_plan);
+            {
+                LatencyTracer trace(risk_to_submit_hist);
+                executor_->submit(accepted_plan);
+            }
             strategy_engine_->notify_plan_accepted(accepted_plan);
         } else {
             LOG_INFO("[Risk] Plan REJECTED for {}: {} ({})",
@@ -494,12 +595,30 @@ void BotApp::setup_affinity_handler_(BounceFromDensity::Config     bounce_cfg,
                 books_for_executor_[ticker] = controllers_[ticker]->book.get();
                 feed_->add_listener(ticker, controllers_[ticker].get());
                 feed_->subscribe_ticker(ticker);
+                
+                // Register ticker components in PipelineProcessor for event-driven processing
+                if (processor_) {
+                    auto& ctrl = controllers_[ticker];
+                    processor_->register_ticker(
+                        ticker,
+                        ctrl->book.get(),
+                        ctrl->stream.get(),
+                        ctrl->leader_tracker.get(),
+                        ctrl->extractor.get(),
+                        ctrl.get()
+                    );
+                    LOG_INFO("[PipelineProcessor] Registered components for {}", ticker);
+                }
                 if (ob_settings_loader_) {
-                    auto obs = ob_settings_loader_->fetch(ticker);
-                    if (obs) {
-                        universe_.update_orderbook_settings(*obs);
-                        LOG_INFO("[Universe] {} orderbook settings: large_amount_usd={}",
-                                 ticker, obs->large_amount_usd);
+                    try {
+                        auto obs = ob_settings_loader_->fetch(ticker);
+                        if (obs) {
+                            universe_.update_orderbook_settings(*obs);
+                            LOG_INFO("[Universe] {} orderbook settings: large_amount_usd={}",
+                                     ticker, obs->large_amount_usd);
+                        }
+                    } catch (const std::exception& e) {
+                        LOG_WARN("[Universe] ob_settings fetch failed for {}: {}", ticker, e.what());
                     }
                 }
                 if (leader_name != ticker && !controllers_.contains(leader_name)) {
@@ -508,6 +627,18 @@ void BotApp::setup_affinity_handler_(BounceFromDensity::Config     bounce_cfg,
                     books_for_executor_[leader_name] = controllers_[leader_name]->book.get();
                     feed_->add_listener(leader_name, controllers_[leader_name].get());
                     feed_->subscribe_ticker(leader_name);
+                    if (processor_) {
+                        auto& ctrl = controllers_[leader_name];
+                        processor_->register_ticker(
+                            leader_name,
+                            ctrl->book.get(),
+                            ctrl->stream.get(),
+                            ctrl->leader_tracker.get(),
+                            ctrl->extractor.get(),
+                            ctrl.get()
+                        );
+                        LOG_INFO("[PipelineProcessor] Registered components for dynamic leader {}", leader_name);
+                    }
                 }
             }
             auto meta = universe_.meta(ticker).value_or(TickerMeta{0.01, 1e-6, 0.0, 0.0});
@@ -524,7 +655,8 @@ void BotApp::setup_affinity_handler_(BounceFromDensity::Config     bounce_cfg,
                 cfg.entry_offset_bps          *= inv_sqrt;
                 cfg.min_approach_speed_bps_1s *= sqrt_sf;
                 cfg.no_progress_timeout_sec    = std::min(cfg.no_progress_timeout_sec * inv_sqrt, 300.0);
-                strategy_engine_->add_strategy(std::make_unique<BounceFromDensity>(ticker, info, cfg));
+                auto strat = std::make_unique<BounceFromDensity>(ticker, info, cfg, system_clock_);
+                strategy_engine_->add_strategy(std::move(strat));
             } else if (strategy == "breakout") {
                 auto cfg = breakout_cfg;
                 cfg.stop_buffer_bps          *= inv_sqrt;
@@ -532,18 +664,21 @@ void BotApp::setup_affinity_handler_(BounceFromDensity::Config     bounce_cfg,
                 cfg.min_relative_volume      *= sqrt_sf;
                 cfg.no_progress_timeout_sec   = std::min(cfg.no_progress_timeout_sec * inv_sqrt, 120.0);
                 cfg.post_entry_grace_sec      *= inv_sqrt;
-                strategy_engine_->add_strategy(std::make_unique<BreakoutEatThrough>(ticker, info, cfg));
+                auto strat = std::make_unique<BreakoutEatThrough>(ticker, info, cfg, system_clock_);
+                strategy_engine_->add_strategy(std::move(strat));
             } else if (strategy == "leaderlag") {
                 auto cfg = leaderlag_cfg;
                 cfg.stop_distance_bps        *= inv_sqrt;
                 cfg.no_progress_timeout_sec   = std::min(cfg.no_progress_timeout_sec * inv_sqrt, 60.0);
-                strategy_engine_->add_strategy(std::make_unique<LeaderLag>(ticker, info, cfg));
+                auto strat = std::make_unique<LeaderLag>(ticker, info, cfg, system_clock_);
+                strategy_engine_->add_strategy(std::move(strat));
             } else if (strategy == "flushreversal") {
                 auto cfg = flushreversal_cfg;
                 cfg.stop_buffer_bps          *= inv_sqrt;
                 cfg.entry_offset_bps         *= inv_sqrt;
                 cfg.no_progress_timeout_sec   = std::min(cfg.no_progress_timeout_sec * inv_sqrt, 60.0);
-                strategy_engine_->add_strategy(std::make_unique<FlushReversal>(ticker, info, cfg));
+                auto strat = std::make_unique<FlushReversal>(ticker, info, cfg, system_clock_);
+                strategy_engine_->add_strategy(std::move(strat));
             }
         } else {
             std::string cls;
@@ -617,8 +752,16 @@ std::vector<Ticker> BotApp::init_universe_pool_(
 
 void BotApp::start_notification_feed_(int port) {
     auto notif_ws = std::make_shared<BeastWsClient>(ioc_);
-    notif_feed_ = std::make_unique<NotificationFeed>(notif_ws, universe_,
-                                                     NotificationFeed::Config{});
+    
+    // Callback fires on first ScreenerNewCoin to start processor after initial pool populated
+    auto on_first_coin = [this]() {
+        LOG_INFO("[Universe] First coin received from screener — starting processor");
+        start_processor();
+    };
+    
+    notif_feed_ = std::make_unique<NotificationFeed>(
+        notif_ws, universe_, NotificationFeed::Config{}, std::move(on_first_coin),
+        signal_level_bridge_.get()); // AD3: wire bridge to route SignalLevel notifications
     notif_ws->connect("ws://127.0.0.1:" + std::to_string(port) + "/notifications");
     notif_feed_->start();
     LOG_INFO("[Universe] NotificationFeed started — screener will populate pool");
@@ -640,16 +783,19 @@ void BotApp::init_components() {
 
     auto ntp = std::make_shared<SntpClient>();
     clock_monitor_ = std::make_unique<ClockDriftMonitor>(ntp, ClockDriftMonitor::Config{
-        .warn_drift_ms      = Config::get_or<int64_t>("clock.warn_drift_ms",      500),
-        .max_clock_drift_ms = Config::get_or<int64_t>("clock.max_clock_drift_ms", 2000),
+        .sources            = Config::get_or<std::vector<std::string>>("clock.sources", {"pool.ntp.org", "time.google.com"}),
+        .check_interval     = std::chrono::seconds(Config::get_or<int64_t>("clock.check_interval_sec", 30)),
+        .query_timeout      = std::chrono::milliseconds(Config::get_or<int64_t>("clock.query_timeout_ms", 1500)),
+        .warn_drift_ms      = Config::get_or<int64_t>("clock.warn_drift_ms",      1000),
+        .max_clock_drift_ms = Config::get_or<int64_t>("clock.max_clock_drift_ms", 5000),
     });
     clock_monitor_->start();
 
     ExternalIoContext::instance().start();
     start_dashboard_thread_();
     subscribe_signal_bus_();
-    strategy_engine_ = std::make_unique<StrategyEngine>(*signal_bus_);
-    risk_manager_ = std::make_unique<RiskManager>(universe_, news_, load_risk_config_());
+    strategy_engine_ = std::make_unique<StrategyEngine>(*signal_bus_, system_clock_);
+    risk_manager_ = std::make_unique<RiskManager>(universe_, news_, load_risk_config_(), system_clock_);
     load_account_state_();
     maybe_load_news_();
 
@@ -730,9 +876,68 @@ void BotApp::init_components() {
         }
         LOG_INFO("[Universe] Screener notifications not received within 10s — "
                  "activating {} candidates as fallback pool", pending_candidates_.size());
-        universe_.refresh_pool(pending_candidates_);
+        universe_.refresh_pool(pending_candidates_, system_clock_->now());
         universe_.refresh_affinity();
+        
+        // Start processor after initial pool is populated
+        start_processor();
     });
+
+    // ═══════════════════════════════════════════════════════════════
+    // PipelineProcessor: Event-driven hot path (OrderBook → Submit)
+    // ═══════════════════════════════════════════════════════════════
+    PipelineProcessor::Config proc_cfg;
+    proc_cfg.hot_path_cpu = static_cast<int>(
+        Config::get_or<int64_t>("perf.hot_path_cpu", 2));
+    proc_cfg.spsc_queue_capacity = static_cast<size_t>(
+        Config::get_or<int64_t>("perf.spsc_queue_capacity", 65536));
+    proc_cfg.feature_rate_hz = Config::get_or<double>("perf.feature_rate_hz", 20.0);
+    
+    processor_ = std::make_unique<PipelineProcessor>(proc_cfg);
+    
+    // Register pipeline components (shared across all tickers)
+    processor_->set_pipeline_components(
+        signal_bus_.get(),
+        strategy_engine_.get(),
+        risk_manager_.get(),
+        executor_.get()
+    );
+    
+    // Wire BeastWsClient raw message callback to processor queue
+    ws->set_on_raw_message([this](const char* data, size_t size, uint64_t recv_ns, TraceId trace_id) {
+        RawWsEvent event;
+        // Skip messages that don't fit — they are snapshots/large payloads already
+        // handled by the MarketDataFeed JSON path.
+        if (size > RawWsEvent::kMaxPayload) return;
+        event.trace_id = trace_id;
+        event.recv_ns = recv_ns;
+        event.payload_size = static_cast<uint32_t>(size);
+        std::memcpy(event.payload.data(), data, size);
+
+        if (!processor_->enqueue(std::move(event))) {
+            LOG_WARN("[PipelineProcessor] Queue overflow — event dropped");
+        }
+    });
+    
+    // Note: Per-ticker components (OrderBook, TradeStream, LeaderTracker, FeatureExtractor)
+    // will be registered dynamically in setup_affinity_handler_() when tickers are activated.
+    // This happens after universe pool is populated by screener or fallback timer.
+    
+    LOG_INFO("[PipelineProcessor] Initialized (CPU={}, queue={})",
+             proc_cfg.hot_path_cpu, proc_cfg.spsc_queue_capacity);
+}
+
+void BotApp::start_processor() {
+    if (!processor_) {
+        LOG_WARN("[PipelineProcessor] Cannot start — processor not initialized");
+        return;
+    }
+
+    // Start processor thread only after all initial tickers are registered
+    // (happens in setup_affinity_handler_ when universe pool is populated)
+    feed_->set_skip_hot_path(true);
+    processor_->start();
+    LOG_INFO("[PipelineProcessor] Started event-driven processing thread");
 }
 
 } // namespace trade_bot

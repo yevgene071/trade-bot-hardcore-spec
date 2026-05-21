@@ -4,6 +4,7 @@
 #include "IHttpClient.hpp"
 #include <memory>
 #include <vector>
+#include <atomic>
 
 namespace trade_bot {
 
@@ -23,12 +24,12 @@ public:
     void cancel_order(int connection_id, int64_t order_id, const Ticker& ticker) override;
     void cancel_all_orders(int connection_id, const Ticker& ticker) override;
 
-    void set_port(int port) { m_port = port; }
+    void set_port(int port) { m_port.store(port, std::memory_order_relaxed); }
 
 private:
     static std::string get_base_url() { return "http://127.0.0.1"; } // Port will be appended or found via discovery
     std::shared_ptr<IHttpClient> m_http_client;
-    int m_port = 17845; // Default, should be set via discovery
+    std::atomic<int> m_port{17845}; // Default, should be set via discovery
 };
 
 } // namespace trade_bot

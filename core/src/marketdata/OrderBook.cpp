@@ -6,6 +6,8 @@
 #include <cmath>
 #include <execution>
 #include <algorithm>
+#include <mutex>
+#include <shared_mutex>
 
 namespace trade_bot {
 
@@ -15,44 +17,59 @@ OrderBook::OrderBook(Ticker ticker,
                      std::size_t /*reserve_levels*/)
     : ticker_(std::move(ticker))
     , price_increment_(price_increment)
-    , size_increment_(size_increment)
-    , inv_price_increment_(1.0 / price_increment)
-    , inv_size_increment_(1.0 / size_increment) {
+    , size_increment_(size_increment) {
+    // B1-FIX: Validate increments before computing inverses to prevent division by zero
+    if (price_increment <= 0.0 || size_increment <= 0.0) {
+        throw std::invalid_argument(
+            "OrderBook: price_increment and size_increment must be positive (got price=" +
+            std::to_string(price_increment) + ", size=" + std::to_string(size_increment) + ")");
+    }
+    
+    inv_price_increment_ = 1.0 / price_increment;
+    inv_size_increment_ = 1.0 / size_increment;
+    
     // absl::btree_map allocates per-node. reserve_levels is ignored here 
     // but kept in API for future PMR/Arena swap-in as per ARCH § 2.3.
 }
 
-OrderBook::OrderBook(OrderBook&& other) noexcept
-    : ticker_(std::move(other.ticker_))
-    , price_increment_(other.price_increment_)
-    , size_increment_(other.size_increment_)
-    , inv_price_increment_(other.inv_price_increment_)
-    , inv_size_increment_(other.inv_size_increment_)
-    , bids_(std::move(other.bids_))
-    , asks_(std::move(other.asks_))
-    , best_bid_tick_(other.best_bid_tick_)
-    , best_ask_tick_(other.best_ask_tick_)
-    , update_count_(other.update_count_)
-    , top_dirty_(other.top_dirty_.load()) {}
+OrderBook::OrderBook(OrderBook&& other) noexcept {
+    // shared_mutex is not movable — the new object gets a fresh unlocked mutex.
+    std::unique_lock<std::shared_mutex> lk(other.mtx_);
+    ticker_              = std::move(other.ticker_);
+    price_increment_     = other.price_increment_;
+    size_increment_      = other.size_increment_;
+    inv_price_increment_ = other.inv_price_increment_;
+    inv_size_increment_  = other.inv_size_increment_;
+    bids_                = std::move(other.bids_);
+    asks_                = std::move(other.asks_);
+    best_bid_tick_       = other.best_bid_tick_;
+    best_ask_tick_       = other.best_ask_tick_;
+    update_count_.store(other.update_count_.load(std::memory_order_relaxed));
+    top_dirty_           = other.top_dirty_;
+}
 
 OrderBook& OrderBook::operator=(OrderBook&& other) noexcept {
     if (this != &other) {
-        ticker_ = std::move(other.ticker_);
-        price_increment_ = other.price_increment_;
-        size_increment_ = other.size_increment_;
+        std::unique_lock<std::shared_mutex> lk1(mtx_, std::defer_lock);
+        std::unique_lock<std::shared_mutex> lk2(other.mtx_, std::defer_lock);
+        std::lock(lk1, lk2);
+        ticker_              = std::move(other.ticker_);
+        price_increment_     = other.price_increment_;
+        size_increment_      = other.size_increment_;
         inv_price_increment_ = other.inv_price_increment_;
-        inv_size_increment_ = other.inv_size_increment_;
-        bids_ = std::move(other.bids_);
-        asks_ = std::move(other.asks_);
-        best_bid_tick_ = other.best_bid_tick_;
-        best_ask_tick_ = other.best_ask_tick_;
-        update_count_ = other.update_count_;
-        top_dirty_ = other.top_dirty_.load();
+        inv_size_increment_  = other.inv_size_increment_;
+        bids_                = std::move(other.bids_);
+        asks_                = std::move(other.asks_);
+        best_bid_tick_       = other.best_bid_tick_;
+        best_ask_tick_       = other.best_ask_tick_;
+        update_count_.store(other.update_count_.load(std::memory_order_relaxed));
+        top_dirty_           = other.top_dirty_;
     }
     return *this;
 }
 
 void OrderBook::apply_snapshot(const OrderBookSnapshot& snap) {
+    std::unique_lock<std::shared_mutex> lk(mtx_);
     bids_.clear();
     asks_.clear();
     for (const auto& level : snap.bids) {
@@ -69,10 +86,15 @@ void OrderBook::apply_snapshot(const OrderBookSnapshot& snap) {
     }
     refresh_top_of_book_();
     top_dirty_ = false;
-    ++update_count_;
+    m_synced = true;
+    update_count_.fetch_add(1, std::memory_order_relaxed);
 }
 
-void OrderBook::apply_update(const OrderBookUpdate& upd) {
+void OrderBook::apply_update(const OrderBookUpdate& upd) noexcept {
+    std::unique_lock<std::shared_mutex> lk(mtx_);
+    if (!m_synced) {
+        m_synced = true;
+    }
     for (const auto& change : upd.changes) {
         apply_change_(change.side, change.price, change.size);
     }
@@ -80,60 +102,124 @@ void OrderBook::apply_update(const OrderBookUpdate& upd) {
         refresh_top_of_book_();
         top_dirty_ = false;
     }
-    ++update_count_;
+    update_count_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void OrderBook::apply_update_batch(const std::vector<PriceLevel>& changes) {
-    // T4-PERF: Threshold raised to 64. Partitioning avoids O(2N) work in parallel branch (#158).
+    std::unique_lock<std::shared_mutex> lk(mtx_);
+    if (!m_synced) {
+        m_synced = true;
+    }
+    // Exclusive lock is held throughout; parallel tasks safely modify separate maps
+    // because no concurrent readers can enter during exclusive ownership.
     if (changes.size() >= 64) {
         std::vector<std::pair<PriceTick, SizeFix>> buy_work, sell_work;
         buy_work.reserve(changes.size());
         sell_work.reserve(changes.size());
 
         for (const auto& c : changes) {
+            if (c.side != Side::Buy && c.side != Side::Sell) {
+                apply_change_(c.side, c.price, c.size);
+                continue;
+            }
             const auto tick = PriceTick::from_price_inv(c.price, inv_price_increment_);
             const auto size = SizeFix::from_double_inv(c.size, inv_size_increment_);
             if (c.side == Side::Buy) buy_work.emplace_back(tick, size);
-            else if (c.side == Side::Sell) sell_work.emplace_back(tick, size);
+            else sell_work.emplace_back(tick, size);
         }
 
-        auto update_map = [&](auto& map, const std::vector<std::pair<PriceTick, SizeFix>>& work) {
+        auto update_map = [](auto& map, const std::vector<std::pair<PriceTick, SizeFix>>& work) {
             for (const auto& [tick, size] : work) {
                 if (size.raw > 0) map.insert_or_assign(tick, size);
                 else map.erase(tick);
             }
         };
 
+        top_dirty_ = true;
         std::array<std::function<void()>, 2> tasks = {
             [&]() { update_map(bids_, buy_work); },
             [&]() { update_map(asks_, sell_work); }
         };
-        std::for_each(std::execution::par_unseq, tasks.begin(), tasks.end(), [](auto& f) { f(); });
-        top_dirty_ = true;
+        std::for_each(std::execution::par, tasks.begin(), tasks.end(), [](auto& f) { f(); });
+
+        // Find maximum new bid and minimum new ask with size > 0 to resolve overlaps
+        std::optional<PriceTick> max_new_bid;
+        std::optional<PriceTick> min_new_ask;
+
+        for (const auto& [tick, size] : buy_work) {
+            if (size.raw > 0) {
+                if (!max_new_bid || tick > *max_new_bid) {
+                    max_new_bid = tick;
+                }
+            }
+        }
+        for (const auto& [tick, size] : sell_work) {
+            if (size.raw > 0) {
+                if (!min_new_ask || tick < *min_new_ask) {
+                    min_new_ask = tick;
+                }
+            }
+        }
+
+        // Clean up crossed levels on opposite sides
+        if (max_new_bid) {
+            while (!asks_.empty() && asks_.begin()->first <= *max_new_bid) {
+                asks_.erase(asks_.begin());
+            }
+        }
+        if (min_new_ask) {
+            while (!bids_.empty() && bids_.begin()->first >= *min_new_ask) {
+                bids_.erase(bids_.begin());
+            }
+        }
     } else {
         for (const auto& c : changes) {
             apply_change_(c.side, c.price, c.size);
         }
     }
-    
+
     if (top_dirty_) {
         refresh_top_of_book_();
         top_dirty_ = false;
     }
-    ++update_count_;
+    update_count_.fetch_add(1, std::memory_order_relaxed);
 }
 
-void OrderBook::apply_change_(Side side, double price, double size) {
-    // Branchless-style hint: updates are more likely than deletes in a busy book
-    if (side == Side::None) [[unlikely]] return;
+void OrderBook::apply_change_(Side side, double price, double size) noexcept {
+    // Some MetaScalp orderbook_update encodings don't carry an explicit,
+    // parseable side. Rather than silently drop the level (which leaves the
+    // book stuck at the thin initial snapshot), infer it from price vs. the
+    // current touch: at/below best-bid → bid, at/above best-ask → ask.
+    if (side == Side::None) [[unlikely]] {
+        // K4: ensure cached top is fresh before using it for side inference
+        if (top_dirty_) { refresh_top_of_book_(); top_dirty_ = false; }
+        // Access tick cache directly (avoid recursive lock via public best_bid()/best_ask())
+        const auto bb = best_bid_tick_ ? std::optional<double>{best_bid_tick_->to_price(price_increment_)} : std::nullopt;
+        const auto ba = best_ask_tick_ ? std::optional<double>{best_ask_tick_->to_price(price_increment_)} : std::nullopt;
+        if (bb && ba)       side = (price <= 0.5 * (*bb + *ba)) ? Side::Buy : Side::Sell;
+        else if (bb)        side = (price <= *bb) ? Side::Buy : Side::Sell;
+        else if (ba)        side = (price >= *ba) ? Side::Sell : Side::Buy;
+        else                return; // empty book, no reference yet — snapshot seeds it
+    }
 
     const auto tick = PriceTick::from_price_inv(price, inv_price_increment_);
     const auto sizefix = SizeFix::from_double_inv(size, inv_size_increment_);
 
     if (size > 0.0) [[likely]] {
-        if (side == Side::Buy) bids_.insert_or_assign(tick, sizefix);
-        else                   asks_.insert_or_assign(tick, sizefix);
-    } else {
+        // Hot path: update an existing level or insert a new one in a live book.
+        if (side == Side::Buy) {
+            bids_.insert_or_assign(tick, sizefix);
+            while (!asks_.empty() && asks_.begin()->first <= tick) {
+                asks_.erase(asks_.begin());
+            }
+        } else {
+            asks_.insert_or_assign(tick, sizefix);
+            while (!bids_.empty() && bids_.begin()->first >= tick) {
+                bids_.erase(bids_.begin());
+            }
+        }
+    } else [[unlikely]] {
+        // Cold path: level removal (size == 0) is comparatively rare.
         if (side == Side::Buy) bids_.erase(tick);
         else                   asks_.erase(tick);
     }
@@ -146,52 +232,59 @@ void OrderBook::refresh_top_of_book_() noexcept {
 }
 
 std::optional<double> OrderBook::best_bid() const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
     if (!best_bid_tick_) return std::nullopt;
     return best_bid_tick_->to_price(price_increment_);
 }
 
 std::optional<double> OrderBook::best_ask() const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
     if (!best_ask_tick_) return std::nullopt;
     return best_ask_tick_->to_price(price_increment_);
 }
 
 std::optional<double> OrderBook::spread() const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
     if (!best_bid_tick_ || !best_ask_tick_) return std::nullopt;
     return best_ask_tick_->to_price(price_increment_) -
            best_bid_tick_->to_price(price_increment_);
 }
 
 std::optional<double> OrderBook::mid() const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
     if (!best_bid_tick_ || !best_ask_tick_) return std::nullopt;
     return 0.5 * (best_bid_tick_->to_price(price_increment_) +
                   best_ask_tick_->to_price(price_increment_));
 }
 
 double OrderBook::bid_depth(int n_levels) const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
     if (n_levels <= 0 || bids_.empty()) return 0.0;
-    
-    int64_t total_raw = 0;
+    // K5: accumulate as double to avoid int64_t overflow on large books
+    double total = 0.0;
     int count = 0;
     for (const auto& [_, sz] : bids_) {
-        total_raw += sz.raw;
+        total += static_cast<double>(sz.raw) * size_increment_;
         if (++count >= n_levels) break;
     }
-    return static_cast<double>(total_raw) * size_increment_;
+    return total;
 }
 
 double OrderBook::ask_depth(int n_levels) const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
     if (n_levels <= 0 || asks_.empty()) return 0.0;
-    
-    int64_t total_raw = 0;
+    // K5: accumulate as double to avoid int64_t overflow on large books
+    double total = 0.0;
     int count = 0;
     for (const auto& [_, sz] : asks_) {
-        total_raw += sz.raw;
+        total += static_cast<double>(sz.raw) * size_increment_;
         if (++count >= n_levels) break;
     }
-    return static_cast<double>(total_raw) * size_increment_;
+    return total;
 }
 
 double OrderBook::volume_at_range(double lo, double hi) const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
     if (lo > hi) std::swap(lo, hi);
     const auto lo_tick = PriceTick::from_price_inv(lo, inv_price_increment_);
     const auto hi_tick = PriceTick::from_price_inv(hi, inv_price_increment_);
@@ -213,13 +306,27 @@ double OrderBook::volume_at_range(double lo, double hi) const noexcept {
     return static_cast<double>(total_raw) * size_increment_;
 }
 
-std::size_t OrderBook::bid_levels() const noexcept { return bids_.size(); }
-std::size_t OrderBook::ask_levels() const noexcept { return asks_.size(); }
+std::size_t OrderBook::bid_levels() const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
+    return bids_.size();
+}
+std::size_t OrderBook::ask_levels() const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
+    return asks_.size();
+}
 
 std::pair<std::vector<ObLevel>, std::vector<ObLevel>>
 OrderBook::get_top_levels(int n) const noexcept {
     std::vector<ObLevel> bids, asks;
-    if (n <= 0) return {bids, asks};
+    get_top_levels(n, bids, asks);
+    return {std::move(bids), std::move(asks)};
+}
+
+void OrderBook::get_top_levels(int n, std::vector<ObLevel>& bids, std::vector<ObLevel>& asks) const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
+    bids.clear();
+    asks.clear();
+    if (n <= 0) return;
 
     bids.reserve(static_cast<std::size_t>(n));
     int count = 0;
@@ -240,11 +347,10 @@ OrderBook::get_top_levels(int n) const noexcept {
         });
         if (++count >= n) break;
     }
-
-    return {std::move(bids), std::move(asks)};
 }
 
 bool OrderBook::is_consistent(const OrderBookSnapshot& snap, int max_diff) const noexcept {
+    std::shared_lock<std::shared_mutex> lk(mtx_);
     int diffs = 0;
 
     auto check_side = [&](const std::vector<PriceLevel>& snap_levels, const auto& local_map) {

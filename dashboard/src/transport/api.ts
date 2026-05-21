@@ -18,8 +18,9 @@ export async function apiToggleKillSwitch() {
   return post('/killswitch/toggle');
 }
 
-export async function apiStartDump(filename?: string) {
-  return post('/dump/start', { filename: filename || 'dump' });
+export async function apiStartDump(filename?: string): Promise<{ ok: boolean; path?: string }> {
+  const res = await post('/dump/start', { filename: filename || 'dump' });
+  return res.json();
 }
 
 export async function apiStopDump() {
@@ -27,7 +28,13 @@ export async function apiStopDump() {
 }
 
 export async function apiSendCommand(command: string) {
-  return post('/command', { command });
+  const res = await fetch(`${BASE}/command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: command,
+  });
+  if (!res.ok) throw new Error(`/api/command failed: ${res.status}`);
+  return res;
 }
 
 export async function apiGetLogs(n = 100): Promise<string[]> {

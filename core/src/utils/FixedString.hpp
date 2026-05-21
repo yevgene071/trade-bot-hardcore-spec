@@ -41,12 +41,11 @@ public:
     bool empty() const { return size_ == 0; }
 
     template <typename... Args>
-    static FixedString format(const char* fmt, Args... args) {
+    static FixedString format(fmt::format_string<Args...> fmt, Args&&... args) {
         FixedString fs;
-        int len = std::snprintf(fs.data_.data(), N, fmt, args...);
-        if (len >= 0) {
-            fs.size_ = std::min(static_cast<std::size_t>(len), N - 1);
-        }
+        auto result = fmt::format_to_n(fs.data_.data(), N - 1, fmt, std::forward<Args>(args)...);
+        fs.size_ = std::min(result.size, N - 1);
+        fs.data_[fs.size_] = '\0';
         return fs;
     }
 
@@ -54,8 +53,16 @@ public:
         return std::string_view(data_.data(), size_);
     }
 
+    bool operator==(const char* other) const {
+        return std::string_view(*this) == std::string_view(other);
+    }
+
     bool operator==(std::string_view other) const {
         return std::string_view(*this) == other;
+    }
+
+    bool operator==(const std::string& other) const {
+        return std::string_view(*this) == std::string_view(other);
     }
 
 private:

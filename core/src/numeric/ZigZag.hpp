@@ -26,11 +26,14 @@ public:
         double first = prices[0];
         double last_peak_price = first;
         size_t last_peak_idx = 0;
-        State  state = State::FindingHigh; // Start state depends on first movement
+        // Determine initial direction from first two prices
+        State  state = (prices[1] >= prices[0]) ? State::FindingHigh : State::FindingLow;
 
         for (size_t i = 1; i < prices.size(); ++i) {
             double cur = prices[i];
-            double diff_bps = std::abs(cur - last_peak_price) / last_peak_price * kBpsBase;
+            double diff_bps = last_peak_price > 0.0
+                ? std::abs(cur - last_peak_price) / last_peak_price * kBpsBase
+                : 0.0;
 
             if (state == State::FindingHigh) {
                 if (cur > last_peak_price) {

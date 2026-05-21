@@ -3,8 +3,12 @@
 #include "IStrategy.hpp"
 #include "StrategyContext.hpp"
 #include <chrono>
+#include <mutex>
 
 namespace trade_bot {
+
+// Forward declaration for tier-based thresholds
+class TickerUniverse;
 
 /**
  * T3-FLUSH: Trades false breakouts ("stop-hunts").
@@ -29,9 +33,16 @@ public:
         std::chrono::seconds tape_flush_max_age{8};   // TapeFlush must be this fresh
         double min_flush_dist_bps{3.0};               // break must penetrate this far past level
         int    min_level_touches{2};                  // level strength gate
+        int    min_flush_count{1};                    // §4.3 Phase 5: set to 2 for ≥2 TapeFlush requirement
+        std::chrono::seconds flush_count_window{120}; // window for min_flush_count search
 
         double max_vol_fade_ratio{0.5};               // vol_1s / avg_vol_1s must be below this
         double min_price_reversal_bps{1.5};           // price must have started reversing
+
+        // Tier-based threshold arrays (tier0, tier1, tier2)
+        std::vector<double> tier_min_flush_dist_bps{25.0, 15.0, 10.0};
+        std::vector<double> tier_min_price_reversal_bps{8.0, 5.0, 3.0};
+        std::vector<double> tier_entry_offset_bps{5.0, 3.0, 2.0};
 
         std::chrono::seconds entry_timeout{8};
         double no_progress_timeout_sec{30.0};
@@ -39,18 +50,24 @@ public:
         double min_follow_through_bps{5.0};
     };
 
-    FlushReversal(Ticker ticker, TickerInfo info, const Config& cfg);
-    FlushReversal(Ticker ticker, TickerInfo info);
+    FlushReversal(Ticker ticker, TickerInfo info, const Config& cfg, std::shared_ptr<IClock> clock = nullptr);
+    FlushReversal(Ticker ticker, TickerInfo info, std::shared_ptr<IClock> clock = nullptr);
+
+    // Set TickerUniverse for tier-based thresholds
+    void set_universe(const TickerUniverse* universe) { universe_ = universe; }
 
     const std::string& name() const override { return name_; }
     const Ticker& ticker() const override { return ticker_; }
 
     void on_frame(const FeatureFrame& frame) override;
-    void on_signal(const Signal& signal) override;
+    std::optional<TradePlan> on_signal(const Signal& signal, std::chrono::system_clock::time_point now) override;
     std::optional<TradePlan> tick(std::chrono::system_clock::time_point now) override;
     StrategyState get_state() const override;
 
-    bool has_active_plan() const override { return active_plan_.has_value(); }
+    bool has_active_plan() const override {
+        std::lock_guard<std::mutex> lk(plan_mtx_);
+        return active_plan_.has_value();
+    }
     void reset_active_plan() override;
     void on_plan_accepted(const TradePlan& plan) override;
     std::optional<FixedString<32>> check_close_conditions(const FeatureFrame& latest_frame) override;
@@ -66,6 +83,13 @@ private:
 
     std::optional<TradePlan> active_plan_;
     std::optional<TradePlan> active_trade_info_;
+    mutable std::mutex       plan_mtx_;
+    
+    // Tier-based thresholds support
+    const TickerUniverse* universe_{nullptr};
+    
+    // P0 DETERMINISM: Clock abstraction for replay (injected via constructor)
+    std::shared_ptr<IClock> clock_;
 };
 
 } // namespace trade_bot

@@ -11,7 +11,7 @@ public:
     MOCK_METHOD(void, connect, (const std::string&), (override));
     MOCK_METHOD(void, disconnect, (), (override));
     MOCK_METHOD(void, send, (std::string_view), (override));
-    MOCK_METHOD(void, set_on_message, (std::function<void(const nlohmann::json&)>), (override));
+    MOCK_METHOD(void, set_on_message, (std::function<void(const nlohmann::json&, uint64_t, TraceId)>), (override));
     MOCK_METHOD(void, set_on_close, (std::function<void(int, const std::string&)>), (override));
     MOCK_METHOD(void, set_on_error, (std::function<void(const std::string&)>), (override));
     MOCK_METHOD(void, set_on_connect, (std::function<void()>), (override));
@@ -27,7 +27,7 @@ TEST_F(NotificationRoutingTest, RoutesBigTickToUniverse) {
     auto ws = std::make_shared<MockWsClient>();
     TickerUniverse universe;
     universe.register_strategy("S1", [](const Ticker&){ return true; });
-    universe.refresh_pool({"BTCUSDT"});
+    universe.refresh_pool({"BTCUSDT"}, std::chrono::system_clock::now());
     
     NotificationFeed::Config cfg;
     cfg.exchange_id = 2; // Binance
@@ -35,7 +35,7 @@ TEST_F(NotificationRoutingTest, RoutesBigTickToUniverse) {
     
     NotificationFeed feed(ws, universe, cfg);
     
-    std::function<void(const nlohmann::json&)> captured_cb;
+    std::function<void(const nlohmann::json&, uint64_t, TraceId)> captured_cb;
     EXPECT_CALL(*ws, set_on_message(testing::_)).WillOnce(testing::SaveArg<0>(&captured_cb));
     EXPECT_CALL(*ws, send(testing::_)).Times(1);
     
@@ -63,7 +63,7 @@ TEST_F(NotificationRoutingTest, RoutesBigTickToUniverse) {
         }}
     };
     
-    captured_cb(msg);
+    captured_cb(msg, 0, TraceId{0});
     
     EXPECT_TRUE(universe.is_boosted("BTCUSDT", std::chrono::system_clock::now()));
     EXPECT_EQ(feed.dropped_wrong_connection_total(), 0);
@@ -80,7 +80,7 @@ TEST_F(NotificationRoutingTest, RoutesScreenerNewCoin) {
     
     NotificationFeed feed(ws, universe, cfg);
     
-    std::function<void(const nlohmann::json&)> captured_cb;
+    std::function<void(const nlohmann::json&, uint64_t, TraceId)> captured_cb;
     EXPECT_CALL(*ws, set_on_message(testing::_)).WillOnce(testing::SaveArg<0>(&captured_cb));
     EXPECT_CALL(*ws, send(testing::_));
     
@@ -101,7 +101,7 @@ TEST_F(NotificationRoutingTest, RoutesScreenerNewCoin) {
         }}
     };
     
-    captured_cb(msg);
+    captured_cb(msg, 0, TraceId{0});
     // ScreenerNewCoin calls on_screener_new_coin which adds to pool;
     // verify indirectly by checking universe active set
     // (pool addition depends on strategy affinity accepting the ticker)
@@ -117,7 +117,7 @@ TEST_F(NotificationRoutingTest, DropsWrongConnection) {
     
     NotificationFeed feed(ws, universe, cfg);
     
-    std::function<void(const nlohmann::json&)> captured_cb;
+    std::function<void(const nlohmann::json&, uint64_t, TraceId)> captured_cb;
     EXPECT_CALL(*ws, set_on_message(testing::_)).WillOnce(testing::SaveArg<0>(&captured_cb));
     EXPECT_CALL(*ws, send(testing::_));
     
@@ -139,7 +139,7 @@ TEST_F(NotificationRoutingTest, DropsWrongConnection) {
         }}
     };
     
-    captured_cb(msg);
+    captured_cb(msg, 0, TraceId{0});
     
     EXPECT_EQ(feed.dropped_wrong_connection_total(), 1);
 }
@@ -150,7 +150,7 @@ TEST_F(NotificationRoutingTest, BackwardCompatBareObject) {
     auto ws = std::make_shared<MockWsClient>();
     TickerUniverse universe;
     universe.register_strategy("S1", [](const Ticker&){ return true; });
-    universe.refresh_pool({"BTCUSDT"});
+    universe.refresh_pool({"BTCUSDT"}, std::chrono::system_clock::now());
     
     NotificationFeed::Config cfg;
     cfg.exchange_id = 2;
@@ -158,7 +158,7 @@ TEST_F(NotificationRoutingTest, BackwardCompatBareObject) {
     
     NotificationFeed feed(ws, universe, cfg);
     
-    std::function<void(const nlohmann::json&)> captured_cb;
+    std::function<void(const nlohmann::json&, uint64_t, TraceId)> captured_cb;
     EXPECT_CALL(*ws, set_on_message(testing::_)).WillOnce(testing::SaveArg<0>(&captured_cb));
     EXPECT_CALL(*ws, send(testing::_));
     
@@ -178,7 +178,7 @@ TEST_F(NotificationRoutingTest, BackwardCompatBareObject) {
         }}
     };
     
-    captured_cb(msg);
+    captured_cb(msg, 0, TraceId{0});
     
     EXPECT_TRUE(universe.is_boosted("BTCUSDT", std::chrono::system_clock::now()));
     EXPECT_EQ(feed.dropped_wrong_connection_total(), 0);

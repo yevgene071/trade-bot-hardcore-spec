@@ -22,7 +22,7 @@ protected:
         u.set_stats_lookup([](const Ticker&) {
             return std::optional<TickerStats>{TickerStats{1e6, 5.0}};
         });
-        u.refresh_pool(tickers);
+        u.refresh_pool(tickers, std::chrono::system_clock::now());
         return u;
     }
 };
@@ -95,7 +95,7 @@ TEST_F(TickerUniverseAffinityTest, BoostExpiresAfterTtl) {
     u.set_stats_lookup([](const Ticker&) {
         return std::optional<TickerStats>{TickerStats{1e6, 5.0}};
     });
-    u.refresh_pool({"BTCUSDT"});
+    u.refresh_pool({"BTCUSDT"}, std::chrono::system_clock::now());
 
     auto t0 = std::chrono::system_clock::now();
     u.on_big_event("BTCUSDT", t0);

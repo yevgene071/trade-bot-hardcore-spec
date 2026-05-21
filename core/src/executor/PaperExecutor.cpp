@@ -1,5 +1,6 @@
 #include "PaperExecutor.hpp"
 #include "logger/Logger.hpp"
+#include "numeric/Kahan.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -206,6 +207,13 @@ void PaperExecutor::tick(const Ticker& ticker, std::chrono::system_clock::time_p
                 if (adjusted.tp2_price) *adjusted.tp2_price += price_shift;
             }
 
+            // AE1: check for existing position to avoid silent overwrite
+            if (positions_.contains(plan.ticker)) {
+                LOG_WARN("PaperExecutor: already have open position for {} — rejecting NEW entry", plan.ticker);
+                it = pending_entries_.erase(it);
+                continue;
+            }
+
             positions_[plan.ticker] = {adjusted, plan.size_coin, fill_price, now};
             it = pending_entries_.erase(it);
         } else {
@@ -304,26 +312,41 @@ void PaperExecutor::tick(const Ticker& ticker, std::chrono::system_clock::time_p
                     double slip = exit_price * (cfg_.slippage_bps / 10000.0);
                     exit_price += (pos.plan.side == Side::Buy) ? -slip : slip;
 
+                    // GAP-08: partial exit at TP1 (tp1_size_ratio < 1.0)
+                    const bool is_tp1_partial = (reason == "Take Profit") &&
+                                                pos.plan.tp1_size_ratio > 0.0 &&
+                                                pos.plan.tp1_size_ratio < 1.0;
+                    const double exit_size = is_tp1_partial
+                        ? pos.executed_size * pos.plan.tp1_size_ratio
+                        : pos.executed_size;
+
                     double pnl = (pos.plan.side == Side::Buy)
-                        ? (exit_price - pos.avg_price) * pos.executed_size
-                        : (pos.avg_price - exit_price) * pos.executed_size;
+                        ? (exit_price - pos.avg_price) * exit_size
+                        : (pos.avg_price - exit_price) * exit_size;
 
-                    LOG_INFO("PaperExecutor: FILLED Exit ({}) {} {} at {} | PnL: {:.4f}",
+                    LOG_INFO("PaperExecutor: FILLED Exit ({}) {} {} at {:.4f} | Size: {:.6f} | PnL: {:.4f}{}",
                              reason, pos.plan.side == Side::Buy ? "Sell" : "Buy",
-                             pos.plan.ticker, exit_price, pnl);
+                             pos.plan.ticker, exit_price, exit_size, pnl,
+                             is_tp1_partial ? " [partial TP1]" : "");
 
-                    {
-                        std::lock_guard lock(mutex_);
-                        ClosedTrade ct;
-                        ct.plan = pos.plan;
-                        ct.entry_price = pos.avg_price;
-                        ct.exit_price = exit_price;
-                        ct.size_filled = pos.executed_size;
-                        ct.pnl_usd = pnl;
-                        ct.reason = reason.c_str();
-                        closed_trades_.push_back(ct);
+                    // mutex_ already held — no inner lock needed
+                    ClosedTrade ct;
+                    ct.plan = pos.plan;
+                    ct.entry_price = pos.avg_price;
+                    ct.exit_price = exit_price;
+                    ct.size_filled = exit_size;
+                    ct.pnl_usd = pnl;
+                    ct.reason = reason.c_str();
+                    closed_trades_.push_back(ct);
+
+                    if (is_tp1_partial) {
+                        // Partial exit: reduce size, move stop to break-even, disable TP1
+                        pos.executed_size -= exit_size;
+                        pos.plan.stop_price = pos.avg_price;
+                        pos.plan.tp1_price = 0.0;
+                    } else {
+                        positions_.erase(pit);
                     }
-                    positions_.erase(pit);
                 }
             }
         }

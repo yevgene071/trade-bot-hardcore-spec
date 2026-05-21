@@ -8,18 +8,22 @@ namespace trade_bot {
 
 RiskManager::RiskManager(const TickerUniverse& universe,
                         const NewsCalendar& news,
-                        const Config& cfg)
+                        const Config& cfg,
+                        std::shared_ptr<IClock> clock)
     : universe_(universe)
     , news_(news)
-    , cfg_(cfg) {}
+    , cfg_(cfg)
+    , clock_(std::move(clock)) {}
 
 RiskManager::RiskManager(const TickerUniverse& universe,
-                        const NewsCalendar& news)
-    : RiskManager(universe, news, Config{}) {}
+                        const NewsCalendar& news,
+                        std::shared_ptr<IClock> clock)
+    : RiskManager(universe, news, Config{}, std::move(clock)) {}
 
 RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& state) {
     RiskDecision d;
-    auto now = std::chrono::system_clock::now();
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
 
     // ---- Input sanity (#125): reject malformed inputs explicitly so we
     //      never divide by zero further down. Each guard short-circuits
@@ -47,8 +51,6 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
-    std::lock_guard lock(mtx_);
-
     // R1. Kill-switch
     if (state.kill_switch_triggered) {
         d.reason = RejectReason::KillSwitchActive;
@@ -56,7 +58,9 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
-    // R2. Daily loss limit (starting_equity_usd guarded above)
+    // R2. Daily loss limit (starting_equity_usd guarded above).
+    // Per spec §8: daily P&L = realized_today + unrealized (mark-to-market).
+    // Unrealized is included so an open drawdown triggers the limit before close.
     double daily_pnl_pct =
         (state.realized_pnl_today_usd + state.unrealized_pnl_usd) /
         state.starting_equity_usd * 100.0;
@@ -92,8 +96,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     // R5. Universe — accept if ticker is in the active pool, boosted, or explicitly whitelisted.
     // Additionally check strategy-specific affinity (ARCHITECTURE.md § 2.11).
     {
-        const auto& active = universe_.active();
-        const bool in_pool = std::find(active.begin(), active.end(), plan.ticker) != active.end();
+        const bool in_pool = universe_.is_in_pool(plan.ticker);
         const bool boosted  = universe_.is_boosted(plan.ticker, now);
         const bool listed   = !cfg_.whitelist_tickers.empty() &&
             std::find(cfg_.whitelist_tickers.begin(), cfg_.whitelist_tickers.end(), plan.ticker)
@@ -114,7 +117,18 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     }
 
     // R6. Stop validation
+    if (plan.stop_price <= 0.0) {
+        d.reason = RejectReason::InvalidStopSide;
+        d.details = "Stop price must be positive";
+        return d;
+    }
     double stop_dist_bps = std::abs(plan.entry_price - plan.stop_price) / plan.entry_price * 10000.0;
+    if (stop_dist_bps <= 0.0) {
+        d.reason = RejectReason::StopTooTight;
+        d.details = "Stop distance is zero";
+        return d;
+    }
+
     bool stop_correct_side = (plan.side == Side::Buy && plan.stop_price < plan.entry_price) ||
                             (plan.side == Side::Sell && plan.stop_price > plan.entry_price);
     
@@ -181,15 +195,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         }
     }
 
-    // R8. Sizing — stop_dist_bps already passed > min_stop_bps above so
-    //      it's strictly positive; entry_price guarded at top.
-    if (stop_dist_bps <= 0.0) {
-        LOG_ERROR("RiskManager: stop_dist_bps={} non-positive after R6 — invariant broken",
-                  stop_dist_bps);
-        d.reason  = RejectReason::InternalError;
-        d.details = "stop distance is not positive";
-        return d;
-    }
+    // R8. Sizing — stop_dist_bps validated in R6 (B2-FIX), guaranteed > 0
     double risk_usd_target = state.equity_usd * cfg_.max_per_trade_risk_pct / 100.0;
     double size_coin = risk_usd_target / (plan.entry_price * stop_dist_bps / 10000.0);
 
@@ -235,14 +241,15 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         return d;
     }
 
+    // R10–R13 access shared mutable state; lock only here, not over R1–R9.
+    std::lock_guard lock(mtx_);
+
     // R10. Rate limit
+    while (trade_history_.size() > cfg_.max_trade_history) trade_history_.pop_front();
+    
     while (!trade_history_.empty() && (now - trade_history_.front()) > std::chrono::minutes(cfg_.trades_window_min)) {
         trade_history_.pop_front();
     }
-    // B7-FIX: Hard-cap deque size to prevent unbounded memory growth
-    // under extreme trading volumes.
-    constexpr size_t kMaxTradeHistory = 10000;
-    while (trade_history_.size() > kMaxTradeHistory) trade_history_.pop_front();
     if (trade_history_.size() >= static_cast<size_t>(cfg_.max_trades_per_window)) {
         d.reason = RejectReason::TradeRateLimitHit;
         d.details = "Trade rate limit hit";
@@ -250,11 +257,15 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     }
 
     // R11. Loss streak
-    if (last_loss_streak_ts_ != std::chrono::system_clock::time_point{} &&
-        (now - last_loss_streak_ts_) < std::chrono::minutes(cfg_.loss_streak_cooloff_min)) {
-        d.reason = RejectReason::LossStreakCircuitBreaker;
-        d.details = "Loss streak cooloff active";
-        return d;
+    if (last_loss_streak_ts_ != std::chrono::system_clock::time_point{}) {
+        if ((now - last_loss_streak_ts_) < std::chrono::minutes(cfg_.loss_streak_cooloff_min)) {
+            d.reason = RejectReason::LossStreakCircuitBreaker;
+            d.details = "Loss streak cooloff active";
+            return d;
+        }
+        // Cooloff expired: clear stale history so the very next loss doesn't re-arm immediately.
+        loss_history_.clear();
+        last_loss_streak_ts_ = {};
     }
 
     // R12. News blackout
@@ -266,10 +277,25 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     }
 
     // R12b. News calendar freshness check
-    auto mins_since = news_.minutes_since_latest_event(now);
-    if (mins_since && *mins_since > static_cast<int64_t>(cfg_.news_calendar_check_min)) {
-        LOG_WARN("RiskManager: news calendar stale — latest event is {} min old (limit {} min)",
-                 *mins_since, cfg_.news_calendar_check_min);
+    // B10-FIX: Check both past and future events to detect stale calendar
+    auto mins_since_latest = news_.minutes_since_latest_event(now);
+    auto mins_to_next = news_.minutes_to_next_news(now, "");  // global check
+    
+    bool is_stale = false;
+    const int64_t stale_threshold = static_cast<int64_t>(cfg_.news_calendar_check_min);
+    
+    // Calendar is stale if latest event is too old (> threshold hours in past)
+    if (mins_since_latest && *mins_since_latest > stale_threshold * 60) {
+        is_stale = true;
+    }
+    // OR if next event is too far (> threshold hours in future)
+    if (mins_to_next && *mins_to_next > stale_threshold * 60) {
+        is_stale = true;
+    }
+    
+    if (is_stale) {
+        LOG_WARN("RiskManager: news calendar stale (latest={} min ago, next={} min)",
+                 mins_since_latest.value_or(-1), mins_to_next.value_or(-1));
         if (cfg_.news_calendar_require_fresh) {
             d.reason = RejectReason::NewsBlackout;
             d.details = "News calendar is stale";
@@ -304,20 +330,34 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
         }
     }
 
+    // R15. Entry slippage check
+    if (state.mark_price > 0.0) {
+        double slippage_bps = std::abs(state.mark_price - plan.entry_price) / state.mark_price * 10000.0;
+        if (slippage_bps > cfg_.max_entry_slippage_bps) {
+            d.reason = RejectReason::EntrySlippageExceeded;
+            d.details = "Entry slippage too high: " + std::to_string(slippage_bps) + " bps";
+            return d;
+        }
+    }
+
     d.accepted = true;
-    trade_history_.push_back(std::chrono::system_clock::now());
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    trade_history_.push_back(clock_ ? clock_->now() : std::chrono::system_clock::now());
     return d;
 }
 
 void RiskManager::update_funding_time(const Ticker& ticker,
                                       std::chrono::system_clock::time_point ts) {
     std::lock_guard lock(mtx_);
-    // T1-BUGFIX: Save the PREVIOUS funding timestamp before overwriting (#204).
-    // When MetaScalp sends the new next_funding_time right after funding,
-    // the post-window would otherwise vanish immediately (within one tick).
+    // B3-FIX: Always save previous timestamp when updating, and handle first update
     auto it = funding_times_.find(ticker);
-    if (it != funding_times_.end() && it->second != ts) {
+    if (it != funding_times_.end()) {
         prev_funding_times_[ticker] = it->second;
+    } else {
+        auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
+        if (ts < now) {
+            prev_funding_times_[ticker] = ts;
+        }
     }
     funding_times_[ticker] = ts;
 }
@@ -325,16 +365,16 @@ void RiskManager::update_funding_time(const Ticker& ticker,
 void RiskManager::record_trade_end(bool is_loss,
                                    std::chrono::system_clock::time_point ts) {
     std::lock_guard lock(mtx_);
+    // P0-DETERMINISM: Use provided timestamp (from clock injection upstream)
     loss_history_.push_back({ts, is_loss});
 
+    while (loss_history_.size() > cfg_.max_loss_history) loss_history_.pop_front();
+    
     while (!loss_history_.empty() &&
            (ts - loss_history_.front().first) >
                std::chrono::minutes(cfg_.loss_streak_window_min)) {
         loss_history_.pop_front();
     }
-    // B7-FIX: Hard-cap deque size to prevent unbounded memory growth.
-    constexpr size_t kMaxLossHistory = 10000;
-    while (loss_history_.size() > kMaxLossHistory) loss_history_.pop_front();
 
     auto first_non_loss = std::find_if(loss_history_.rbegin(), loss_history_.rend(), [](const auto& p) {
         return !p.second;

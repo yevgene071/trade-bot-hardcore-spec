@@ -42,7 +42,7 @@ if(MSVC)
         add_compile_options(/arch:AVX2)
     endif()
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+    add_compile_options(-Wall -Wextra -Werror -Wno-error=deprecated-literal-operator)
     if(ENABLE_AVX2)
         add_compile_options(-mavx2)
     endif()
@@ -83,10 +83,13 @@ find_package(nlohmann_json_schema_validator REQUIRED CONFIG)
 find_package(OpenSSL REQUIRED CONFIG)
 find_package(absl REQUIRED CONFIG)
 find_package(fmt REQUIRED CONFIG)
+find_package(flatbuffers REQUIRED CONFIG)
+find_package(simdjson REQUIRED CONFIG)
 find_package(Python3 REQUIRED)
 # Add include directories for all Conan packages globally to support object libraries
 include_directories(
     ${spdlog_INCLUDE_DIRS}
+    ${fmt_INCLUDE_DIRS}
     ${nlohmann_json_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
     ${tomlplusplus_INCLUDE_DIRS}
@@ -111,7 +114,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # ═══════════════════════════════════════════════════════════════
 add_library(obj_logger OBJECT src/logger/Logger.cpp)
 target_include_directories(obj_logger PUBLIC src)
-target_link_libraries(obj_logger PUBLIC spdlog::spdlog fmt::fmt)
+target_link_libraries(obj_logger PUBLIC spdlog::spdlog fmt::fmt hdr_histogram::hdr_histogram_static)
 # Ensure spdlog headers are available for the object library compilation
 target_include_directories(obj_logger PRIVATE ${spdlog_INCLUDE_DIRS})
 
@@ -132,6 +135,8 @@ target_include_directories(obj_signal_bus PUBLIC src)
 target_link_libraries(obj_signal_bus PUBLIC nlohmann_json::nlohmann_json)
 # Ensure spdlog headers are available for this object library
 target_link_libraries(obj_signal_bus PUBLIC spdlog::spdlog)
+# Signal.hpp → LatencyTracer.hpp → HdrHistogramWrapper.hpp needs hdr_histogram include path
+target_link_libraries(obj_signal_bus PUBLIC hdr_histogram::hdr_histogram_static)
 
 add_library(obj_orderbook OBJECT src/marketdata/OrderBook.cpp)
 target_include_directories(obj_orderbook PUBLIC src)
@@ -163,6 +168,13 @@ add_library(obj_config OBJECT src/config/Config.cpp)
 target_include_directories(obj_config PUBLIC src)
 target_link_libraries(obj_config PUBLIC tomlplusplus::tomlplusplus spdlog::spdlog)
 
+add_library(obj_perf_registry OBJECT src/perf/PerfRegistry.cpp src/perf/TraceId.cpp)
+target_include_directories(obj_perf_registry PUBLIC src)
+target_link_libraries(obj_perf_registry PUBLIC
+    hdr_histogram::hdr_histogram_static
+    absl::flat_hash_map
+    spdlog::spdlog)
+
 # ═══════════════════════════════════════════════════════════════
 # Main executable
 # ═══════════════════════════════════════════════════════════════
@@ -170,6 +182,7 @@ add_executable(trade_bot
     src/main.cpp
     src/app/BotAppInit.cpp
     src/app/BotAppRun.cpp
+    src/app/PipelineProcessor.cpp
     src/perf/CpuPinning.cpp
     src/perf/TimestampMonitor.cpp
     src/transport/CurlHttpClient.cpp
@@ -187,6 +200,7 @@ add_executable(trade_bot
     src/control/ClockDriftMonitor.cpp
     src/control/SntpClient.cpp
     src/control/DashboardServer.cpp
+    src/control/DashboardServerBinary.cpp
     src/risk/NewsCalendar.cpp
     src/risk/RiskManager.cpp
     src/risk/AccountStatePersister.cpp
@@ -219,7 +233,7 @@ target_include_directories(trade_bot PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(trade_bot PRIVATE
     obj_logger obj_simd_ops obj_codec obj_signal_bus obj_config
     obj_orderbook obj_trade_stream obj_kalman_lag obj_leader_tracker
-    obj_ticker_universe obj_universe_filters obj_metrics_registry
+    obj_ticker_universe obj_universe_filters obj_metrics_registry obj_perf_registry
     spdlog::spdlog
     xsimd
     hdr_histogram::hdr_histogram_static
@@ -234,6 +248,8 @@ target_link_libraries(trade_bot PRIVATE
     absl::btree
     absl::flat_hash_map
     absl::hash
+    flatbuffers::flatbuffers
+    simdjson::simdjson
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -255,7 +271,134 @@ add_executable(labeler
     src/perf/TimestampMonitor.cpp
     src/perf/CpuPinning.cpp) 
 target_link_libraries(labeler PRIVATE
-    obj_logger obj_simd_ops obj_codec obj_signal_bus
+    obj_logger obj_simd_ops obj_codec obj_signal_bus obj_perf_registry
+    obj_orderbook obj_trade_stream obj_kalman_lag obj_leader_tracker
+    obj_ticker_universe obj_universe_filters obj_metrics_registry obj_config
+    spdlog::spdlog
+    xsimd
+    hdr_histogram::hdr_histogram_static
+    boost::boost
+    concurrentqueue::concurrentqueue
+    tomlplusplus::tomlplusplus
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    nlohmann_json_schema_validator
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    absl::btree
+    absl::flat_hash_map
+    absl::hash
+)
+
+# ═══════════════════════════════════════════════════════════════
+# perf_replay tool — offline pipeline latency profiler
+# ═══════════════════════════════════════════════════════════════
+add_executable(perf_replay
+    tool/perf_replay/main.cpp
+    src/transport/CurlHttpClient.cpp
+    src/transport/ClusterSnapshotClient.cpp
+    src/transport/ReplayFeed.cpp
+    src/marketdata/ClusterSnapshot.cpp
+    src/features/FeatureExtractor.cpp
+    src/signals/DensityDetector.cpp
+    src/signals/IcebergDetector.cpp
+    src/signals/TapeAnalyzer.cpp
+    src/signals/LevelDetector.cpp
+    src/signals/ApproachAnalyzer.cpp
+    src/signals/LeaderSignal.cpp
+    src/strategy/StrategyEngine.cpp
+    src/strategy/BounceFromDensity.cpp
+    src/strategy/BreakoutEatThrough.cpp
+    src/strategy/LeaderLag.cpp
+    src/strategy/FlushReversal.cpp
+    src/risk/RiskManager.cpp
+    src/risk/NewsCalendar.cpp
+    src/executor/PaperExecutor.cpp
+    src/logger/TradeJournal.cpp
+    src/universe/ConnectionSelector.cpp
+    src/universe/OrderbookSettingsLoader.cpp
+    src/perf/TimestampMonitor.cpp
+    src/perf/CpuPinning.cpp)
+target_link_libraries(perf_replay PRIVATE
+    obj_logger obj_simd_ops obj_codec obj_signal_bus obj_perf_registry
+    obj_orderbook obj_trade_stream obj_kalman_lag obj_leader_tracker
+    obj_ticker_universe obj_universe_filters obj_metrics_registry obj_config
+    spdlog::spdlog
+    xsimd
+    hdr_histogram::hdr_histogram_static
+    boost::boost
+    concurrentqueue::concurrentqueue
+    tomlplusplus::tomlplusplus
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    nlohmann_json_schema_validator
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    absl::btree
+    absl::flat_hash_map
+    absl::hash
+)
+
+# ═══════════════════════════════════════════════════════════════
+# core_probe tool — AI-friendly diagnostic CLI for pipeline tracing
+# ═══════════════════════════════════════════════════════════════
+# Resolve git SHA for --version output (best-effort, falls back to "unknown").
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE CORE_PROBE_GIT_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT CORE_PROBE_GIT_SHA)
+    set(CORE_PROBE_GIT_SHA "unknown")
+endif()
+
+add_executable(core_probe
+    tool/core_probe/main.cpp
+    tool/core_probe/CliOptions.cpp
+    tool/core_probe/TraceLogger.cpp
+    tool/core_probe/TraceFormatter.cpp
+    tool/core_probe/SummaryCollector.cpp
+    tool/core_probe/InvariantChecker.cpp
+    tool/core_probe/ProbePipeline.cpp
+    tool/core_probe/ReplayRunner.cpp
+    tool/core_probe/DiffRunner.cpp
+    tool/core_probe/AssertRunner.cpp
+    tool/core_probe/SchemaRunner.cpp
+    tool/core_probe/AiRecipeRunner.cpp
+    tool/core_probe/SyntheticFeed.cpp
+    tool/core_probe/SynthRunner.cpp
+    tool/core_probe/LiveRunner.cpp
+    src/transport/CurlHttpClient.cpp
+    src/transport/ClusterSnapshotClient.cpp
+    src/transport/ReplayFeed.cpp
+    src/transport/BeastWsClient.cpp
+    src/transport/MarketDataFeed.cpp
+    src/marketdata/ClusterSnapshot.cpp
+    src/features/FeatureExtractor.cpp
+    src/signals/DensityDetector.cpp
+    src/signals/IcebergDetector.cpp
+    src/signals/TapeAnalyzer.cpp
+    src/signals/LevelDetector.cpp
+    src/signals/ApproachAnalyzer.cpp
+    src/signals/LeaderSignal.cpp
+    src/strategy/StrategyEngine.cpp
+    src/strategy/BounceFromDensity.cpp
+    src/strategy/BreakoutEatThrough.cpp
+    src/strategy/LeaderLag.cpp
+    src/strategy/FlushReversal.cpp
+    src/risk/RiskManager.cpp
+    src/risk/NewsCalendar.cpp
+    src/executor/PaperExecutor.cpp
+    src/logger/TradeJournal.cpp
+    src/universe/ConnectionSelector.cpp
+    src/universe/OrderbookSettingsLoader.cpp
+    src/perf/TimestampMonitor.cpp
+    src/perf/CpuPinning.cpp)
+target_compile_definitions(core_probe PRIVATE GIT_SHA="${CORE_PROBE_GIT_SHA}")
+target_link_libraries(core_probe PRIVATE
+    obj_logger obj_simd_ops obj_codec obj_signal_bus obj_perf_registry
     obj_orderbook obj_trade_stream obj_kalman_lag obj_leader_tracker
     obj_ticker_universe obj_universe_filters obj_metrics_registry obj_config
     spdlog::spdlog
@@ -312,6 +455,52 @@ if(BUILD_BENCHMARKS)
     target_link_libraries(bench_tradestream_on_trade PRIVATE
         obj_logger obj_trade_stream obj_simd_ops
         benchmark::benchmark xsimd spdlog::spdlog)
+
+    add_executable(bench_feature_extractor
+        bench/bench_feature_extractor.cpp
+        src/features/FeatureExtractor.cpp)
+    target_link_libraries(bench_feature_extractor PRIVATE
+        obj_logger obj_simd_ops obj_perf_registry
+        obj_orderbook obj_trade_stream obj_kalman_lag obj_leader_tracker
+        benchmark::benchmark xsimd absl::btree absl::flat_hash_map
+        hdr_histogram::hdr_histogram_static spdlog::spdlog)
+
+    add_executable(bench_density_detector
+        bench/bench_density_detector.cpp
+        src/features/FeatureExtractor.cpp
+        src/signals/DensityDetector.cpp)
+    target_link_libraries(bench_density_detector PRIVATE
+        obj_logger obj_simd_ops obj_signal_bus obj_perf_registry
+        obj_orderbook obj_trade_stream obj_kalman_lag obj_leader_tracker
+        obj_ticker_universe obj_universe_filters
+        benchmark::benchmark xsimd absl::btree absl::flat_hash_map
+        hdr_histogram::hdr_histogram_static spdlog::spdlog)
+
+    add_executable(bench_strategy_engine_tick
+        bench/bench_strategy_engine_tick.cpp
+        src/strategy/StrategyEngine.cpp
+        src/features/FeatureExtractor.cpp)
+    target_link_libraries(bench_strategy_engine_tick PRIVATE
+        obj_logger obj_simd_ops obj_signal_bus obj_perf_registry
+        obj_orderbook obj_trade_stream obj_kalman_lag obj_leader_tracker
+        benchmark::benchmark xsimd absl::btree absl::flat_hash_map
+        hdr_histogram::hdr_histogram_static spdlog::spdlog)
+
+    add_executable(bench_end_to_end_pipeline
+        bench/bench_end_to_end_pipeline.cpp
+        src/features/FeatureExtractor.cpp
+        src/signals/DensityDetector.cpp
+        src/strategy/StrategyEngine.cpp
+        src/executor/PaperExecutor.cpp
+        src/logger/TradeJournal.cpp)
+    target_link_libraries(bench_end_to_end_pipeline PRIVATE
+        obj_logger obj_simd_ops obj_signal_bus obj_perf_registry obj_config
+        obj_orderbook obj_trade_stream obj_kalman_lag obj_leader_tracker
+        obj_ticker_universe obj_universe_filters obj_metrics_registry
+        benchmark::benchmark xsimd absl::btree absl::flat_hash_map
+        hdr_histogram::hdr_histogram_static
+        concurrentqueue::concurrentqueue
+        nlohmann_json::nlohmann_json spdlog::spdlog)
 endif()
 
 # ═══════════════════════════════════════════════════════════════

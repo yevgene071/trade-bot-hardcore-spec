@@ -11,17 +11,17 @@ public:
     void connect(const std::string& url) override { boost::ignore_unused(url); m_connected = true; if (m_on_connect) m_on_connect(); }
     void send(std::string_view message) override { m_sent_messages.push_back(std::string(message)); }
     void disconnect() override { m_connected = false; }
-    void set_on_message(std::function<void(const nlohmann::json&)> cb) override { m_on_message = cb; }
+    void set_on_message(std::function<void(const nlohmann::json&, uint64_t, TraceId)> cb) override { m_on_message = cb; }
     void set_on_close(std::function<void(int, const std::string&)> cb) override { boost::ignore_unused(cb); }
     void set_on_error(std::function<void(const std::string&)> cb) override { boost::ignore_unused(cb); }
     void set_on_connect(std::function<void()> cb) override { m_on_connect = cb; }
     bool is_connected() const override { return m_connected; }
 
-    void simulate_message(const nlohmann::json& j) { if (m_on_message) m_on_message(j); }
+    void simulate_message(const nlohmann::json& j) { if (m_on_message) m_on_message(j, 0, 0); }
 
     std::vector<std::string> m_sent_messages;
     bool m_connected = false;
-    std::function<void(const nlohmann::json&)> m_on_message;
+    std::function<void(const nlohmann::json&, uint64_t, TraceId)> m_on_message;
     std::function<void()> m_on_connect;
 };
 

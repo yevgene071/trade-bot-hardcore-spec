@@ -19,10 +19,16 @@
 #include "strategy/StrategyEngine.hpp"
 #include "transport/DumpRecorder.hpp"
 #include "universe/TickerUniverse.hpp"
+#include "transport/IClock.hpp"
+#include "transport/Clocks.hpp"
+#include "numeric/Kahan.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 
+#include "transport/IOrderGateway.hpp"
+
+#include <atomic>
 #include <chrono>
 #include <deque>
 #include <map>
@@ -60,6 +66,9 @@ public:
     void run();
 
 private:
+    void start_processor();
+
+private:
     // ── Bootstrap ─────────────────────────────────────────
     void init_config_and_logger_();
     void register_strategy_affinities_(std::shared_ptr<double> exchange_mult);
@@ -89,6 +98,7 @@ private:
                                   int connection_id,
                                   std::shared_ptr<OrderGateway> gateway);
     void setup_strategy_engine_callbacks_();
+    void dump_perf_report_();
     void setup_affinity_handler_(BounceFromDensity::Config     bounce_cfg,
                                   BreakoutEatThrough::Config   breakout_cfg,
                                   LeaderLag::Config             leaderlag_cfg,
@@ -103,6 +113,8 @@ private:
     // ── Tick / Runtime ────────────────────────────────────
     void schedule_tick();
     void tick();
+    void schedule_dashboard_tick();
+    void dashboard_tick();
     static std::string normalize_ticker_(const std::string& name);
     void update_account_from_exchange_();
     void check_daily_reset_();
@@ -114,16 +126,19 @@ private:
                                const std::vector<struct ActiveTrade>& active,
                                double upnl_sum,
                                const std::string& leader_ticker,
-                               const std::unordered_map<Ticker, double>& all_marks);
+                               const absl::btree_map<Ticker, double>& all_marks,
+                               bool is_full_update);
 
     // ── Shutdown ──────────────────────────────────────────
     void handle_kill_switch_();
 
     // ── Members ───────────────────────────────────────────
+    std::atomic<bool> shutdown_initiated_{false};
     boost::asio::io_context& ioc_;
     boost::asio::io_context dashboard_ioc_;
     std::thread dashboard_thread_;
     boost::asio::steady_timer timer_;
+    boost::asio::steady_timer dashboard_timer_;
     boost::asio::steady_timer pool_fallback_timer_;
 
     TickerUniverse universe_;
@@ -133,6 +148,8 @@ private:
     std::chrono::system_clock::time_point last_persist_;
     std::chrono::system_clock::time_point last_dash_update_;
     std::chrono::system_clock::time_point last_slow_dash_update_;
+    std::chrono::system_clock::time_point last_ob_sanity_check_{};
+    bool journal_dirty_{false};
 
     // Cached slow-changing dashboard data (rebuilt every 1s, not every 100ms)
     std::vector<TradeJournal::Entry> cached_journal_;
@@ -145,6 +162,7 @@ private:
 
     DumpRecorder dump_recorder_;
     KillSwitch* kill_switch_;
+    std::shared_ptr<IClock> system_clock_;  // P0 determinism: clock interface supporting replay injection
     std::unique_ptr<ClockDriftMonitor> clock_monitor_;
     std::unique_ptr<DashboardServer> dashboard_;
     std::unique_ptr<MetricsExporter> metrics_exporter_;
@@ -156,9 +174,11 @@ private:
     std::unique_ptr<ClusterSnapshotClient> cluster_client_;
     std::unique_ptr<ClusterSnapshotManager> cluster_mgr_;
     std::unique_ptr<class IExecutor> executor_;
+    std::shared_ptr<IOrderGateway> gateway_;
     std::unique_ptr<AccountStatePersister> persister_;
     std::unique_ptr<SignalLevelGateway> signal_level_gateway_;
     std::unique_ptr<SignalLevelBridge> signal_level_bridge_;
+    std::unique_ptr<class PipelineProcessor> processor_;
     std::shared_ptr<CurlHttpClient> http_client_;
     std::unique_ptr<FinresHandler> finres_handler_;
     std::unique_ptr<OrderbookSettingsLoader> ob_settings_loader_;
@@ -174,9 +194,26 @@ private:
     TradeJournal journal_{"journal"};
     int cached_consecutive_losses_{0};
 
+    // P0 DETERMINISM: Kahan accumulators for numerically stable PnL tracking
+    KahanAccumulator<double> realized_pnl_accumulator_;
+    KahanAccumulator<double> equity_accumulator_;
+    KahanAccumulator<double> free_balance_accumulator_;
+
+    // WS-02: slow-tick cached fields (rebuilt every 1s, not every 100ms)
+    // strategy_states, chart_history, OB snapshot are expensive to build;
+    // they change slowly so we cache them and only update on slow ticks.
+    std::vector<StrategyState> cached_strategy_states_;
+    std::vector<ChartPoint> cached_chart_history_;
+    std::vector<DensityColumn> cached_density_history_;
+    std::vector<ObLevel> cached_bids_top20_;
+    std::vector<ObLevel> cached_asks_top20_;
+    double cached_ob_mid_{0.0};
+    double cached_ob_spread_bps_{0.0};
+    double cached_ob_imbalance_{0.0};
+
     // Per-ticker stats cache updated every tick from live data (books + funding).
     // Wired into universe_.set_stats_lookup() so affinity lambdas see live values.
-    std::unordered_map<Ticker, TickerStats> ticker_stats_cache_;
+    absl::btree_map<Ticker, TickerStats> ticker_stats_cache_;
     std::chrono::system_clock::time_point last_affinity_refresh_{};
 };
 

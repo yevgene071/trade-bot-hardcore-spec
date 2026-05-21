@@ -85,6 +85,10 @@ struct OrderUpdate {
     std::string fee_currency;
     OrderStatus status;
     std::chrono::system_clock::time_point time;
+    // Echo of the client_order_id sent in PlaceOrderRequest. Populated when
+    // the exchange includes it in the WS stream; empty string otherwise.
+    // Used for deterministic first-sight matching in on_order_update.
+    std::string client_order_id;
 
     bool operator==(const OrderUpdate&) const = default;
 };
@@ -207,6 +211,7 @@ struct Notification {
     Ticker ticker;
     double price;
     double size;
+    int64_t level_id = 0;
     std::chrono::system_clock::time_point timestamp;
     
     bool operator==(const Notification&) const = default;
@@ -221,7 +226,7 @@ struct OrderbookSettings {
 };
 
 struct SignalLevel {
-    int id;
+    int64_t id;
     Ticker ticker;
     double price;
     bool triggered;
@@ -257,7 +262,12 @@ struct PlaceOrderRequest {
     double size;
     OrderType type;
     bool reduce_only = false;
-    
+    // Idempotency key sent to the exchange. On network timeout the bot can
+    // determine whether the order was accepted by querying open orders and
+    // matching on this key. Also used in on_order_update for deterministic
+    // first-sight matching instead of heuristic side+type+size.
+    std::string client_order_id;
+
     bool operator==(const PlaceOrderRequest&) const = default;
 };
 

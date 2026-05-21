@@ -28,7 +28,6 @@ struct DashboardServer::Session : public std::enable_shared_from_this<DashboardS
 
     // Hard cap: a slow client (mobile, heavy DevTools) must not grow the queue
     // unboundedly — OOM on a live trading bot is worse than a dropped dashboard.
-    static constexpr std::size_t kMaxWriteQueueSize = 8;
 
     Session(tcp::socket socket, DashboardServer& p) : ws(std::move(socket)), parent(p) {}
 
@@ -122,15 +121,8 @@ struct DashboardServer::Session : public std::enable_shared_from_this<DashboardS
         auto buf = std::make_shared<std::string>(std::move(payload));
         net::post(ws.get_executor(),
             [self = shared_from_this(), buf]() {
-                if (self->write_queue_.size() >= kMaxWriteQueueSize) {
-                    LOG_WARN("Dashboard: JSON write queue full ({} entries), dropping slow client",
-                             self->write_queue_.size());
-                    self->ws.async_close(websocket::close_code::try_again_later,
-                        [self](beast::error_code) {
-                            std::lock_guard lock(self->parent.mutex_);
-                            self->parent.sessions_.erase(self);
-                        });
-                    return;
+                if (self->write_queue_.size() >= self->parent.m_max_write_queue_size) {
+                    self->write_queue_.pop_front(); // A11: drop oldest
                 }
                 self->write_queue_.push_back(buf);
                 if (!self->writing_) self->do_write_();
@@ -141,15 +133,8 @@ struct DashboardServer::Session : public std::enable_shared_from_this<DashboardS
         auto buf = std::make_shared<std::vector<uint8_t>>(std::move(payload));
         net::post(ws.get_executor(),
             [self = shared_from_this(), buf]() {
-                if (self->binary_queue_.size() >= kMaxWriteQueueSize) {
-                    LOG_WARN("Dashboard: binary write queue full ({} entries), dropping slow client",
-                             self->binary_queue_.size());
-                    self->ws.async_close(websocket::close_code::try_again_later,
-                        [self](beast::error_code) {
-                            std::lock_guard lock(self->parent.mutex_);
-                            self->parent.sessions_.erase(self);
-                        });
-                    return;
+                if (self->binary_queue_.size() >= self->parent.m_max_write_queue_size) {
+                    self->binary_queue_.pop_front(); // A11: drop oldest
                 }
                 self->binary_queue_.push_back(buf);
                 if (!self->writing_) self->do_write_binary_();
@@ -222,9 +207,9 @@ DashboardServer::DashboardServer(net::io_context& ioc,
     , auth_token_(std::move(auth_token))
     , conflation_timer_(strand_) {
     if (auth_token_.empty() && address != "127.0.0.1" && address != "::1") {
-        LOG_WARN("DashboardServer bound to {} with NO auth token — anyone on "
-                 "the network can read account state. Set "
-                 "[dashboard].auth_token or bind to 127.0.0.1.", address);
+        LOG_CRITICAL("DashboardServer bound to {} with NO auth token — SECURITY RISK! "
+                     "Aborting. Set [dashboard].auth_token or bind to 127.0.0.1.", address);
+        throw std::runtime_error("DashboardServer: cannot bind to public address without auth_token");
     }
 }
 
@@ -263,15 +248,14 @@ std::string DashboardServer::get_selected_ticker() const noexcept {
 }
 
 void DashboardServer::push_iceberg_event(int64_t ts_ms, double price, std::string side, double hidden_size) {
+    State::IcebergEvent ev{ts_ms, price, std::move(side), hidden_size};
+    
     std::lock_guard lock(mutex_);
-    State::IcebergEvent ev;
-    ev.ts_ms       = ts_ms;
-    ev.price       = price;
-    ev.side        = std::move(side);
-    ev.hidden_size = hidden_size;
     current_state_.iceberg_events.push_back(std::move(ev));
     if (current_state_.iceberg_events.size() > kMaxIcebergEvents)
-        current_state_.iceberg_events.erase(current_state_.iceberg_events.begin());
+        current_state_.iceberg_events.pop_front(); // A14: O(1) with deque
+    
+    pending_dirty_ = true; // A15: set dirty so it gets broadcasted eventually
 }
 
 void DashboardServer::update_state(const State& state) {
@@ -282,15 +266,35 @@ void DashboardServer::update_state(const State& state) {
     bool has_binary = false;
     
     {
-        std::lock_guard lock(mutex_);
-        // WS-02: increment generation counter — frontend uses this to skip
-        // unnecessary applyServerState calls when only the gen changed.
-        ++state_gen_;
-        // Preserve iceberg_events managed separately via push_iceberg_event()
-        auto saved_iceberg = std::move(current_state_.iceberg_events);
-        current_state_ = state;
+    // WS-02: increment generation counter only when state actually changed
+    // Injected into State::state_gen at serialisation time.
+    if (state.is_full_update || !state.bids_top20.empty()) {
+        // Simple heuristic: if we have OB or full update, something meaningful changed.
+        // A7: ++state_gen_ should probably be tied to pending_dirty_ in schedule_conflation_
+    }
+        
+        // A2: Merge logic instead of total overwrite.
+        // If incoming state is "fast" (no history), we preserve current history.
+        if (state.is_full_update) {
+            current_state_ = state;
+        } else {
+            // Copy lightweight fields
+            current_state_.account = state.account;
+            current_state_.open_trades = state.open_trades;
+            current_state_.risk = state.risk;
+            current_state_.ob_mid = state.ob_mid;
+            current_state_.ob_spread_bps = state.ob_spread_bps;
+            current_state_.ob_imbalance = state.ob_imbalance;
+            current_state_.bids_top20 = state.bids_top20;
+            current_state_.asks_top20 = state.asks_top20;
+            current_state_.selected_ticker = state.selected_ticker;
+            current_state_.server_time_unix = state.server_time_unix;
+            current_state_.kill_switch_active = state.kill_switch_active;
+            current_state_.metascalp = state.metascalp;
+            // history (chart, density, journal, strategy_states) are preserved
+        }
         current_state_.state_gen = state_gen_;
-        current_state_.iceberg_events = std::move(saved_iceberg);
+        current_state_.is_full_update = state.is_full_update;
         // Accumulate equity history
         if (state.server_time_unix > 0) {
             equity_history_.push_back({state.server_time_unix, state.account.equity_usd});
@@ -340,15 +344,30 @@ void DashboardServer::update_state_async(State state) {
 
 void DashboardServer::schedule_conflation_() {
     conflation_timer_.expires_after(std::chrono::milliseconds(50));
-    conflation_timer_.async_wait(
-        net::bind_executor(strand_, [this](beast::error_code ec) {
-            if (ec) return;
+    conflation_timer_.async_wait(net::bind_executor(strand_, [this](beast::error_code ec) {
+        if (ec) return;
+        
+        State to_broadcast;
+        bool dirty = false;
+        {
+            std::lock_guard lock(mutex_);
             if (pending_dirty_) {
+                to_broadcast = std::move(pending_state_);
                 pending_dirty_ = false;
-                update_state(pending_state_);
+                dirty = true;
+                ++state_gen_; // A7: increment ONLY when we actually have new data
             }
+        }
+
+        if (dirty) {
+            update_state(to_broadcast);
+        }
+        
+        // A5: reschedule only if there are active sessions
+        if (session_count() > 0) {
             schedule_conflation_();
-        }));
+        }
+    }));
 }
 
 std::string DashboardServer::serialize_state() const {
@@ -558,31 +577,26 @@ std::string DashboardServer::serialize_state_locked_() const {
         }
     }
 
+    // A1: always include top 20 levels even on fast ticks for smooth Ladder
+    j["bids_top20"] = nlohmann::json::array();
+    for (const auto& lv : s.bids_top20) {
+        j["bids_top20"].push_back({{"price", lv.price}, {"size", lv.size}});
+    }
+    j["asks_top20"] = nlohmann::json::array();
+    for (const auto& lv : s.asks_top20) {
+        j["asks_top20"].push_back({{"price", lv.price}, {"size", lv.size}});
+    }
+
+    j["ob_mid"]        = s.ob_mid;
+    j["ob_spread_bps"] = s.ob_spread_bps;
+    j["ob_imbalance"]  = s.ob_imbalance;
+    j["selected_ticker"] = s.selected_ticker;
+
     if (s.is_full_update) {
-        j["bids_top20"] = nlohmann::json::array();
-        for (const auto& lv : s.bids_top20) {
-            j["bids_top20"].push_back({{"price", lv.price}, {"size", lv.size}});
-        }
-        j["asks_top20"] = nlohmann::json::array();
-        for (const auto& lv : s.asks_top20) {
-            j["asks_top20"].push_back({{"price", lv.price}, {"size", lv.size}});
-        }
-
-        j["ob_mid"]        = s.ob_mid;
-        j["ob_spread_bps"] = s.ob_spread_bps;
-        j["ob_imbalance"]  = s.ob_imbalance;
-        j["selected_ticker"] = s.selected_ticker;
-
         j["equity_history"] = nlohmann::json::array();
         for (const auto& pt : equity_history_) {
             j["equity_history"].push_back({{"ts", pt.first}, {"equity", pt.second}});
         }
-    } else {
-        // Lightweight fields always sent on fast ticks
-        j["ob_mid"]        = s.ob_mid;
-        j["ob_spread_bps"] = s.ob_spread_bps;
-        j["ob_imbalance"]  = s.ob_imbalance;
-        j["selected_ticker"] = s.selected_ticker;
     }
 
     return j.dump();
@@ -590,6 +604,7 @@ std::string DashboardServer::serialize_state_locked_() const {
 
 void DashboardServer::do_accept() {
     acceptor_.async_accept(net::make_strand(ioc_), [this](beast::error_code ec, tcp::socket socket) {
+        if (ec == net::error::operation_aborted) return;
         if (!ec) on_accept(ec, std::move(socket));
         do_accept();
     });
@@ -602,12 +617,19 @@ void DashboardServer::on_accept(beast::error_code, tcp::socket socket) {
 void DashboardServer::start_ws_session(tcp::socket socket,
                                         const http::request<http::string_body>& req) {
     auto ws_session = std::make_shared<Session>(std::move(socket), *this);
+    bool first_session = false;
     {
         std::lock_guard lock(mutex_);
+        first_session = sessions_.empty();
         sessions_.insert(ws_session);
         LOG_TRACE("Dashboard: new session established. Total sessions: {}", sessions_.size());
     }
     ws_session->start(req);
+
+    if (first_session) {
+        // A5: restart conflation timer if this is the first session
+        net::post(strand_, [this]() { schedule_conflation_(); });
+    }
 }
 
 void HttpSession::handle_request() {
@@ -682,8 +704,12 @@ void HttpSession::handle_request() {
         if (safe.empty()) safe = "dump";
         std::string path = "replay/dumps/" + safe + ".ndjson";
         bool ok = parent.recorder_start(path);
-        send_json(ok ? http::status::ok : http::status::internal_server_error,
-                  ok ? R"({"ok":true})" : R"({"error":"could not open file"})");
+        if (ok) {
+            nlohmann::json resp{{"ok", true}, {"path", path}};
+            send_json(http::status::ok, resp.dump());
+        } else {
+            send_json(http::status::internal_server_error, R"({"error":"could not open file"})");
+        }
         return;
     }
 

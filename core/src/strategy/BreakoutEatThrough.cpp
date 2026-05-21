@@ -1,45 +1,52 @@
 #include "BreakoutEatThrough.hpp"
+#include "universe/TickerUniverse.hpp"
 #include "logger/Logger.hpp"
 #include "numeric/PriceUtils.hpp"
 #include <algorithm>
 
 namespace trade_bot {
 
-BreakoutEatThrough::BreakoutEatThrough(Ticker ticker, TickerInfo info, const Config& cfg)
+BreakoutEatThrough::BreakoutEatThrough(Ticker ticker, TickerInfo info, const Config& cfg, std::shared_ptr<IClock> clock)
     : ticker_(std::move(ticker))
     , info_(std::move(info))
     , name_("BreakoutEatThrough")
-    , cfg_(cfg) {}
+    , cfg_(cfg)
+    , clock_(std::move(clock)) {}
 
-BreakoutEatThrough::BreakoutEatThrough(Ticker ticker, TickerInfo info)
-    : BreakoutEatThrough(std::move(ticker), std::move(info), Config{}) {}
+BreakoutEatThrough::BreakoutEatThrough(Ticker ticker, TickerInfo info, std::shared_ptr<IClock> clock)
+    : BreakoutEatThrough(std::move(ticker), std::move(info), Config{}, std::move(clock)) {}
 
-void BreakoutEatThrough::on_signal(const Signal& signal) {
-    if (signal.ticker == ticker_) {
+std::optional<TradePlan> BreakoutEatThrough::on_signal(const Signal& signal, std::chrono::system_clock::time_point now) {
+    if (signal.ticker != ticker_) return std::nullopt;
+    
+    // Update context with new signal
+    {
+        std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
         ctx_.update(signal);
     }
-}
-
-void BreakoutEatThrough::on_frame(const FeatureFrame& frame) {
-    if (frame.ticker == ticker_) {
-        ctx_.update(frame);
-    }
-}
-
-std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::time_point now) {
-    std::lock_guard<std::mutex> lock(ctx_.mtx_);
-    if (active_plan_) {
-        if (now > active_plan_->valid_until) active_plan_ = std::nullopt;
-        else return std::nullopt; // Already have a plan pending or active
-    }
+    
+    // Event-driven: react immediately to DensityEating signals
+    if (signal.kind != SignalKind::DensityEating) return std::nullopt;
+    
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
+    
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    if (clock_) now = clock_->now();
+    
+    if (active_plan_) return std::nullopt; // Already have a plan pending or active
 
     const auto& frame = ctx_.last_frame;
     if (frame.ticker.empty()) return std::nullopt;
 
-    // C1: Eating & Progress
+    if (frame.spread_bps > cfg_.max_avg_spread_bps) {
+        LOG_TRACE("[Breakout] {} spread too wide: {:.2f} bps (max {:.2f})", ticker_, frame.spread_bps, cfg_.max_avg_spread_bps);
+        return std::nullopt;
+    }
+
+    // C1: Eating & Progress (signal just arrived, so it's fresh)
     auto it_eating = ctx_.recent_signals.find(SignalKind::DensityEating);
-    if (it_eating == ctx_.recent_signals.end() || 
-        (now - it_eating->second.timestamp) > std::chrono::seconds(2)) return std::nullopt;
+    if (it_eating == ctx_.recent_signals.end()) return std::nullopt;
 
     const double density_original_size = it_eating->second.payload.original_size;
     const double density_remaining_size = it_eating->second.payload.size;
@@ -72,10 +79,14 @@ std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::tim
         return std::nullopt;
     }
 
-    // Tape Aggression check
+    // Tape Aggression check (tier-based)
+    const double min_aggression = universe_
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_min_tape_aggression)
+        : cfg_.min_tape_aggression;
+    
     double aggression = (breakout_side == Side::Buy) ? frame.tape_aggression : -frame.tape_aggression;
-    if (aggression < cfg_.min_tape_aggression) {
-        LOG_TRACE("[Breakout] {} low aggression: {}", ticker_, aggression);
+    if (aggression < min_aggression) {
+        LOG_TRACE("[Breakout] {} aggression {:.3f} < {:.3f} (tiered)", ticker_, aggression, min_aggression);
         return std::nullopt;
     }
 
@@ -153,7 +164,11 @@ std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::tim
         }
     }
 
-    // C6: Support behind
+    // C6: Support behind (tier-based range)
+    const double support_range = universe_
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_support_search_range_bps)
+        : cfg_.support_search_range_bps;
+    
     auto it_support = std::find_if(ctx_.signal_history.rbegin(), ctx_.signal_history.rend(), [&](const auto& sig) {
         if ((now - sig.timestamp) > std::chrono::seconds(30)) return false;
         
@@ -170,7 +185,7 @@ std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::tim
         
         if (is_support) {
             double dist_bps = std::abs(sig.price - density_price) / density_price * kBpsBase;
-            return dist_bps <= cfg_.support_search_range_bps;
+            return dist_bps <= support_range;
         }
         return false;
     });
@@ -182,16 +197,20 @@ std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::tim
 
     double support_price = it_support->price;
 
-    // C5-distance (STRATEGIES § 2.4): density must not already be at the best
+    // C5-distance (STRATEGIES § 2.4): density must not already be at the best (tier-based)
     // — if the move started without us, we are too late. Reject when the
     // distance from current best price to density is below min_distance_from_best_bps.
+    const double min_dist_from_best = universe_
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_min_distance_from_best_bps)
+        : cfg_.min_distance_from_best_bps;
+    
     {
         const double ref_best = (breakout_side == Side::Buy) ? frame.best_ask : frame.best_bid;
         if (ref_best > 0.0) {
             const double dist_bps = std::abs(density_price - ref_best) / ref_best * kBpsBase;
-            if (dist_bps < cfg_.min_distance_from_best_bps) {
-                LOG_TRACE("[Breakout] {} rejected: density too close to best ({:.2f} bps)",
-                          ticker_, dist_bps);
+            if (dist_bps < min_dist_from_best) {
+                LOG_TRACE("[Breakout] {} rejected: density {:.2f} bps from best < {:.2f} (tiered)",
+                          ticker_, dist_bps, min_dist_from_best);
                 return std::nullopt;
             }
         }
@@ -209,8 +228,12 @@ std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::tim
     stop_price = round_to_tick(stop_price, info_.price_increment);
 
     double risk_per_coin = std::abs(entry_price - stop_price);
-    double tp1_price = (breakout_side == Side::Buy) ? entry_price + cfg_.tp1_r * risk_per_coin 
-                                                   : entry_price - cfg_.tp1_r * risk_per_coin;
+    if (risk_per_coin <= 0.0) {
+        LOG_TRACE("[Breakout] {} zero risk (entry==stop after rounding), skip", ticker_);
+        return std::nullopt;
+    }
+    double tp1_price = (breakout_side == Side::Buy) ? entry_price + cfg_.tp1_r * risk_per_coin
+                                                    : entry_price - cfg_.tp1_r * risk_per_coin;
     tp1_price = round_to_tick(tp1_price, info_.price_increment);
 
     TradePlan plan {
@@ -230,15 +253,62 @@ std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::tim
         .valid_until = now + cfg_.entry_timeout,
         .no_progress_timeout_sec = cfg_.no_progress_timeout_sec,
         .post_entry_grace_sec = cfg_.post_entry_grace_sec,
-        .min_follow_through_bps = cfg_.min_follow_through_bps
+        .min_follow_through_bps = cfg_.min_follow_through_bps,
+        .frame_at_entry = {} // Will be set below
     };
+    plan.trace_id = plan.evidence.empty() ? 0 : plan.evidence.back().trigger_trace_id;
+    
+    // P0 DETERMINISM: Use frame snapshot from history matching the trigger trace_id
+    if (plan.trace_id != 0) {
+        auto historical_frame = ctx_.get_frame_by_trace_id(plan.trace_id);
+        if (historical_frame) {
+            plan.frame_at_entry = *historical_frame;
+            // Debug assertion: verify frame snapshot matches trigger
+            if (plan.frame_at_entry.derived_from != plan.trace_id) {
+                LOG_ERROR("[Breakout] {}: frame_at_entry.derived_from ({}) != plan.trace_id ({})",
+                          ticker_, plan.frame_at_entry.derived_from, plan.trace_id);
+            }
+        } else {
+            LOG_WARN("[Breakout] {}: No frame snapshot found for trace_id {}, using current frame",
+                     ticker_, plan.trace_id);
+            plan.frame_at_entry = frame;
+        }
+    } else {
+        plan.frame_at_entry = frame;
+    }
 
     active_plan_ = plan;
     return plan;
 }
 
+void BreakoutEatThrough::on_frame(const FeatureFrame& frame) {
+    if (frame.ticker == ticker_) {
+        std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
+        ctx_.update(frame);
+    }
+}
+
+std::optional<TradePlan> BreakoutEatThrough::tick(std::chrono::system_clock::time_point now) {
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    if (clock_) now = clock_->now();
+    
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
+    
+    // TTL check for pending plans
+    if (active_plan_ && now > active_plan_->valid_until) {
+        LOG_DEBUG("[Breakout] {} plan expired (TTL)", ticker_);
+        active_plan_ = std::nullopt;
+    }
+    
+    // All entry logic moved to on_signal() for event-driven processing.
+    // tick() only handles TTL cleanup.
+    return std::nullopt;
+}
+
 void BreakoutEatThrough::on_plan_accepted(const TradePlan& plan) {
     if (plan.strategy_name == name_) {
+        std::lock_guard<std::mutex> lock(plan_mtx_);
         active_trade_info_ = plan;
         LOG_INFO("[Breakout] {}: trade accepted, beginning post-entry monitoring (follow-through check)",
                  ticker_);
@@ -246,15 +316,18 @@ void BreakoutEatThrough::on_plan_accepted(const TradePlan& plan) {
 }
 
 void BreakoutEatThrough::reset_active_plan() {
+    std::lock_guard<std::mutex> lock(plan_mtx_);
     active_plan_ = std::nullopt;
     active_trade_info_ = std::nullopt;
     LOG_INFO("[Breakout] {}: plan rejected/reset, post-entry monitoring cleared", ticker_);
 }
 
 std::optional<FixedString<32>> BreakoutEatThrough::check_close_conditions(const FeatureFrame&) {
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> ctx_lock(ctx_.mtx_);
     if (!active_trade_info_) return std::nullopt;
     const auto& plan = *active_trade_info_;
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
 
     // STRATEGIES.md § 2.7: TapeFade on our breakout side — aggression dying out
     // If the side we bet on is fading, the breakout momentum is lost.
@@ -296,7 +369,8 @@ std::optional<FixedString<32>> BreakoutEatThrough::check_close_conditions(const 
 }
 
 StrategyState BreakoutEatThrough::get_state() const {
-    std::lock_guard<std::mutex> lock(ctx_.mtx_);
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
     StrategyState state;
     state.ticker        = ticker_;
     state.strategy_name = "BreakoutEatThrough";
@@ -308,7 +382,7 @@ StrategyState BreakoutEatThrough::get_state() const {
     }
 
     const auto& frame = ctx_.last_frame;
-    const auto now = std::chrono::system_clock::now();
+    const auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
 
     if (frame.ticker.empty()) {
         state.ready_state = StrategyReadyState::Cold;
@@ -323,6 +397,17 @@ StrategyState BreakoutEatThrough::get_state() const {
     state.signals_last_60s = sig_count;
 
     std::vector<StrategyCondition> conds;
+
+    // C0: Spread
+    {
+        StrategyCondition c;
+        c.name = "Spread";
+        c.unit = "bps";
+        c.current = frame.spread_bps;
+        c.target = cfg_.max_avg_spread_bps;
+        c.met = (frame.spread_bps <= cfg_.max_avg_spread_bps);
+        conds.push_back(c);
+    }
 
     // C1: DensityEating availability
     {

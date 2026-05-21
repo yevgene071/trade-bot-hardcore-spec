@@ -2,9 +2,10 @@
 #include "logger/Logger.hpp"
 
 #include <csignal>
-#include <fstream>
+#include <fcntl.h>
 #include <filesystem>
 #include <chrono>
+#include <unistd.h>
 
 namespace trade_bot {
 
@@ -77,11 +78,17 @@ void KillSwitch::trigger(KillReason reason) {
     if (triggered_.exchange(true)) return;
 
     LOG_CRITICAL("Kill-switch TRIGGERED! Reason: {}", to_string(reason));
-    
-    std::ofstream ofs(KILL_FILE);
-    if (ofs) {
-        ofs << "Reason: " << to_string(reason) << "\n";
-        ofs << "Timestamp: " << std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()) << "\n";
+
+    // Use POSIX I/O + fdatasync so the marker survives a power loss.
+    std::string content = "Reason: " + to_string(reason) + "\nTimestamp: "
+        + std::to_string(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()))
+        + "\n";
+    int fd = ::open(KILL_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) {
+        ssize_t written = ::write(fd, content.data(), content.size());
+        (void)written;
+        ::fdatasync(fd);
+        ::close(fd);
     }
 }
 

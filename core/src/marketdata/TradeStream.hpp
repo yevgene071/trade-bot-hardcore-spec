@@ -8,6 +8,7 @@
 #include <vector>
 #include <deque>
 #include <chrono>
+#include <mutex>
 
 namespace trade_bot {
 
@@ -45,8 +46,8 @@ public:
 
     private:
     // Cached T-Digest results for performance
-    double cached_q99_ = 0.0;
-    size_t last_merge_weight_ = 0;
+    mutable double cached_q99_ = 0.0;
+    mutable size_t last_merge_weight_ = 0;
 
     void evict_expired_trades_(std::chrono::system_clock::time_point now);
 
@@ -66,13 +67,14 @@ public:
     // Incremental stats
     WelfordAccumulator<double> size_stats_;
     mutable TDigest size_distribution_;
+    mutable std::mutex stats_mutex_;
 
     // Hawkes intensities
     double hawkes_alpha_;
     double hawkes_beta_;
     double hawkes_intensity_buy_ = 0.0;
     double hawkes_intensity_sell_ = 0.0;
-    std::chrono::system_clock::time_point last_hawkes_update_;
+    std::optional<std::chrono::system_clock::time_point> last_hawkes_update_;
 
     // Volume accumulators (maintained incrementally)
     KahanAccumulator<double> buy_vol_1s_;

@@ -35,7 +35,7 @@ std::vector<SignalLevel> SignalLevelGateway::get_all(const Ticker& ticker) {
     }
 }
 
-int SignalLevelGateway::create(const Ticker& ticker, double price) {
+int64_t SignalLevelGateway::create(const Ticker& ticker, double price) {
     std::stringstream ss;
     ss << base_url_ << "/api/connections/" << connection_id_ << "/signal-levels";
     nlohmann::json body = {{"Ticker", ticker}, {"Price", price}};
@@ -43,14 +43,14 @@ int SignalLevelGateway::create(const Ticker& ticker, double price) {
         auto resp = http_.post(ss.str(), body.dump());
         if (resp.status != 200) return -1;
         auto j = nlohmann::json::parse(resp.body);
-        return j.value("Id", -1);
+        return j.value("Id", -1LL);
     } catch (const std::exception& ex) {
         LOG_WARN("SignalLevelGateway::create({}, {}) failed: {}", ticker, price, ex.what());
         return -1;
     }
 }
 
-void SignalLevelGateway::remove(int id) {
+void SignalLevelGateway::remove(int64_t id) {
     std::stringstream ss;
     ss << base_url_ << "/api/connections/" << connection_id_ << "/signal-levels/" << id;
     http_.del(ss.str());

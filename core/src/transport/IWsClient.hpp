@@ -1,5 +1,6 @@
 #pragma once
 
+#include "perf/LatencyTracer.hpp"
 #include <string>
 #include <string_view>
 #include <functional>
@@ -15,7 +16,7 @@ public:
     virtual void send(std::string_view message) = 0;
     virtual void disconnect() = 0;
 
-    virtual void set_on_message(std::function<void(const nlohmann::json&)> callback) = 0;
+    virtual void set_on_message(std::function<void(const nlohmann::json&, uint64_t recv_ns, TraceId trace_id)> callback) = 0;
     virtual void set_on_close(std::function<void(int code, const std::string& reason)> callback) = 0;
     virtual void set_on_error(std::function<void(const std::string& msg)> callback) = 0;
     virtual void set_on_connect(std::function<void()> callback) = 0;

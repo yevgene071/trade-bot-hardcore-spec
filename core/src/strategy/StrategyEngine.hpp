@@ -2,11 +2,13 @@
 
 #include "IStrategy.hpp"
 #include "signals/SignalBus.hpp"
+#include "transport/IClock.hpp"
 
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <functional>
-#include <unordered_map>
+#include "absl/container/btree_map.h"
 
 namespace trade_bot {
 
@@ -28,7 +30,8 @@ class StrategyEngine {
 public:
     using PlanCallback = std::function<void(const TradePlan&)>;
 
-    explicit StrategyEngine(SignalBus& signal_bus);
+    explicit StrategyEngine(SignalBus& signal_bus,
+                            std::shared_ptr<IClock> clock = nullptr);
 
     void add_strategy(std::unique_ptr<IStrategy> strategy);
 
@@ -67,13 +70,23 @@ public:
 
 private:
     SignalBus& bus_;
-    std::unordered_map<Ticker, std::vector<std::unique_ptr<IStrategy>>> ticker_strategies_;
+    std::shared_ptr<IClock> clock_;
+    mutable std::mutex strategies_mtx_;  // guards ticker_strategies_ and global_strategies_
+    absl::btree_map<Ticker, std::vector<std::unique_ptr<IStrategy>>> ticker_strategies_;
     std::vector<std::unique_ptr<IStrategy>> global_strategies_;
     PlanCallback on_plan_;
     CloseCallback close_cb_;
 
     // Stored regime per ticker, updated on each tick() via on_frame().
-    std::unordered_map<Ticker, MarketRegime> regimes_;
+    absl::btree_map<Ticker, MarketRegime> regimes_;
+
+    // P0-DETERMINISM: Persistent scratch buffer for plan collection (avoids per-tick allocation)
+    struct PlanWithPriority {
+        int priority;
+        TradePlan plan;
+        IStrategy* strategy;
+    };
+    absl::btree_map<Ticker, std::vector<PlanWithPriority>> plans_scratch_;
 };
 
 } // namespace trade_bot

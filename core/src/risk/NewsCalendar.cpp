@@ -27,9 +27,26 @@ namespace {
 // async-signal-safe handler. The watcher thread polls it every 100 ms.
 volatile std::sig_atomic_t g_sighup_pending = 0;
 std::atomic<bool>          g_sighup_installed{false};
+struct sigaction            g_old_sighup_sa{};
 
-void sighup_handler(int /*sig*/) noexcept {
+void sighup_handler(int sig) noexcept {
     g_sighup_pending = 1;
+    // Chain to previously installed handler so other components (e.g. spdlog,
+    // user code) that installed their own SIGHUP handler before us still fire.
+    if (g_old_sighup_sa.sa_handler != SIG_DFL &&
+        g_old_sighup_sa.sa_handler != SIG_IGN &&
+        g_old_sighup_sa.sa_handler != nullptr) {
+        g_old_sighup_sa.sa_handler(sig);
+    }
+}
+
+// Portable UTC mktime: timegm on POSIX, _mkgmtime on Windows.
+static time_t utc_mktime(std::tm* tm) {
+#if defined(_WIN32)
+    return ::_mkgmtime(tm);
+#else
+    return ::timegm(tm);
+#endif
 }
 
 std::chrono::system_clock::time_point parse_iso8601(const std::string& s) {
@@ -39,11 +56,14 @@ std::chrono::system_clock::time_point parse_iso8601(const std::string& s) {
     if (ss.fail()) {
         throw std::runtime_error("NewsCalendar: bad ts_utc value: " + s);
     }
-#if defined(__linux__)
-    const auto secs = timegm(&tm);
-#else
-    const auto secs = ::mktime(&tm);
-#endif
+    // Consume optional trailing 'Z' (UTC designator) so that strings with and
+    // without it are treated identically.
+    char z = '\0';
+    ss >> z;
+    if (z != '\0' && z != 'Z') {
+        throw std::runtime_error("NewsCalendar: unexpected suffix in ts_utc: " + s);
+    }
+    const auto secs = utc_mktime(&tm);
     return std::chrono::system_clock::from_time_t(secs);
 }
 
@@ -84,7 +104,7 @@ void NewsCalendar::install_sighup_handler_() {
     sa.sa_handler = sighup_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
-    ::sigaction(SIGHUP, &sa, nullptr);
+    ::sigaction(SIGHUP, &sa, &g_old_sighup_sa);
 }
 
 NewsCalendar::NewsCalendar()
@@ -203,7 +223,7 @@ std::optional<int64_t> NewsCalendar::minutes_since_latest_event(
         [](const Event& a, const Event& b) { return a.ts_utc < b.ts_utc; });
     const auto delta = std::chrono::duration_cast<std::chrono::minutes>(
         now - latest_it->ts_utc);
-    return std::max<int64_t>(0, delta.count());
+    return delta.count();
 }
 
 size_t NewsCalendar::size() const {

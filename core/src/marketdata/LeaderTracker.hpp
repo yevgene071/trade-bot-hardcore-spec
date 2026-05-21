@@ -77,6 +77,10 @@ private:
     // CUSUM state (one-sided, alarms when correlation drops below baseline).
     double                          cusum_minus_{0.0};
     bool                            cusum_alarm_{false};
+
+    // T1: reuse scratch buffers across recompute_lag_observation_ calls
+    mutable std::vector<double>     scratch_dl_;
+    mutable std::vector<double>     scratch_df_;
 };
 
 }  // namespace trade_bot

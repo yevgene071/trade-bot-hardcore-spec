@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Types.hpp"
+#include "perf/LatencyTracer.hpp"
 
 #include <chrono>
 #include <optional>
@@ -17,6 +18,8 @@ namespace trade_bot {
  * OrderBook PriceTick); we materialise to double here to keep the frame
  * compact and ABI-stable.
  */
+inline constexpr double kCrossedBookSpreadBps = 999.0;
+
 struct FeatureFrame {
     std::chrono::system_clock::time_point timestamp{};
     Ticker                                ticker;
@@ -41,6 +44,7 @@ struct FeatureFrame {
 
     // Price dynamics
     double price_change_1s{};      // in %
+    double price_change_2s{};
     double price_change_5s{};
     double price_change_30s{};
     double volatility_1min{};      // stdev of 1-min log returns (dimensionless)
@@ -57,6 +61,16 @@ struct FeatureFrame {
     std::optional<double> nearest_resistance;
     double dist_to_support_bps{};
     double dist_to_resistance_bps{};
+
+    // Exchange data (injected by BotApp tick loop from MarketDataFeed cache)
+    double funding_rate{};   // 8h funding rate, raw decimal (e.g. 0.0001 = 1 bps); 0 if unknown
+    double mark_price{};     // exchange mark price; 0 if unavailable
+
+    // W3-FIX: validity flag — false until producer confirms mid > 0
+    bool valid{false};
+
+    // Performance tracing: trace ID of the event that triggered this frame extraction
+    TraceId derived_from{0};
 };
 
 }  // namespace trade_bot

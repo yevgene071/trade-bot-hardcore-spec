@@ -2,10 +2,26 @@
 
 #include "numeric/HdrHistogramWrapper.hpp"
 #include <chrono>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 namespace trade_bot {
+
+// Monotonic trace identifier for end-to-end latency tracking
+using TraceId = uint64_t;
+
+// Generate next trace ID (thread-safe, monotonic)
+TraceId next_trace_id() noexcept;
+
+// Helper: record delta from start_ns to now in microseconds
+inline void record_delta_us(HdrHistogram& hist, uint64_t start_ns) noexcept {
+    auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+    auto delta_us = (now_ns - start_ns) / 1000;
+    hist.record(delta_us);
+}
 
 /**
  * RAII tracer for measuring latency in microseconds.

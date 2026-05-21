@@ -60,7 +60,15 @@ public:
 
     /// Inject exchange mark prices so unrealized PnL uses the same price the
     /// dashboard displays (avoids mid vs mark discrepancy).
-    void set_mark_prices(const std::unordered_map<Ticker, double>& marks) override { mark_prices_ = marks; }
+    void set_mark_prices(const absl::btree_map<Ticker, double>& marks) override {
+        std::lock_guard lock(mutex_);
+        mark_prices_ = marks;
+    }
+
+    void set_mark_price(const Ticker& ticker, double price) override {
+        std::lock_guard lock(mutex_);
+        mark_prices_[ticker] = price;
+    }
 
     const std::map<Ticker, Position>& positions() const { return positions_; }
 
@@ -71,7 +79,7 @@ private:
     std::vector<TradePlan>  pending_entries_;
     std::map<Ticker, Position> positions_;
     std::vector<ClosedTrade>   closed_trades_;
-    std::unordered_map<Ticker, double> mark_prices_;
+    absl::btree_map<Ticker, double> mark_prices_;
 };
 
 } // namespace trade_bot

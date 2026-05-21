@@ -1,6 +1,8 @@
 #include "LeaderSignal.hpp"
+#include "perf/TraceContext.hpp"
 #include <cmath>
 #include <algorithm>
+#include <print>
 
 namespace trade_bot {
 
@@ -18,7 +20,13 @@ LeaderSignal::LeaderSignal(Ticker ticker,
     : LeaderSignal(std::move(ticker), std::move(leader_ticker), bus, tracker, Config{}) {}
 
 void LeaderSignal::on_frame(const FeatureFrame& frame) {
+    static int our_call_count = 0;
+    if (++our_call_count % 500 == 0) {
+        std::print(stderr, "[DEBUG on_frame] ticker_={} frame.ticker={} valid={} size_before={}\n",
+                   ticker_, frame.ticker, frame.valid, our_history_.size());
+    }
     if (frame.ticker != ticker_) return;
+    if (!frame.valid) return;
     
     our_history_.push_back({frame.timestamp, frame.mid});
     
@@ -26,12 +34,24 @@ void LeaderSignal::on_frame(const FeatureFrame& frame) {
 }
 
 void LeaderSignal::on_leader_frame(const FeatureFrame& frame) {
+    static int leader_call_count = 0;
+    if (++leader_call_count % 500 == 0) {
+        std::print(stderr, "[DEBUG on_leader_frame] leader_ticker_={} frame.ticker={} valid={} size_before={}\n",
+                   leader_ticker_, frame.ticker, frame.valid, leader_history_.size());
+    }
     if (frame.ticker != leader_ticker_) return;
+    if (!frame.valid) return;
     
     leader_history_.push_back({frame.timestamp, frame.mid});
 }
 
 void LeaderSignal::check_signal_(std::chrono::system_clock::time_point now) {
+    static int call_count = 0;
+    if (++call_count % 500 == 0) {
+        std::print(stderr, "[DEBUG LeaderSignal] ticker={} leader_ticker={} leader_hist={} our_hist={} corr={:.4f} min_corr={:.4f}\n",
+                   ticker_, leader_ticker_, leader_history_.size(), our_history_.size(), tracker_.correlation(), cfg_.min_correlation);
+    }
+
     if (leader_history_.size() < 50 || our_history_.size() < 50) return;
 
     double corr = tracker_.correlation();
@@ -44,12 +64,26 @@ void LeaderSignal::check_signal_(std::chrono::system_clock::time_point now) {
         if (cur == 0.0) return 0.0;
         double prev = 0.0;
         bool found = false;
-        for (int i = static_cast<int>(history.size()) - 1; i >= 0; --i) {
-            if ((now - history[i].first) >= std::chrono::seconds(5)) {
-                prev = history[i].second;
-                found = true;
-                break;
+        
+        // AC2-FIX: Binary search instead of O(N) linear scan
+        int low = 0;
+        int high = static_cast<int>(history.size()) - 1;
+        int best_idx = -1;
+        const auto target_time = now - std::chrono::seconds(5);
+        
+        while (low <= high) {
+            int mid = low + (high - low) / 2;
+            if (history[mid].first <= target_time) {
+                best_idx = mid;
+                low = mid + 1; // Try to find a later element still <= target_time
+            } else {
+                high = mid - 1;
             }
+        }
+        
+        if (best_idx != -1) {
+            prev = history[best_idx].second;
+            found = true;
         }
         if (!found) prev = history[0].second;
         if (prev == 0.0) return 0.0; // guard against division by zero
@@ -81,6 +115,7 @@ void LeaderSignal::check_signal_(std::chrono::system_clock::time_point now) {
                     .lag_ms = static_cast<double>(tracker_.lag_ms())
                 }
             };
+            s.trigger_trace_id = current_trace_context().trace_id;
             bus_.publish(s);
         }
     }

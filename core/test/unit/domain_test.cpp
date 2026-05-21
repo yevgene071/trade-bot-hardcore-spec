@@ -21,7 +21,7 @@ TEST(DomainTypesTest, EqualityOperators) {
 
 TEST(DomainTypesTest, OrderUpdateEquality) {
     auto now = std::chrono::system_clock::now();
-    OrderUpdate o1{123, "BTCUSDT", Side::Buy, OrderType::Limit, 60000.0, 0.0, 0.1, 0.0, 0.0, "USDT", OrderStatus::New, now};
+    OrderUpdate o1{123, "BTCUSDT", Side::Buy, OrderType::Limit, 60000.0, 0.0, 0.1, 0.0, 0.0, "USDT", OrderStatus::New, now, ""};
     OrderUpdate o2 = o1;
     EXPECT_EQ(o1, o2);
 

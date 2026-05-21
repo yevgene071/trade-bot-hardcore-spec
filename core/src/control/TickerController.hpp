@@ -1,5 +1,6 @@
 #pragma once
 
+#include "logger/Logger.hpp"
 #include "marketdata/OrderBook.hpp"
 #include "marketdata/TradeStream.hpp"
 #include "features/FeatureExtractor.hpp"
@@ -12,6 +13,8 @@
 #include "signals/LeaderSignal.hpp"
 #include "transport/MarketDataFeed.hpp"
 #include "config/Config.hpp"
+#include "perf/LatencyTracer.hpp"
+#include "perf/PerfRegistry.hpp"
 
 #include <memory>
 #include <mutex>
@@ -90,6 +93,16 @@ struct TickerController : public IMarketDataListener {
             leader_detector = ls.get();
             detectors.push_back(std::move(ls));
         }
+        
+        // Cache histogram pointers for each detector (stable for process lifetime)
+        det_hist_.reserve(detectors.size());
+        for (const auto& d : detectors) {
+            det_hist_.push_back(&PerfRegistry::instance().get_or_create(d->perf_stage_name()));
+        }
+        
+        // Cache hot-path histogram pointers
+        codec_to_book_hist_ = &PerfRegistry::instance().get_or_create(kStageCodecToBook);
+        book_to_feature_hist_ = &PerfRegistry::instance().get_or_create(kStageBookToFeature);
     }
 
     void on_leader_frame(const FeatureFrame& frame) {
@@ -106,14 +119,23 @@ struct TickerController : public IMarketDataListener {
     void on_trade(const Trade& t) {
         std::lock_guard lock(mtx_);
         stream->on_trade(t);
-        for (auto& d : detectors) d->on_trade(t);
+        for (size_t i = 0; i < detectors.size(); ++i) {
+            LatencyTracer trace(*det_hist_[i]);
+            detectors[i]->on_trade(t);
+        }
         dirty_flags_ |= DirtyTrades;
     }
 
     void on_book_update(const OrderBookUpdate& u) {
         std::lock_guard lock(mtx_);
-        book->apply_update(u);
-        for (auto& d : detectors) d->on_book_update(u);
+        {
+            LatencyTracer trace(*codec_to_book_hist_);
+            book->apply_update(u);
+        }
+        for (size_t i = 0; i < detectors.size(); ++i) {
+            LatencyTracer trace(*det_hist_[i]);
+            detectors[i]->on_book_update(u);
+        }
         dirty_flags_ |= DirtyBook;
     }
 
@@ -123,7 +145,10 @@ struct TickerController : public IMarketDataListener {
         std::lock_guard lock(mtx_);
         for (const auto& t : trades) {
             stream->on_trade(t);
-            for (auto& d : detectors) d->on_trade(t);
+            for (size_t i = 0; i < detectors.size(); ++i) {
+                LatencyTracer trace(*det_hist_[i]);
+                detectors[i]->on_trade(t);
+            }
         }
         dirty_flags_ |= DirtyTrades;
     }
@@ -162,14 +187,20 @@ struct TickerController : public IMarketDataListener {
             return last_frame_;
         }
 
-        last_frame_ = extractor->extract(now);
+        {
+            LatencyTracer trace(*book_to_feature_hist_);
+            last_frame_ = extractor->extract(now);
+        }
         
         if (last_leader_frame_.mid > 0) {
             last_frame_.leader_change_1s = last_leader_frame_.price_change_1s;
             last_frame_.leader_change_5s = last_leader_frame_.price_change_5s;
         }
 
-        for (auto& d : detectors) d->on_frame(last_frame_);
+        for (size_t i = 0; i < detectors.size(); ++i) {
+            LatencyTracer trace(*det_hist_[i]);
+            detectors[i]->on_frame(last_frame_);
+        }
         
         dirty_flags_ = 0;
         last_extract_ = now;
@@ -221,6 +252,9 @@ private:
     DensityHistory density_history_;
     std::vector<ObLevel> bid_buffer_;
     std::vector<ObLevel> ask_buffer_;
+    std::vector<HdrHistogram*> det_hist_; // Cached histogram pointers per detector
+    HdrHistogram* codec_to_book_hist_;    // Cached histogram pointer for codec→book stage
+    HdrHistogram* book_to_feature_hist_;  // Cached histogram pointer for book→feature stage
 };
 
 } // namespace trade_bot

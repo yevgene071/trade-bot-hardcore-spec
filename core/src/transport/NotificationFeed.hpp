@@ -10,6 +10,8 @@
 
 namespace trade_bot {
 
+class SignalLevelBridge; // Forward declaration
+
 /**
  * T1-NOTIF: Handles app-wide notification WS stream.
  */
@@ -23,7 +25,9 @@ public:
 
     NotificationFeed(std::shared_ptr<IWsClient> ws_client,
                      TickerUniverse& universe,
-                     Config cfg);
+                     Config cfg,
+                     std::function<void()> on_first_coin_callback = nullptr,
+                     SignalLevelBridge* signal_level_bridge = nullptr);
 
     void start();
     void stop();
@@ -39,8 +43,11 @@ private:
     std::shared_ptr<IWsClient> ws_client_;
     TickerUniverse&           universe_;
     Config                    cfg_;
+    std::function<void()>     on_first_coin_callback_;
+    SignalLevelBridge*        signal_level_bridge_{nullptr};
     
     std::atomic<bool>         active_{false};
+    std::atomic<bool>         first_coin_fired_{false};
     std::atomic<uint64_t>     dropped_wrong_connection_{0};
 };
 

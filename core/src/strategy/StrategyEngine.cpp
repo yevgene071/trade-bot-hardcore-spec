@@ -1,28 +1,49 @@
 #include "StrategyEngine.hpp"
 #include "logger/Logger.hpp"
+#include "perf/LatencyTracer.hpp"
+#include "perf/PerfRegistry.hpp"
 
 #include <algorithm>
 
 namespace trade_bot {
 
-StrategyEngine::StrategyEngine(SignalBus& signal_bus)
-    : bus_(signal_bus) {
-    
-    // T4-PERF: Route signals to interested strategies by ticker (#160)
+StrategyEngine::StrategyEngine(SignalBus& signal_bus, std::shared_ptr<IClock> clock)
+    : bus_(signal_bus)
+    , clock_(std::move(clock)) {
+
     bus_.subscribe([this](const Signal& s) {
-        if (!s.ticker.empty()) {
-            auto it = ticker_strategies_.find(s.ticker);
-            if (it != ticker_strategies_.end()) {
-                for (auto& strat : it->second) strat->on_signal(s);
+        // I1: use injected clock so replay/tests get deterministic time
+        const auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
+
+        // I2: snapshot under lock to guard concurrent add_strategy/remove_strategy
+        absl::btree_map<Ticker, std::vector<IStrategy*>> snap_ticker;
+        std::vector<IStrategy*> snap_global;
+        {
+            std::lock_guard<std::mutex> lk(strategies_mtx_);
+            if (!s.ticker.empty()) {
+                auto it = ticker_strategies_.find(s.ticker);
+                if (it != ticker_strategies_.end()) {
+                    for (auto& p : it->second) snap_ticker[s.ticker].push_back(p.get());
+                }
+            }
+            for (auto& p : global_strategies_) snap_global.push_back(p.get());
+        }
+
+        for (auto& [ticker, strats] : snap_ticker) {
+            for (auto* strat : strats) {
+                auto plan = strat->on_signal(s, now);
+                if (plan && on_plan_) on_plan_(*plan);
             }
         }
-        for (auto& strat : global_strategies_) {
-            strat->on_signal(s);
+        for (auto* strat : snap_global) {
+            auto plan = strat->on_signal(s, now);
+            if (plan && on_plan_) on_plan_(*plan);
         }
     });
 }
 
 void StrategyEngine::add_strategy(std::unique_ptr<IStrategy> strategy) {
+    std::lock_guard<std::mutex> lk(strategies_mtx_);
     if (strategy->ticker().empty()) {
         global_strategies_.push_back(std::move(strategy));
     } else {
@@ -31,6 +52,7 @@ void StrategyEngine::add_strategy(std::unique_ptr<IStrategy> strategy) {
 }
 
 void StrategyEngine::remove_strategy(const Ticker& ticker, const std::string& name) {
+    std::lock_guard<std::mutex> lk(strategies_mtx_);
     if (ticker.empty()) {
         global_strategies_.erase(
             std::remove_if(global_strategies_.begin(), global_strategies_.end(),
@@ -43,7 +65,12 @@ void StrategyEngine::remove_strategy(const Ticker& ticker, const std::string& na
                 std::remove_if(it->second.begin(), it->second.end(),
                                [&](const auto& s) { return s->name() == name; }),
                 it->second.end());
-            if (it->second.empty()) ticker_strategies_.erase(it);
+            if (it->second.empty()) {
+                ticker_strategies_.erase(it);
+                // AE2: Clean up regime entry when no more strategies exist for this ticker
+                regimes_.erase(ticker);
+                plans_scratch_.erase(ticker);
+            }
         }
     }
 }
@@ -79,21 +106,19 @@ void StrategyEngine::on_frame(const FeatureFrame& frame) {
 }
 
 void StrategyEngine::tick(std::chrono::system_clock::time_point now) {
-    // Collect plans grouped by ticker with their strategy priority and pointer.
-    // The strategy pointer is needed for fallback: after the on_plan_ callback,
-    // we check has_active_plan() to see if risk accepted the plan.
-    struct PlanWithPriority {
-        int priority;
-        TradePlan plan;
-        IStrategy* strategy;  // non-owning — pointer into ticker_strategies_ / global_strategies_
-    };
-    std::unordered_map<Ticker, std::vector<PlanWithPriority>> plans_by_ticker;
+    // I4: Clear inner vectors only (preserves capacity), not the outer map.
+    for (auto& [ticker, vec] : plans_scratch_) vec.clear();
 
     auto collect = [&](auto& list) {
+        static auto& signal_to_plan_hist = PerfRegistry::instance().get_or_create(kStageSignalToPlan);
         for (auto& strat : list) {
-            auto plan = strat->tick(now);
+            std::optional<TradePlan> plan;
+            {
+                LatencyTracer trace(signal_to_plan_hist);
+                plan = strat->tick(now);
+            }
             if (plan) {
-                plans_by_ticker[plan->ticker].push_back({strat->priority(), *plan, strat.get()});
+                plans_scratch_[plan->ticker].push_back({strat->priority(), *plan, strat.get()});
             }
         }
     };
@@ -106,7 +131,7 @@ void StrategyEngine::tick(std::chrono::system_clock::time_point now) {
     // For each ticker, sort plans by priority and emit the highest-priority one.
     // If the top-priority plan is rejected (strategy's active_plan_ gets cleared
     // synchronously in the on_plan_ callback), fall back to the next plan.
-    for (auto& [ticker, plans] : plans_by_ticker) {
+    for (auto& [ticker, plans] : plans_scratch_) {
         if (plans.empty()) continue;
 
         // GAP-1 FIX: Suppress plans based on current market regime.
@@ -117,20 +142,27 @@ void StrategyEngine::tick(std::chrono::system_clock::time_point now) {
             MarketRegime regime = current_regime(ticker);
             if (regime == MarketRegime::News) {
                 LOG_DEBUG("[StrategyEngine] {} regime=News — suppressing all plans", ticker);
+                for (auto& pw : plans) pw.strategy->reset_active_plan();
                 continue;
             }
+            // I3: keep predicate side-effect-free; reset strategies after erase
+            // by iterating the [new_end, end) tail before erasing it.
             if (regime == MarketRegime::Trend) {
-                plans.erase(std::remove_if(plans.begin(), plans.end(),
+                auto new_end = std::remove_if(plans.begin(), plans.end(),
                     [](const PlanWithPriority& pw) {
                         return pw.plan.strategy_name == "BounceFromDensity";
-                    }), plans.end());
+                    });
+                for (auto it = new_end; it != plans.end(); ++it) it->strategy->reset_active_plan();
+                plans.erase(new_end, plans.end());
                 if (plans.empty()) continue;
             }
             if (regime == MarketRegime::Range) {
-                plans.erase(std::remove_if(plans.begin(), plans.end(),
+                auto new_end = std::remove_if(plans.begin(), plans.end(),
                     [](const PlanWithPriority& pw) {
                         return pw.plan.strategy_name == "LeaderLag";
-                    }), plans.end());
+                    });
+                for (auto it = new_end; it != plans.end(); ++it) it->strategy->reset_active_plan();
+                plans.erase(new_end, plans.end());
                 if (plans.empty()) continue;
             }
         }
@@ -166,9 +198,12 @@ void StrategyEngine::tick(std::chrono::system_clock::time_point now) {
         }
 
         if (plans.size() > 1) {
-            LOG_TRACE("[StrategyEngine] {} plans for {} — selected priority {} {}others",
-                      plans.size(), ticker, plans.front().priority,
-                      accepted ? "accepted, dropped " + std::to_string(plans.size() - 1) : "all rejected");
+            if (accepted) {
+                LOG_TRACE("[StrategyEngine] {} plans for {} — priority {} accepted, dropped {}",
+                          plans.size(), ticker, plans.front().priority, plans.size() - 1);
+            } else {
+                LOG_TRACE("[StrategyEngine] {} plans for {} — all rejected", plans.size(), ticker);
+            }
         }
     }
 }
@@ -227,16 +262,29 @@ std::vector<StrategyState> StrategyEngine::get_all_states() const {
 MarketRegime StrategyEngine::classify_regime(const FeatureFrame& frame) const {
     // STRATEGIES.md § 6: 3-state regime classifier.
     // Full HMM implementation is Phase 5; this is a threshold-based fallback.
+
+    // S5-FIX: Increased News threshold from 50→80 bps to reduce false positives
+    // on volatile altcoins. Added hysteresis to prevent regime flapping.
+    // §7 strategies.common.max_vol_bps = 80: News regime at extreme volatility.
+    // RiskManager applies the same threshold globally; this early check avoids
+    // unnecessary risk evaluation. Both gates must stay in sync.
+    static constexpr double kNewsVolThresholdBps = 80.0;
+    static constexpr double kNewsVolHysteresisBps = 60.0;  // Exit News at 60 bps
     
-    // News regime: very high volatility
-    if (frame.volatility_1min_bps > 50.0) {
+    const auto current = current_regime(frame.ticker);
+    if (current == MarketRegime::News && frame.volatility_1min_bps > kNewsVolHysteresisBps) {
+        // Stay in News until vol drops below hysteresis threshold
+        return MarketRegime::News;
+    }
+    if (frame.volatility_1min_bps > kNewsVolThresholdBps) {
         return MarketRegime::News;
     }
 
-    // Trend regime: strong directional movement with high correlation
+    // Trend regime: strong directional movement.
+    // leader_correlation == 0.0 means no leader data (self-leader or unconfigured) — skip corr check.
     const double trend_slope = frame.price_change_30s;  // % over 30s
-    if (std::abs(trend_slope) > 0.3 &&                    // >0.3% directional move
-        frame.leader_correlation > 0.6) {                 // correlated with leader
+    const bool corr_ok = (frame.leader_correlation == 0.0) || (frame.leader_correlation > 0.6);
+    if (std::abs(trend_slope) > 0.3 && corr_ok) {
         return MarketRegime::Trend;
     }
 

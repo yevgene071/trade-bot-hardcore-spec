@@ -1,6 +1,8 @@
 #pragma once
 
 #include "domain/Types.hpp"
+#include "features/FeatureFrame.hpp"
+#include "perf/LatencyTracer.hpp"
 #include "signals/Signal.hpp"
 #include "utils/FixedString.hpp"
 
@@ -52,6 +54,15 @@ struct TradePlan {
     double leader_exit_reversal_bps{0.0};
     /// Price of the density used for stop calculation (BounceFromDensity).
     double density_price_for_stop{0.0};
+
+    /// Approach count (N-th test of this level) from LevelApproach payload.touches (FEAT-07).
+    int approach_count{0};
+
+    /// Snapshot of market state at the moment the plan was generated (GAP-06).
+    FeatureFrame frame_at_entry;
+
+    /// Trace ID for end-to-end latency tracking (from triggering event to order submit)
+    TraceId trace_id{0};
 
     bool operator==(const TradePlan&) const = default;
 };

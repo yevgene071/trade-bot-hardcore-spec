@@ -29,12 +29,15 @@ public:
         double cluster_tolerance_bps{10.0};
         size_t touches_min{2};
         std::chrono::seconds level_min_age{300};
-        
+
         double approach_trigger_bps{10.0};
-        
+
         // KDE
         double kde_smoothness{1.0};
         double cluster_min_volume_pct{0.05};
+
+        // AA4: half-window sizes for multi-scale extreme detection (~1s, ~5s, ~15s at 10Hz)
+        std::vector<size_t> extreme_half_windows{5, 25, 75};
     };
 
     struct Level {
@@ -62,8 +65,11 @@ public:
     void on_frame(const FeatureFrame& frame) override;
     void on_trade(const Trade& trade) override;
     void on_book_update(const OrderBookUpdate& update) override;
+    
+    const char* perf_stage_name() const noexcept override { return "level_eval_us"; }
 
     void rebuild();
+    void rebuild(std::chrono::system_clock::time_point now); // AA3: deterministic overload
 
     void set_approach_analyzer(const ApproachAnalyzer* analyzer) { analyzer_ = analyzer; }
 

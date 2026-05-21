@@ -29,7 +29,7 @@ OrderGateway::OrderGateway(std::shared_ptr<IHttpClient> http_client)
     : m_http_client(std::move(http_client)) {}
 
 std::vector<ConnectionInfo> OrderGateway::get_connections() {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections";
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections";
     auto response = m_http_client->get(url);
     if (response.status != 200) {
         throw CodecError("Failed to get connections: status " + std::to_string(response.status));
@@ -49,7 +49,7 @@ std::vector<ConnectionInfo> OrderGateway::get_connections() {
 }
 
 ConnectionInfo OrderGateway::get_connection(int id) {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + std::to_string(id);
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + std::to_string(id);
     auto response = m_http_client->get(url);
     if (response.status != 200) {
         throw CodecError("Failed to get connection " + std::to_string(id) + ": status " + std::to_string(response.status));
@@ -58,7 +58,7 @@ ConnectionInfo OrderGateway::get_connection(int id) {
 }
 
 std::vector<TickerInfo> OrderGateway::get_tickers(int connection_id, bool refresh) {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/tickers?Refresh=" + (refresh ? "true" : "false");
     auto response = m_http_client->get(url);
     if (response.status != 200) {
@@ -79,7 +79,7 @@ std::vector<TickerInfo> OrderGateway::get_tickers(int connection_id, bool refres
 }
 
 std::vector<RestOrder> OrderGateway::get_open_orders(int connection_id, const Ticker& ticker) {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/orders?Ticker=" + url_encode(ticker);
     auto response = m_http_client->get(url);
     if (response.status != 200) {
@@ -100,7 +100,7 @@ std::vector<RestOrder> OrderGateway::get_open_orders(int connection_id, const Ti
 }
 
 std::vector<PositionUpdate> OrderGateway::get_positions(int connection_id) {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/positions";
     auto response = m_http_client->get(url);
     if (response.status != 200) {
@@ -114,24 +114,28 @@ std::vector<PositionUpdate> OrderGateway::get_positions(int connection_id) {
     if (arr) {
         result.resize(arr->size());
         std::transform(arr->begin(), arr->end(), result.begin(), [](const auto& item) {
-            return MetaScalpCodec::parse_position_update(item);
+            auto pos = MetaScalpCodec::parse_position_update(item);
+            if (!pos) throw CodecError(pos.error());
+            return *pos;
         });
     }
     return result;
 }
 
 BalanceUpdate OrderGateway::get_balance(int connection_id) {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/balance";
     auto response = m_http_client->get(url);
     if (response.status != 200) {
         throw CodecError("Failed to get balance: status " + std::to_string(response.status));
     }
-    return MetaScalpCodec::parse_balance_update(nlohmann::json::parse(response.body));
+    auto bal = MetaScalpCodec::parse_balance_update(nlohmann::json::parse(response.body));
+    if (!bal) throw CodecError(bal.error());
+    return *bal;
 }
 
 PlaceOrderResult OrderGateway::place_order(int connection_id, const PlaceOrderRequest& request) {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/orders";
     
     nlohmann::json body;
@@ -141,6 +145,8 @@ PlaceOrderResult OrderGateway::place_order(int connection_id, const PlaceOrderRe
     body["Size"] = request.size;
     body["Type"] = static_cast<int>(request.type);
     body["ReduceOnly"] = request.reduce_only;
+    if (!request.client_order_id.empty())
+        body["ClientOrderId"] = request.client_order_id;
 
     auto response = m_http_client->post(url, body.dump());
     if (response.status != 200) {
@@ -150,7 +156,7 @@ PlaceOrderResult OrderGateway::place_order(int connection_id, const PlaceOrderRe
 }
 
 void OrderGateway::cancel_order(int connection_id, int64_t order_id, const Ticker& ticker) {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/orders/cancel";
     nlohmann::json body;
     body["Ticker"] = ticker;
@@ -164,7 +170,7 @@ void OrderGateway::cancel_order(int connection_id, int64_t order_id, const Ticke
 }
 
 void OrderGateway::cancel_all_orders(int connection_id, const Ticker& ticker) {
-    std::string url = get_base_url() + ":" + std::to_string(m_port) + "/api/connections/" + 
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/orders/cancel-all";
     nlohmann::json body;
     body["Ticker"] = ticker;

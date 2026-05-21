@@ -2,6 +2,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 
 namespace trade_bot {
 
@@ -11,27 +12,74 @@ MetricsRegistry& MetricsRegistry::instance() {
 }
 
 void MetricsRegistry::counter_inc(const std::string& name, const std::map<std::string, std::string>& labels, double val) {
-    std::lock_guard lock(mtx_);
     MetricKey key{name, labels};
-    if (!counters_.contains(key)) {
-        counters_.emplace(std::piecewise_construct, std::forward_as_tuple(key), std::forward_as_tuple(0.0));
+    // AK1: optimistic read — try shared lock first, only take unique lock on insert
+    {
+        std::shared_lock lock(rw_mtx_);
+        auto it = counters_.find(key);
+        if (it != counters_.end()) {
+            double current = it->second.load();
+            it->second.store(current + val);
+            return;
+        }
     }
-    double current = counters_[key].load();
-    counters_[key].store(current + val);
+    std::unique_lock lock(rw_mtx_);
+    auto it = counters_.find(key);
+    if (it != counters_.end()) {
+        double current = it->second.load();
+        it->second.store(current + val);
+        return;
+    }
+    counters_.emplace(std::piecewise_construct, std::forward_as_tuple(key), std::forward_as_tuple(0.0));
+    counters_[key].store(val);
 }
 
 void MetricsRegistry::gauge_set(const std::string& name, double val, const std::map<std::string, std::string>& labels) {
-    std::lock_guard lock(mtx_);
     MetricKey key{name, labels};
-    if (!gauges_.contains(key)) {
-        gauges_.emplace(std::piecewise_construct, std::forward_as_tuple(key), std::forward_as_tuple(0.0));
+    {
+        std::shared_lock lock(rw_mtx_);
+        auto it = gauges_.find(key);
+        if (it != gauges_.end()) {
+            it->second.store(val);
+            return;
+        }
     }
+    std::unique_lock lock(rw_mtx_);
+    auto it = gauges_.find(key);
+    if (it != gauges_.end()) {
+        it->second.store(val);
+        return;
+    }
+    gauges_.emplace(std::piecewise_construct, std::forward_as_tuple(key), std::forward_as_tuple(0.0));
     gauges_[key].store(val);
 }
 
 void MetricsRegistry::histogram_observe(const std::string& name, double val, const std::map<std::string, std::string>& labels) {
-    std::lock_guard lock(mtx_);
     MetricKey key{name, labels};
+    {
+        std::shared_lock lock(rw_mtx_);
+        auto it = histograms_.find(key);
+        if (it != histograms_.end()) {
+            auto& h = it->second;
+            h.sum += val;
+            h.count++;
+            std::for_each(h.buckets.begin(), h.buckets.end(), [&](double b) {
+                if (val <= b) h.counts[b]++;
+            });
+            return;
+        }
+    }
+    std::unique_lock lock(rw_mtx_);
+    auto it = histograms_.find(key);
+    if (it != histograms_.end()) {
+        auto& h = it->second;
+        h.sum += val;
+        h.count++;
+        std::for_each(h.buckets.begin(), h.buckets.end(), [&](double b) {
+            if (val <= b) h.counts[b]++;
+        });
+        return;
+    }
     auto& h = histograms_[key];
     if (h.buckets.empty()) {
         h.buckets = {0.1, 1.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0}; // Default latency buckets in ms
@@ -60,7 +108,7 @@ static std::string format_labels(const std::map<std::string, std::string>& label
 }
 
 std::string MetricsRegistry::export_prometheus() const {
-    std::lock_guard lock(mtx_);
+    std::shared_lock lock(rw_mtx_);
     std::stringstream ss;
 
     for (const auto& [key, val] : counters_) {

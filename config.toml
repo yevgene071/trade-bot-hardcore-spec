@@ -19,7 +19,7 @@ ws_max_reconnect_delay_ms = 30000
 metascalp_max_rps = 20
 
 [trading]
-symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+symbols = ["ZEC_USDT"]
 max_concurrent_orders = 5
 
 [risk]
@@ -304,7 +304,7 @@ tier_thresholds_enabled = true
 tier_volume_boundaries = [1000000000.0, 100000000.0, 0.0]  # [$1B, $100M, $0]
 
 [universe.pool]
-allow_patterns         = ["*USDT"]
+allow_patterns         = ["ZEC_USDT", "BTC_USDT", "BTCUSDT"]
 deny_patterns          = ["*UP*", "*DOWN*", "*BULL*", "*BEAR*", "*1000*"]
 require_trading_allowed = true
 max_pool_size          = 30

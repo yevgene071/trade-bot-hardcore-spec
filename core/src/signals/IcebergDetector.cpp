@@ -1,5 +1,6 @@
 #include "IcebergDetector.hpp"
 #include "logger/Logger.hpp"
+#include "perf/TraceContext.hpp"
 
 #include <absl/container/flat_hash_map.h>
 
@@ -28,8 +29,8 @@ IcebergDetector::IcebergDetector(Ticker ticker,
     : IcebergDetector(std::move(ticker), bus, book, universe, Config{}) {}
 
 void IcebergDetector::on_frame(const FeatureFrame& frame) {
-    if (this == nullptr) [[unlikely]] return;
     if (frame.ticker != ticker_) return;
+    if (!frame.valid) return;
 
     // T4-LIFECYCLE: Prune stale level stats to prevent memory bloat (#142)
     auto now = frame.timestamp;
@@ -64,10 +65,14 @@ void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
     buy_vol_by_tick_.clear();
     sell_vol_by_tick_.clear();
 
-    for (size_t i = 0; i < trade_history_.size(); ++i) {
+    // Y2: Optimize lookup by only scanning relevant recent trades from the tail of the buffer.
+    // CircularBuffer stores in chronological order (tail to head).
+    for (int i = static_cast<int>(trade_history_.size()) - 1; i >= 0; --i) {
         const auto& t = trade_history_[i];
         auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - t.ts);
-        if (std::abs(delta.count()) > cfg_.event_join_window.count()) continue;
+        if (delta.count() > cfg_.event_join_window.count()) break; // Too old
+        if (delta.count() < -cfg_.event_join_window.count()) continue; // Too new (unlikely but possible with clock skew)
+        
         const auto ttick = PriceTick::from_price(t.price, price_inc);
         if (t.side == Side::Buy) buy_vol_by_tick_[ttick] += t.size;
         else                      sell_vol_by_tick_[ttick] += t.size;
@@ -104,14 +109,17 @@ void IcebergDetector::on_book_update(const OrderBookUpdate& update) {
     }
 }
 
-void IcebergDetector::process_refill_(double price, Side side, double trade_size, 
-                                     double size_before, double size_after, 
+void IcebergDetector::process_refill_(double price, Side side, double trade_size,
+                                     double size_before, double size_after,
                                      std::chrono::system_clock::time_point ts) {
+    // Y4-FIX: Don't drop first refill — a level re-appearing after depletion is valid evidence.
+    if (size_before <= 0.0 && size_after <= 0.0) return;
     const auto price_inc = book_.price_increment();
     const auto tick = PriceTick::from_price(price, price_inc);
     
     double visible_decrease = size_before - size_after;
-    bool is_refill = (trade_size > visible_decrease) && (size_after >= size_before * cfg_.size_retention_ratio);
+    double baseline = (size_before > 0.0) ? size_before : size_after;
+    bool is_refill = (trade_size > visible_decrease) && (size_after >= baseline * cfg_.size_retention_ratio);
     
     auto& stats = levels_[tick];
     if (stats.posterior == 0.0) {
@@ -152,6 +160,7 @@ void IcebergDetector::process_refill_(double price, Side side, double trade_size
                     .refill_events = stats.refill_count
                 }
             };
+            s.trigger_trace_id = current_trace_context().trace_id;
             bus_.publish(s);
         }
     }
@@ -164,9 +173,10 @@ void IcebergDetector::update_bayesian_(LevelStats& stats, bool is_refill) {
     double p = stats.posterior;
     double denom = (p * L1 + (1.0 - p) * L0);
     
-    // T4-MATH: Prevent division by zero and probability leakage (#141)
+    // Y3-FIX: Prevent division by zero and probability leakage, nudge instead of slamming
     if (denom < 1e-12) {
-        stats.posterior = is_refill ? 0.99 : 0.01;
+        const double nudge = 0.05;
+        stats.posterior = std::clamp(is_refill ? p + nudge * (1.0 - p) : p - nudge * p, 0.0001, 0.9999);
     } else {
         stats.posterior = std::clamp((p * L1) / denom, 0.0001, 0.9999);
     }

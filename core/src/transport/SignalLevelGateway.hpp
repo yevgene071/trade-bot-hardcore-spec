@@ -17,8 +17,8 @@ public:
     virtual ~SignalLevelGateway() = default;
 
     virtual std::vector<SignalLevel> get_all(const Ticker& ticker);
-    virtual int create(const Ticker& ticker, double price);
-    virtual void remove(int id);
+    virtual int64_t create(const Ticker& ticker, double price);
+    virtual void remove(int64_t id);
     virtual void remove_all(const Ticker& ticker);
     virtual void cleanup_triggered();
 

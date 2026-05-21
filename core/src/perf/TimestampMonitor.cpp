@@ -10,7 +10,11 @@ TimestampMonitor::TimestampMonitor() : TimestampMonitor(Config{}) {}
 
 TimestampMonitor::TimestampMonitor(Config cfg)
     : cfg_(cfg)
-    , latency_(cfg.highest_latency_us, cfg.sig_digits) {}
+    , latency_(cfg.highest_latency_us, cfg.sig_digits) {
+    // Register same-stream jitter histograms in PerfRegistry
+    trade_to_trade_hist_ = &PerfRegistry::instance().get_or_create(kStageTradeToTradeJitter, cfg.highest_latency_us, cfg.sig_digits);
+    book_to_book_hist_ = &PerfRegistry::instance().get_or_create(kStageBookToBookJitter, cfg.highest_latency_us, cfg.sig_digits);
+}
 
 void TimestampMonitor::on_trade(const Ticker& ticker, const Trade& /*trade*/) {
     record_pair(ticker, clock::now(), /*from_trade=*/true);
@@ -35,6 +39,17 @@ void TimestampMonitor::on_orderbook_update(const OrderBookUpdate& update) {
 
 void TimestampMonitor::record_pair(const Ticker& ticker, clock::time_point now, bool from_trade) {
     std::lock_guard<std::mutex> lk(mtx_);
+    
+    // AH7: Cap per_ticker_ size to avoid memory leak from random tickers
+    if (!per_ticker_.contains(ticker) && per_ticker_.size() >= 1000) {
+        static bool warned = false;
+        if (!warned) {
+            LOG_WARN("TimestampMonitor: per_ticker_ limit reached (1000), ignoring new ticker {}", ticker);
+            warned = true;
+        }
+        return;
+    }
+
     auto& st = per_ticker_[ticker];
 
     auto record_delta = [&](clock::time_point counterpart) {
@@ -53,16 +68,38 @@ void TimestampMonitor::record_pair(const Ticker& ticker, clock::time_point now, 
     };
 
     if (from_trade) {
+        // Cross-stream: trade → book
         if (st.has_book) {
             record_delta(st.last_book);
         }
+        
+        // Same-stream: trade → trade jitter
+        if (st.last_same_trade != clock::time_point{}) {
+            auto delta_us = std::chrono::duration_cast<std::chrono::microseconds>(now - st.last_same_trade).count();
+            if (delta_us > 0 && delta_us <= cfg_.pair_window_us) {
+                trade_to_trade_hist_->record(std::min<int64_t>(delta_us, cfg_.highest_latency_us));
+            }
+        }
+        
         st.last_trade = now;
+        st.last_same_trade = now;
         st.has_trade = true;
     } else {
+        // Cross-stream: book → trade
         if (st.has_trade) {
             record_delta(st.last_trade);
         }
+        
+        // Same-stream: book → book jitter
+        if (st.last_same_book != clock::time_point{}) {
+            auto delta_us = std::chrono::duration_cast<std::chrono::microseconds>(now - st.last_same_book).count();
+            if (delta_us > 0 && delta_us <= cfg_.pair_window_us) {
+                book_to_book_hist_->record(std::min<int64_t>(delta_us, cfg_.highest_latency_us));
+            }
+        }
+        
         st.last_book = now;
+        st.last_same_book = now;
         st.has_book = true;
     }
 }
@@ -100,11 +137,23 @@ int64_t TimestampMonitor::sample_count() const {
     return latency_.total_count();
 }
 
+int64_t TimestampMonitor::latency_trade_to_trade_p99_us() const {
+    std::lock_guard<std::mutex> lk(mtx_);
+    return trade_to_trade_hist_->value_at_percentile(99.0);
+}
+
+int64_t TimestampMonitor::latency_book_to_book_p99_us() const {
+    std::lock_guard<std::mutex> lk(mtx_);
+    return book_to_book_hist_->value_at_percentile(99.0);
+}
+
 void TimestampMonitor::reset() {
     std::lock_guard<std::mutex> lk(mtx_);
     latency_.reset();
     per_ticker_.clear();
     samples_since_check_ = 0;
+    trade_to_trade_hist_->reset();
+    book_to_book_hist_->reset();
 }
 
 } // namespace trade_bot

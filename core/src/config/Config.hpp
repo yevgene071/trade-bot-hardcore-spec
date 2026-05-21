@@ -14,17 +14,22 @@ class ConfigError : public std::runtime_error {
 
 class Config {
 public:
+    Config() = default;
+    explicit Config(toml::table data) : data_(std::move(data)) {}
+
+    void load_file(const std::string& path);
     static void load(const std::string& path);
+    static Config& instance();
     
     /**
      * @brief Strict validation of required configuration keys.
      * Throws ConfigError if any required key is missing or has wrong type.
      */
-    static void validate();
+    void validate();
 
     template <typename T>
-    static T get(std::string_view dotted_path) {
-        auto node = find_node(dotted_path);
+    T get_val(std::string_view dotted_path) const {
+        auto node = find_node_internal(dotted_path);
         if (!node) {
             throw ConfigError("Config key not found: " + std::string(dotted_path));
         }
@@ -53,24 +58,39 @@ public:
     }
 
     template <typename T>
-    static T get_or(std::string_view dotted_path, const T& default_value) {
-        if (!has(dotted_path)) {
+    static T get(std::string_view dotted_path) {
+        return instance().get_val<T>(dotted_path);
+    }
+
+    template <typename T>
+    T get_val_or(std::string_view dotted_path, const T& default_value) const {
+        if (!has_val(dotted_path)) {
             return default_value;
         }
         try {
-            return get<T>(dotted_path);
+            return get_val<T>(dotted_path);
         } catch (const ConfigError&) {
             return default_value;
         }
     }
 
+    template <typename T>
+    static T get_or(std::string_view dotted_path, const T& default_value) {
+        return instance().get_val_or<T>(dotted_path, default_value);
+    }
+
+    bool has_val(std::string_view dotted_path) const {
+        return static_cast<bool>(find_node_internal(dotted_path));
+    }
+
     static bool has(std::string_view dotted_path) {
-        return static_cast<bool>(find_node(dotted_path));
+        return instance().has_val(dotted_path);
     }
 
 private:
-    static toml::node_view<toml::node> find_node(std::string_view dotted_path);
-    static toml::table s_data;
+    toml::node_view<const toml::node> find_node_internal(std::string_view dotted_path) const;
+    toml::table data_;
+    static std::unique_ptr<Config> s_instance;
 };
 
 } // namespace trade_bot

@@ -27,9 +27,16 @@ export default defineConfig(({mode}) => {
           changeOrigin: true,
         },
         '/ws': {
-          target: 'ws://localhost:8080',
+          target: 'http://localhost:8080',
           ws: true,
           changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('error', (err) => {
+              // Suppress EPIPE when backend disconnects — expected during restarts
+              if ((err as NodeJS.ErrnoException).code === 'EPIPE') return;
+              console.error('[ws proxy]', err);
+            });
+          },
         },
       },
     },

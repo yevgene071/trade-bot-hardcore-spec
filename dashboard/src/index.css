@@ -1,36 +1,181 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --bg0: #04060c;
+  --bg1: #070b13;
+  --bg2: #0a0f1a;
+  --bg3: #0d1422;
+  --brd: #141e30;
+  --brd2: #0c1220;
+  --tx: #b0c0d4;
+  --txd: #3c4e62;
+  --txf: #1c2a38;
+  --amb: #c08828;
+  --grn: #1a9448;
+  --red: #ae2c2c;
+  --blu: #3478b8;
+  --wht: #d8e8f8;
+
+  /* ── Chart canvas palette ────────────────────────────── */
+  --chart-cold:      4 6 12;
+  --chart-hot:       192 136 40;
+  --chart-green:     26 148 72;
+  --chart-red:       174 44 44;
+  --chart-amber:     192 136 40;
+  --chart-price:     216 232 248;
+  --chart-grid:      122 143 168;
+  --chart-grid-line: 30 45 65;
+  --chart-ghost-hi:  26 148 72;
+  --chart-ghost-md:  192 136 40;
+  --chart-ghost-lo:  174 44 44;
+  --chart-spread:    180 200 220;
+
+  /* L1 — position layer (entry / SL / TP) */
+  --chart-entry-long:   60 220 140;
+  --chart-entry-short:  240 90 90;
+  --chart-sl:           240 90 90;
+  --chart-tp:           60 220 140;
+  /* Cause of exit (journal markers) */
+  --chart-cause-tp:     60 220 140;
+  --chart-cause-sl:     240 90 90;
+  --chart-cause-signal: 90 150 240;
+  --chart-cause-time:   140 150 160;
+  /* Regime badges */
+  --chart-regime-momentum: 60 220 140;
+  --chart-regime-flush:    240 90 90;
+  --chart-regime-accum:    192 136 40;
+  --chart-regime-neutral:  122 143 168;
+}
+
+/* Light theme — switch via <html class="light"> or @media (prefers-color-scheme: light) */
+.light {
+  --bg0: #f4f6fa;
+  --bg1: #e8ecf2;
+  --bg2: #dce0e8;
+  --bg3: #cfd5e0;
+  --brd: #c4ccd8;
+  --brd2: #b0b8c4;
+  --tx: #1c2a38;
+  --txd: #7a8fa8;
+  --txf: #b0c0d4;
+  --amb: #a07020;
+  --grn: #14803a;
+  --red: #9a2424;
+  --blu: #2058a0;
+  --wht: #0a0f1a;
+
+  --chart-cold:      230 234 242;
+  --chart-hot:       160 108 20;
+  --chart-green:     20 128 58;
+  --chart-red:       154 36 36;
+  --chart-amber:     160 108 20;
+  --chart-price:     10 15 26;
+  --chart-grid:      140 155 175;
+  --chart-grid-line: 200 210 225;
+  --chart-ghost-hi:  20 128 58;
+  --chart-ghost-md:  160 108 20;
+  --chart-ghost-lo:  154 36 36;
+  --chart-spread:    180 190 210;
+
+  --chart-entry-long:   34 168 100;
+  --chart-entry-short:  200 50 50;
+  --chart-sl:           200 50 50;
+  --chart-tp:           34 168 100;
+  --chart-cause-tp:     34 168 100;
+  --chart-cause-sl:     200 50 50;
+  --chart-cause-signal: 50 110 200;
+  --chart-cause-time:   120 130 145;
+  --chart-regime-momentum: 34 168 100;
+  --chart-regime-flush:    200 50 50;
+  --chart-regime-accum:    160 108 20;
+  --chart-regime-neutral:  120 135 160;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not(.dark) {
+    --bg0: #f4f6fa;
+    --bg1: #e8ecf2;
+    --bg2: #dce0e8;
+    --bg3: #cfd5e0;
+    --brd: #c4ccd8;
+    --brd2: #b0b8c4;
+    --tx: #1c2a38;
+    --txd: #7a8fa8;
+    --txf: #b0c0d4;
+    --amb: #a07020;
+    --grn: #14803a;
+    --red: #9a2424;
+    --blu: #2058a0;
+    --wht: #0a0f1a;
+
+    --chart-cold:      230 234 242;
+    --chart-hot:       160 108 20;
+    --chart-green:     20 128 58;
+    --chart-red:       154 36 36;
+    --chart-amber:     160 108 20;
+    --chart-price:     10 15 26;
+    --chart-grid:      140 155 175;
+    --chart-grid-line: 200 210 225;
+    --chart-ghost-hi:  20 128 58;
+    --chart-ghost-md:  160 108 20;
+    --chart-ghost-lo:  154 36 36;
+    --chart-spread:    180 190 210;
+  }
 }
 
 @layer base {
   body {
-    @apply bg-[#03050a] text-[#e8edf5] antialiased overflow-hidden;
+    @apply bg-[#04060c] text-[#b0c0d4] antialiased overflow-hidden;
+  }
+
+  /* CRT scanlines removed — they obscured price/PnL digits and
+     violated the "строгость, не гейминг" design mandate.
+     Enable via class .scanlines on body if desired for demos. */
+  body.scanlines::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      rgba(0, 0, 0, 0.08) 1px,
+      rgba(0, 0, 0, 0.08) 2px
+    );
+    pointer-events: none;
+    z-index: 9999;
   }
 }
 
 @layer utilities {
   .glass-panel {
-    @apply bg-[rgba(10,14,23,0.7)] backdrop-blur-2xl border border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.5)];
+    @apply bg-[rgba(7,11,19,0.85)] backdrop-blur-xl border border-[#141e30] shadow-[0_8px_32px_rgba(0,0,0,0.6)];
   }
   
   .glass-card {
-    @apply bg-white/[0.02] backdrop-blur-md border border-white/[0.05] rounded-2xl shadow-xl transition-all duration-300;
+    @apply bg-[rgba(10,15,26,0.6)] backdrop-blur-md border border-[#141e30] rounded-xl shadow-lg transition-all duration-300;
   }
 
-  .text-glow-emerald {
-    text-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+  .text-glow-green {
+    text-shadow: 0 0 12px rgba(26, 148, 72, 0.35);
   }
   
-  .text-glow-rose {
-    text-shadow: 0 0 12px rgba(244, 63, 94, 0.4);
+  .text-glow-red {
+    text-shadow: 0 0 12px rgba(174, 44, 44, 0.35);
   }
 
   .text-glow-blue {
-    text-shadow: 0 0 16px rgba(59, 130, 246, 0.5);
+    text-shadow: 0 0 16px rgba(52, 120, 184, 0.4);
+  }
+
+  .text-glow-amber {
+    text-shadow: 0 0 12px rgba(192, 136, 40, 0.35);
   }
 
   .no-scrollbar::-webkit-scrollbar {
@@ -41,10 +186,40 @@
     scrollbar-width: none;
   }
 
+  /* Styled scrollbar for panels that need visible scroll */
+  .styled-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .styled-scrollbar::-webkit-scrollbar-track {
+    background: #0a0f1a;
+  }
+  .styled-scrollbar::-webkit-scrollbar-thumb {
+    background: #333340;
+    border-radius: 2px;
+  }
+  .styled-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #555566;
+  }
+  .styled-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #333340 #0a0f1a;
+  }
+
+  /* Loading skeleton animation */
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.7; }
+  }
+  .skeleton {
+    background: #0d1422;
+    border-radius: 2px;
+    animation: skeleton-pulse 1.4s ease-in-out infinite;
+  }
+
   .grid-bg {
     background-image: 
-      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
     background-size: 30px 30px;
   }
 }

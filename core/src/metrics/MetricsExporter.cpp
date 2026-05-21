@@ -1,5 +1,6 @@
 #include "MetricsExporter.hpp"
 #include "MetricsRegistry.hpp"
+#include "perf/PerfRegistry.hpp"
 #include "logger/Logger.hpp"
 #include <boost/beast/version.hpp>
 #include <boost/asio/strand.hpp>
@@ -33,7 +34,20 @@ struct MetricsSession : public std::enable_shared_from_this<MetricsSession> {
             // Fix for #138: Bearer token auth
             if (!auth_token.empty()) {
                 auto it = req->find(http::field::authorization);
-                if (it == req->end() || it->value() != "Bearer " + auth_token) {
+                std::string expected = "Bearer " + auth_token;
+                bool authorized = false;
+                if (it != req->end()) {
+                    std::string_view actual = it->value();
+                    if (actual.size() == expected.size()) {
+                        volatile char diff = 0;
+                        for (size_t i = 0; i < actual.size(); ++i) {
+                            diff |= (actual[i] ^ expected[i]);
+                        }
+                        authorized = (diff == 0);
+                    }
+                }
+
+                if (!authorized) {
                     LOG_WARN("MetricsExporter: unauthorized access attempt from {}", 
                              stream.socket().remote_endpoint().address().to_string());
                     auto res = std::make_shared<http::response<http::string_body>>(http::status::unauthorized, req->version());
@@ -51,7 +65,8 @@ struct MetricsSession : public std::enable_shared_from_this<MetricsSession> {
             res->set(http::field::server, BOOST_BEAST_VERSION_STRING);
             res->set(http::field::content_type, "text/plain; version=0.0.4");
             res->keep_alive(req->keep_alive());
-            res->body() = MetricsRegistry::instance().export_prometheus();
+            res->body() = MetricsRegistry::instance().export_prometheus() + 
+                          PerfRegistry::instance().export_prometheus();
             res->prepare_payload();
             
             http::async_write(stream, *res, [self = shared_from_this(), res](beast::error_code ec, std::size_t) {

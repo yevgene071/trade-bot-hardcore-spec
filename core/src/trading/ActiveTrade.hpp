@@ -11,7 +11,8 @@ enum class TradeState {
     Exiting,
     Closed,
     Cancelling,
-    SubmitUnknown
+    SubmitUnknown,
+    EmergencyClosing  // B4-FIX: Prevent race between emergency close and on_order_update
 };
 
 struct ActiveTrade {
@@ -22,6 +23,10 @@ struct ActiveTrade {
     // asynchronously. Issue #129.
     int64_t    entry_order_id{0};
     int64_t    stop_order_id{0};
+    // Client-generated idempotency key for the entry order. Set before
+    // place_order() is called; used in on_order_update() for deterministic
+    // first-sight matching when entry_order_id is not yet known.
+    std::string entry_client_order_id;
     int64_t    tp1_order_id{0};
     int64_t    tp2_order_id{0};
     TradeState state{TradeState::PendingEntry};

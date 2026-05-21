@@ -1,4 +1,5 @@
 #include "KalmanLagEstimator.hpp"
+#include "logger/Logger.hpp"
 #include <cmath>
 #include <algorithm>
 
@@ -51,8 +52,15 @@ void KalmanLagEstimator::update(double dt, double z) {
     const double y_inno = z - x_[0];
     const double s      = p_[0][0] + cfg_.r_obs;
     
-    // T4-MATH: Check for singular S or extreme innovation (outlier)
-    if (s < 1e-9 || std::abs(y_inno) > 5000.0) return;
+    // U1: log discarded outliers so they are visible in metrics/replay
+    if (s < 1e-9) {
+        LOG_DEBUG("KalmanLagEstimator: singular innovation variance (S={:.3e}), skipping update", s);
+        return;
+    }
+    if (std::abs(y_inno) > cfg_.outlier_cutoff_ms) {
+        LOG_DEBUG("KalmanLagEstimator: outlier lag observation {:.1f} ms, skipping update", y_inno);
+        return;
+    }
 
     // K = P H^T / S = [P00, P10]^T / S
     const double k0 = p_[0][0] / s;
@@ -61,15 +69,17 @@ void KalmanLagEstimator::update(double dt, double z) {
     x_[0] += k0 * y_inno;
     x_[1] += k1 * y_inno;
 
-    // P = (I - K H) P
-    const double new00 = (1.0 - k0) * p_[0][0];
-    const double new01 = (1.0 - k0) * p_[0][1];
-    const double new10 = p_[1][0] - k1 * p_[0][0];
-    const double new11 = p_[1][1] - k1 * p_[0][1];
-    
-    // T4-MATH: Force symmetry and enforce positive-definiteness
-    p_[0][0] = std::max(1e-6, new00);
-    p_[1][1] = std::max(1e-6, new11);
+    // U2: Joseph form P_new = (I-KH)*P*(I-KH)^T + K*R*K^T
+    // Guarantees positive-definiteness regardless of K magnitude.
+    // H=[1,0], so (I-KH) = [[1-k0,0],[-k1,1]]
+    const double p00 = p_[0][0], p01 = p_[0][1], p10 = p_[1][0], p11 = p_[1][1];
+    const double new00 = (1.0-k0)*(1.0-k0)*p00 + k0*k0*cfg_.r_obs;
+    const double new01 = -(1.0-k0)*k1*p00 + (1.0-k0)*p01 + k0*k1*cfg_.r_obs;
+    const double new10 = (1.0-k0)*(-k1*p00 + p10) + k0*k1*cfg_.r_obs;
+    const double new11 = k1*k1*p00 - k1*p10 - k1*p01 + p11 + k1*k1*cfg_.r_obs;
+
+    p_[0][0] = std::max(1e-9, new00);
+    p_[1][1] = std::max(1e-9, new11);
     p_[0][1] = p_[1][0] = 0.5 * (new01 + new10);
     
     // T4-MATH: Clamp state to sane physical limits (ms and ms/sec)

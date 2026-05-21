@@ -17,7 +17,7 @@ TEST(WsSmokeTest, LiveConnection) {
     auto client = std::make_shared<BeastWsClient>(ioc);
     
     std::atomic<bool> subscribed{false};
-    client->set_on_message([&](const nlohmann::json& j) {
+    client->set_on_message([&](const nlohmann::json& j, uint64_t /*recv_ns*/, trade_bot::TraceId /*tid*/) {
         LOG_INFO("WS received: {}", j.dump());
         if (j.contains("Type") && j["Type"] == "subscribed") {
             subscribed = true;

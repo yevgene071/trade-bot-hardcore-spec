@@ -2,55 +2,70 @@
 #include "logger/Logger.hpp"
 #include <filesystem>
 
+#include <memory>
+
 namespace trade_bot {
 
-toml::table Config::s_data;
+std::unique_ptr<Config> Config::s_instance;
 
-void Config::load(const std::string& path) {
+Config& Config::instance() {
+    if (!s_instance) {
+        s_instance = std::make_unique<Config>();
+    }
+    return *s_instance;
+}
+
+void Config::load_file(const std::string& path) {
     if (!std::filesystem::exists(path)) {
         throw ConfigError("Config file not found: " + path);
     }
 
     try {
-        s_data = toml::parse_file(path);
+        data_ = toml::parse_file(path);
         validate();
     } catch (const toml::parse_error& err) {
         throw ConfigError("Failed to parse config: " + std::string(err.description()));
     }
 }
 
-void Config::validate() {
-    // App
-    get<std::string>("app.version");
-    get<std::string>("app.name");
-
-    // Logger
-    get<std::string>("logger.level");
-    get<std::string>("logger.path");
-
-    // Network
-    get<int64_t>("network.http_timeout_ms");
-
-    // Trading
-    get<std::vector<std::string>>("trading.symbols");
-
-    // Risk Management (Core)
-    get<double>("risk.max_daily_loss_pct");
-    get<double>("risk.max_per_trade_risk_pct");
-    get<int64_t>("risk.max_concurrent_positions");
-    get<double>("risk.max_leverage");
-    
-    // Clock Monitoring (T0-CLOCK) — optional section: validate types only if present.
-    if (has("clock.sources")) {
-        get<std::vector<std::string>>("clock.sources");
-    }
-    if (has("clock.check_interval_sec"))  get<int64_t>("clock.check_interval_sec");
-    if (has("clock.warn_drift_ms"))       get<int64_t>("clock.warn_drift_ms");
-    if (has("clock.max_clock_drift_ms"))  get<int64_t>("clock.max_clock_drift_ms");
+void Config::load(const std::string& path) {
+    instance().load_file(path);
 }
 
-toml::node_view<toml::node> Config::find_node(std::string_view dotted_path) {
-    return s_data.at_path(dotted_path);
+void Config::validate() {
+    // App
+    get_val<std::string>("app.version");
+    get_val<std::string>("app.name");
+
+    // Logger
+    get_val<std::string>("logger.level");
+    get_val<std::string>("logger.path");
+
+    // Network
+    auto http_timeout = get_val<int64_t>("network.http_timeout_ms");
+    if (http_timeout < 100 || http_timeout > 60000) {
+        throw ConfigError("network.http_timeout_ms out of range [100, 60000]");
+    }
+
+    // Risk Management (Core)
+    auto daily_loss = get_val<double>("risk.max_daily_loss_pct");
+    if (daily_loss < 0.0 || daily_loss > 100.0) {
+        throw ConfigError("risk.max_daily_loss_pct out of range [0, 100]");
+    }
+    
+    auto per_trade_risk = get_val<double>("risk.max_per_trade_risk_pct");
+    if (per_trade_risk < 0.0 || per_trade_risk > 10.0) {
+        throw ConfigError("risk.max_per_trade_risk_pct out of range [0, 10]");
+    }
+
+    // Clock Monitoring
+    if (has_val("clock.sources")) {
+        get_val<std::vector<std::string>>("clock.sources");
+    }
+}
+
+toml::node_view<const toml::node> Config::find_node_internal(std::string_view dotted_path) const {
+    return data_.at_path(dotted_path);
 }
 
 } // namespace trade_bot

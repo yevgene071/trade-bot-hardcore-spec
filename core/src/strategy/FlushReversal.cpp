@@ -1,4 +1,5 @@
 #include "FlushReversal.hpp"
+#include "universe/TickerUniverse.hpp"
 #include "logger/Logger.hpp"
 #include "numeric/PriceUtils.hpp"
 
@@ -7,30 +8,42 @@
 
 namespace trade_bot {
 
-FlushReversal::FlushReversal(Ticker ticker, TickerInfo info, const Config& cfg)
+FlushReversal::FlushReversal(Ticker ticker, TickerInfo info, const Config& cfg, std::shared_ptr<IClock> clock)
     : ticker_(std::move(ticker))
     , info_(std::move(info))
     , name_("FlushReversal")
-    , cfg_(cfg) {}
+    , cfg_(cfg)
+    , clock_(std::move(clock)) {}
 
-FlushReversal::FlushReversal(Ticker ticker, TickerInfo info)
-    : FlushReversal(std::move(ticker), std::move(info), Config{}) {}
+FlushReversal::FlushReversal(Ticker ticker, TickerInfo info, std::shared_ptr<IClock> clock)
+    : FlushReversal(std::move(ticker), std::move(info), Config{}, std::move(clock)) {}
 
 void FlushReversal::on_frame(const FeatureFrame& frame) {
-    if (frame.ticker == ticker_) ctx_.update(frame);
-}
-
-void FlushReversal::on_signal(const Signal& signal) {
-    if (signal.ticker == ticker_) ctx_.update(signal);
-}
-
-std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_point now) {
-    std::lock_guard<std::mutex> lock(ctx_.mtx_);
-
-    if (active_plan_) {
-        if (now > active_plan_->valid_until) active_plan_ = std::nullopt;
-        else return std::nullopt;
+    if (frame.ticker == ticker_) {
+        std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
+        ctx_.update(frame);
     }
+}
+
+std::optional<TradePlan> FlushReversal::on_signal(const Signal& signal, std::chrono::system_clock::time_point now) {
+    if (signal.ticker != ticker_) return std::nullopt;
+    
+    // Update context with new signal
+    {
+        std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
+        ctx_.update(signal);
+    }
+    
+    // Event-driven: react immediately to LevelBreak signals
+    if (signal.kind != SignalKind::LevelBreak) return std::nullopt;
+    
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
+    
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    if (clock_) now = clock_->now();
+    
+    if (active_plan_) return std::nullopt; // Already have a plan pending
 
     const auto& frame = ctx_.last_frame;
     if (frame.ticker.empty()) return std::nullopt;
@@ -41,10 +54,9 @@ std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_poi
         return std::nullopt;
     }
 
-    // C2: Fresh LevelBreak — the defining event of the pattern
+    // C2: Fresh LevelBreak (signal just arrived, so it's fresh)
     auto it_break = ctx_.recent_signals.find(SignalKind::LevelBreak);
-    if (it_break == ctx_.recent_signals.end() ||
-        (now - it_break->second.timestamp) > cfg_.flush_max_age) {
+    if (it_break == ctx_.recent_signals.end()) {
         return std::nullopt;
     }
     const Signal& brk = it_break->second;
@@ -55,10 +67,14 @@ std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_poi
     const bool flushed_down = (brk.payload.dist_bps < 0.0);
     const Side plan_side = flushed_down ? Side::Buy : Side::Sell;
 
-    // Break must have pushed meaningfully past the level (not a gentle touch)
-    if (std::abs(brk.payload.dist_bps) < cfg_.min_flush_dist_bps) {
-        LOG_TRACE("[Flush] {} break too shallow: {:.1f} bps (need {:.1f})",
-                  ticker_, std::abs(brk.payload.dist_bps), cfg_.min_flush_dist_bps);
+    // Break must have pushed meaningfully past the level (tier-based)
+    const double min_flush_dist = universe_
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_min_flush_dist_bps)
+        : cfg_.min_flush_dist_bps;
+    
+    if (std::abs(brk.payload.dist_bps) < min_flush_dist) {
+        LOG_TRACE("[Flush] {} break {:.1f} bps < {:.1f} (tiered)",
+                  ticker_, std::abs(brk.payload.dist_bps), min_flush_dist);
         return std::nullopt;
     }
 
@@ -70,16 +86,29 @@ std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_poi
     }
 
     // C4: TapeFlush confirming the stop-hunt candle
+    // GAP-09: when min_flush_count > 1, count from signal_history (recent_signals keeps only last)
     auto it_flush = ctx_.recent_signals.find(SignalKind::TapeFlush);
     if (it_flush == ctx_.recent_signals.end() ||
         (now - it_flush->second.timestamp) > cfg_.tape_flush_max_age) {
         LOG_TRACE("[Flush] {} no recent TapeFlush", ticker_);
         return std::nullopt;
     }
-    // TapeFlush must not predate the LevelBreak by more than 3 s
     if (it_flush->second.timestamp < brk.timestamp - std::chrono::seconds(3)) {
         LOG_TRACE("[Flush] {} TapeFlush predates LevelBreak", ticker_);
         return std::nullopt;
+    }
+    if (cfg_.min_flush_count > 1) {
+        int flush_count = 0;
+        const auto count_cutoff = now - cfg_.flush_count_window;
+        for (const auto& s : ctx_.signal_history) {
+            if (s.timestamp < count_cutoff) continue;
+            if (s.kind == SignalKind::TapeFlush) ++flush_count;
+        }
+        if (flush_count < cfg_.min_flush_count) {
+            LOG_TRACE("[Flush] {} only {} TapeFlush in {}s (need {})",
+                      ticker_, flush_count, cfg_.flush_count_window.count(), cfg_.min_flush_count);
+            return std::nullopt;
+        }
     }
 
     // C5: Volume fade — aggression in the flush direction must be dying out
@@ -93,13 +122,17 @@ std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_poi
         return std::nullopt;
     }
 
-    // C6: Reversal move confirmed — price already moving back toward the level
+    // C6: Reversal move confirmed (tier-based threshold)
     // price_change_1s is % (positive = up). For Buy reversal we need upward move.
+    const double min_reversal = universe_
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_min_price_reversal_bps)
+        : cfg_.min_price_reversal_bps;
+    
     const double reversal_bps = (flushed_down ? frame.price_change_1s : -frame.price_change_1s)
                                 * 100.0;
-    if (reversal_bps < cfg_.min_price_reversal_bps) {
-        LOG_TRACE("[Flush] {} reversal not confirmed: {:.1f} bps (need {:.1f})",
-                  ticker_, reversal_bps, cfg_.min_price_reversal_bps);
+    if (reversal_bps < min_reversal) {
+        LOG_TRACE("[Flush] {} reversal {:.1f} bps < {:.1f} (tiered)",
+                  ticker_, reversal_bps, min_reversal);
         return std::nullopt;
     }
 
@@ -136,10 +169,14 @@ std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_poi
     LOG_INFO("[Strategy] FlushReversal TRIGGERED for {}! {} at level {:.4f} (vol_fade={:.2f})",
              ticker_, flushed_down ? "BUY" : "SELL", level_price, vol_fade_ratio);
 
-    // Entry just inside the broken level so we're positioned as price returns through it.
+    // Entry just inside the broken level (tier-based offset)
     // Stop beyond the level to invalidate if the real breakout resumes.
-    const double offset = level_price * (cfg_.entry_offset_bps / kBpsBase);
-    const double buffer = level_price * (cfg_.stop_buffer_bps  / kBpsBase);
+    const double entry_offset = universe_
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_entry_offset_bps)
+        : cfg_.entry_offset_bps;
+    
+    const double offset = level_price * (entry_offset / kBpsBase);
+    const double buffer = level_price * (cfg_.stop_buffer_bps / kBpsBase);
     double entry_price, stop_price, tp1_price;
 
     if (plan_side == Side::Buy) {
@@ -156,6 +193,10 @@ std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_poi
 
     entry_price = round_to_tick(entry_price, info_.price_increment);
     stop_price  = round_to_tick(stop_price,  info_.price_increment);
+    if (entry_price == stop_price) {
+        LOG_TRACE("[Flush] {} zero risk (entry==stop after rounding), skip", ticker_);
+        return std::nullopt;
+    }
     tp1_price   = round_to_tick(tp1_price,   info_.price_increment);
 
     TradePlan plan {
@@ -178,14 +219,53 @@ std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_poi
         .no_progress_timeout_sec = cfg_.no_progress_timeout_sec,
         .post_entry_grace_sec    = cfg_.post_entry_grace_sec,
         .min_follow_through_bps  = cfg_.min_follow_through_bps,
+        .frame_at_entry          = {} // Will be set below
     };
+    plan.trace_id = plan.evidence.empty() ? 0 : plan.evidence.back().trigger_trace_id;
+    
+    // P0 DETERMINISM: Use frame snapshot from history matching the trigger trace_id
+    if (plan.trace_id != 0) {
+        auto historical_frame = ctx_.get_frame_by_trace_id(plan.trace_id);
+        if (historical_frame) {
+            plan.frame_at_entry = *historical_frame;
+            // Debug assertion: verify frame snapshot matches trigger
+            if (plan.frame_at_entry.derived_from != plan.trace_id) {
+                LOG_ERROR("[Flush] {}: frame_at_entry.derived_from ({}) != plan.trace_id ({})",
+                          ticker_, plan.frame_at_entry.derived_from, plan.trace_id);
+            }
+        } else {
+            LOG_WARN("[Flush] {}: No frame snapshot found for trace_id {}, using current frame",
+                     ticker_, plan.trace_id);
+            plan.frame_at_entry = frame;
+        }
+    } else {
+        plan.frame_at_entry = frame;
+    }
 
     active_plan_ = plan;
     return plan;
 }
 
+std::optional<TradePlan> FlushReversal::tick(std::chrono::system_clock::time_point now) {
+    if (clock_) now = clock_->now();
+    
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
+    
+    // TTL check for pending plans
+    if (active_plan_ && now > active_plan_->valid_until) {
+        LOG_DEBUG("[Flush] {} plan expired (TTL)", ticker_);
+        active_plan_ = std::nullopt;
+    }
+    
+    // All entry logic moved to on_signal() for event-driven processing.
+    // tick() only handles TTL cleanup.
+    return std::nullopt;
+}
+
 void FlushReversal::on_plan_accepted(const TradePlan& plan) {
     if (plan.strategy_name == name_) {
+        std::lock_guard<std::mutex> lk(plan_mtx_);
         active_trade_info_ = plan;
         LOG_INFO("[Flush] {}: trade accepted at {:.4f}, monitoring post-entry",
                  ticker_, plan.entry_price);
@@ -193,14 +273,17 @@ void FlushReversal::on_plan_accepted(const TradePlan& plan) {
 }
 
 void FlushReversal::reset_active_plan() {
+    std::lock_guard<std::mutex> lk(plan_mtx_);
     active_plan_       = std::nullopt;
     active_trade_info_ = std::nullopt;
 }
 
 std::optional<FixedString<32>> FlushReversal::check_close_conditions(const FeatureFrame&) {
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> ctx_lock(ctx_.mtx_);
     if (!active_trade_info_) return std::nullopt;
     const auto& plan = *active_trade_info_;
-    const auto now = std::chrono::system_clock::now();
+    const auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
 
     // A second TapeFlush post-entry means the breakout is accelerating — exit
     {
@@ -234,7 +317,8 @@ std::optional<FixedString<32>> FlushReversal::check_close_conditions(const Featu
 }
 
 StrategyState FlushReversal::get_state() const {
-    std::lock_guard<std::mutex> lock(ctx_.mtx_);
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> lock(ctx_.mtx_);
     StrategyState state;
     state.ticker        = ticker_;
     state.strategy_name = "FlushReversal";
@@ -246,7 +330,7 @@ StrategyState FlushReversal::get_state() const {
     }
 
     const auto& frame = ctx_.last_frame;
-    const auto  now   = std::chrono::system_clock::now();
+    const auto  now   = clock_ ? clock_->now() : std::chrono::system_clock::now();
 
     if (frame.ticker.empty()) {
         state.ready_state = StrategyReadyState::Cold;
@@ -298,8 +382,14 @@ StrategyState FlushReversal::get_state() const {
         c.unit = "ratio";
         // Show min fade ratio across both sides (lower = more faded = better)
         double r_sell = 1.0, r_buy = 1.0;
-        if (frame.sell_vol_5s > 0) r_sell = frame.sell_vol_1s / (frame.sell_vol_5s / 5.0);
-        if (frame.buy_vol_5s  > 0) r_buy  = frame.buy_vol_1s  / (frame.buy_vol_5s  / 5.0);
+        if (frame.sell_vol_5s > 0.0) {
+            double avg_sell = frame.sell_vol_5s / 5.0;
+            r_sell = frame.sell_vol_1s / std::max(1.0, avg_sell);
+        }
+        if (frame.buy_vol_5s > 0.0) {
+            double avg_buy = frame.buy_vol_5s / 5.0;
+            r_buy = frame.buy_vol_1s / std::max(1.0, avg_buy);
+        }
         c.current = std::min(r_sell, r_buy);
         c.target  = cfg_.max_vol_fade_ratio;
         c.met     = (c.current < c.target);

@@ -12,9 +12,15 @@ TradeStream::TradeStream(Ticker ticker, double hawkes_alpha, double hawkes_beta)
 }
 
 void TradeStream::on_trade(const Trade& trade) {
+    std::lock_guard<std::mutex> lk(stats_mutex_);
+    // S1: save the evicted trade before overwriting (only matters when buffer is full)
+    const bool full = (count_ >= kMaxTrades);
+    const size_t old_head = head_;
+    const Trade evicted = full ? trades_[head_] : Trade{};
+
     // Add to ring buffer
     trades_[head_] = trade;
-    
+
     // Incremental volume addition
     if (trade.side == Side::Buy) {
         buy_vol_1s_.add(trade.size);
@@ -27,16 +33,20 @@ void TradeStream::on_trade(const Trade& trade) {
     }
 
     head_ = (head_ + 1) % kMaxTrades;
-    if (count_ < kMaxTrades) {
+    if (!full) {
         count_++;
     } else {
-        // We just overwrote the oldest trade in the entire buffer.
-        // If any tail index was pointing to it, we MUST advance it.
-        // But normally tail indices are much closer to head than kMaxTrades.
-        // For safety:
-        if (tail_1s_ == head_) tail_1s_ = (tail_1s_ + 1) % kMaxTrades;
-        if (tail_5s_ == head_) tail_5s_ = (tail_5s_ + 1) % kMaxTrades;
-        if (tail_30s_ == head_) tail_30s_ = (tail_30s_ + 1) % kMaxTrades;
+        // S1: subtract evicted trade from any window whose tail was still pointing at it
+        auto sub_if_evicted = [&](size_t& tail, KahanAccumulator<double>& buy_acc, KahanAccumulator<double>& sell_acc) {
+            if (tail == old_head) {
+                if (evicted.side == Side::Buy)        buy_acc.add(-evicted.size);
+                else if (evicted.side == Side::Sell)  sell_acc.add(-evicted.size);
+                tail = (tail + 1) % kMaxTrades;
+            }
+        };
+        sub_if_evicted(tail_1s_,  buy_vol_1s_,  sell_vol_1s_);
+        sub_if_evicted(tail_5s_,  buy_vol_5s_,  sell_vol_5s_);
+        sub_if_evicted(tail_30s_, buy_vol_30s_, sell_vol_30s_);
     }
 
     // Incremental stats
@@ -52,8 +62,9 @@ void TradeStream::on_trade(const Trade& trade) {
 }
 
 void TradeStream::update(std::chrono::system_clock::time_point now) {
-    if (last_hawkes_update_ != std::chrono::system_clock::time_point{}) {
-        auto delta = std::chrono::duration<double>(now - last_hawkes_update_).count();
+    std::lock_guard<std::mutex> lk(stats_mutex_);
+    if (last_hawkes_update_.has_value()) {
+        auto delta = std::chrono::duration<double>(now - *last_hawkes_update_).count();
         // Decay
         double decay = std::exp(-hawkes_beta_ * delta);
         hawkes_intensity_buy_ *= decay;
@@ -63,7 +74,6 @@ void TradeStream::update(std::chrono::system_clock::time_point now) {
 
     evict_expired_trades_(now);
 }
-
 void TradeStream::evict_expired_trades_(std::chrono::system_clock::time_point now) {
     auto evict = [&](size_t& tail, double seconds, KahanAccumulator<double>& buy_acc, KahanAccumulator<double>& sell_acc) {
         while (tail != head_) {
@@ -83,7 +93,9 @@ void TradeStream::evict_expired_trades_(std::chrono::system_clock::time_point no
     evict(tail_30s_, 30.0, buy_vol_30s_, sell_vol_30s_);
 }
 
+
 TradeStream::Stats TradeStream::get_stats() const {
+    std::lock_guard<std::mutex> lk(stats_mutex_);
     Stats s;
     s.avg_size = size_stats_.mean();
     s.stdev_size = size_stats_.stdev();
@@ -102,12 +114,9 @@ TradeStream::Stats TradeStream::get_stats() const {
     double total_w = size_distribution_.total_weight();
     if (total_w > 0) {
         if (total_w > static_cast<double>(last_merge_weight_ + 50)) {
-            // Need to cast to non-const for merge (mutable-like behavior)
-            auto& mutable_dist = const_cast<TDigest&>(size_distribution_);
-            s.q99_size = mutable_dist.quantile(0.99);
-            
-            const_cast<TradeStream*>(this)->cached_q99_ = s.q99_size;
-            const_cast<TradeStream*>(this)->last_merge_weight_ = static_cast<size_t>(total_w);
+            s.q99_size = size_distribution_.quantile(0.99);
+            cached_q99_ = s.q99_size;
+            last_merge_weight_ = static_cast<size_t>(total_w);
         } else {
             s.q99_size = cached_q99_;
         }

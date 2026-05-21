@@ -83,6 +83,13 @@ check_interval_sec = 30
 warn_drift_ms = 200
 max_clock_drift_ms = 500
 
+[perf]
+hot_path_cpu = 2           # CPU id for processor_thread (event-driven pipeline)
+ws_thread_cpu = 1          # CPU id for WebSocket I/O thread
+rest_thread_cpu = 3        # CPU id for REST API thread
+feature_rate_hz = 20.0     # Event-driven feature extraction rate cap (Hz)
+spsc_queue_capacity = 65536  # Lock-free queue capacity (WS → processor)
+
 
 [external_feeds]
 [external_feeds.funding]

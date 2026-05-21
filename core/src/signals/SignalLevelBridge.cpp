@@ -11,9 +11,9 @@ SignalLevelBridge::SignalLevelBridge(SignalLevelGateway& gateway,
     , bus_(bus)
     , cfg_(cfg) {
     if (cfg_.enabled) {
-        bus_.subscribe([this](const Signal& s) {
+        subscription_id_ = bus_.subscribe([this](const Signal& s) { // AD1: store ID for unsubscribe
             if (s.kind == SignalKind::LevelFormed) {
-                on_level_formed(s.ticker, s.price);
+                on_level_formed(s.ticker, s.price, s.timestamp); // AD3: pass event timestamp
             }
         });
     }
@@ -23,9 +23,18 @@ SignalLevelBridge::SignalLevelBridge(SignalLevelGateway& gateway,
                                    SignalBus& bus)
     : SignalLevelBridge(gateway, bus, Config{}) {}
 
-void SignalLevelBridge::on_level_formed(const Ticker& ticker, double price, double current_mid) {
+SignalLevelBridge::~SignalLevelBridge() { // AD1: unsubscribe so stale lambda can't fire after dtor
+    if (cfg_.enabled) {
+        bus_.unsubscribe(subscription_id_);
+    }
+}
+
+void SignalLevelBridge::on_level_formed(const Ticker& ticker, double price, 
+                                       std::chrono::system_clock::time_point timestamp,
+                                       double current_mid) {
     if (!cfg_.enabled) return;
 
+    int64_t evict_id = -1;
     {
         std::lock_guard<std::mutex> lk(mtx_);
         if (active_levels_.size() >= static_cast<size_t>(cfg_.max_server_levels)) {
@@ -57,21 +66,26 @@ void SignalLevelBridge::on_level_formed(const Ticker& ticker, double price, doub
             }
 
             if (victim != active_levels_.end()) {
-                gateway_.remove(victim->first);
+                evict_id = victim->first; // AD2: defer HTTP call to outside the lock
                 active_levels_.erase(victim);
             }
         }
     }
 
-    int id = gateway_.create(ticker, price);
+    if (evict_id >= 0) {
+        gateway_.remove(evict_id); // AD2: synchronous HTTP outside mtx_ — no deadlock for other publishers
+    }
+
+    int64_t id = gateway_.create(ticker, price);
     if (id > 0) {
         std::lock_guard<std::mutex> lk(mtx_);
-        active_levels_[id] = {id, ticker, price, std::chrono::system_clock::now()};
+        active_levels_[id] = {id, ticker, price, timestamp}; // AD3: use event timestamp
         LOG_INFO("SignalLevelBridge: created server-side level {} for {} at {}", id, ticker, price);
     }
 }
 
-void SignalLevelBridge::on_server_trigger(int id, const Ticker& ticker, double price) {
+void SignalLevelBridge::on_server_trigger(int64_t id, const Ticker& ticker, double price,
+                                         std::chrono::system_clock::time_point timestamp) {
     {
         std::lock_guard<std::mutex> lk(mtx_);
         auto it = active_levels_.find(id);
@@ -80,12 +94,12 @@ void SignalLevelBridge::on_server_trigger(int id, const Ticker& ticker, double p
 
     Signal s {
         .kind = SignalKind::LevelBreak, // or Approach, but spec says non-polling
-        .timestamp = std::chrono::system_clock::now(),
+        .timestamp = timestamp, // AD3: use event timestamp from server notification
         .ticker = ticker,
         .price = price,
         .confidence = 1.0,
         .payload = {
-            .id = FixedString<16>::format("%d", id),
+            .id = FixedString<16>::format("%lld", id),
             .source = "server"
         }
     };

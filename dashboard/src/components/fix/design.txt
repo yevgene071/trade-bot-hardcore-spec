@@ -1,0 +1,83 @@
+Сейчас
+❌ Density — главный визуал
+❌ Цена — тонкая линия в шуме
+❌ Направление не читается
+❌ Текущий прайс — мелкий label
+❌ Стены = ещё больше полос
+Нужно
+✅ Area fill = направление сразу
+✅ Цена — толстая, цветная (up/dn)
+✅ OB density — правая колонка
+✅ Текущий прайс — крупно, всегда
+✅ Стены — только значимые
+
+Понял. Смотрю не на детали — смотрю на проблему целиком.
+
+**Главная проблема: у чарта нет иерархии сигнала.** Всё одинаково важно → ничего не важно. Трейдер за секунду должен считать 3 вещи: куда идёт цена, с какой силой, и где стены. Сейчас ни одна не читается.Окей, это не детали патча — это проблема концепции. Рисую что должно быть.Вот что нужно сделать в коде. Три изменения в `drawPrice`, одно в `drawDensity`:
+
+**1. Area fill под ценовой линией** — добавить в `drawPrice` после отрисовки spread shadow:
+
+```ts
+// После spread shadow, перед ghost lines:
+const isUp = pts[n-1].mid > pts[0].mid;
+const fillClr = isUp ? 'rgba(38,194,110,' : 'rgba(224,80,80,';
+const areaGrad = ctx.createLinearGradient(0, 0, 0, H);
+areaGrad.addColorStop(0, fillClr + '0.15)');
+areaGrad.addColorStop(1, fillClr + '0.01)');
+
+ctx.beginPath();
+let started = false;
+for (let i = 0; i < n; i++) {
+  if (pts[i].mid <= 0) { started = false; continue; }
+  const x = getX(pts[i].ts_unix_ms, latestTs, W);
+  const y = toY(pts[i].mid, H, mn, mx);
+  if (!started) { ctx.moveTo(x, y); started = true; }
+  else ctx.lineTo(x, y);
+}
+ctx.lineTo(getX(pts[n-1].ts_unix_ms, latestTs, W), H);
+ctx.lineTo(getX(pts.find(p=>p.mid>0)!.ts_unix_ms, latestTs, W), H);
+ctx.closePath();
+ctx.fillStyle = areaGrad;
+ctx.fill();
+```
+
+**2. Цветная линия по momentum** — заменить текущий блок рисования price line:
+
+```ts
+// Вместо ctx.strokeStyle = lastAgg > 0.6 ? C.priceAgg : C.priceLine;
+// рисуем посегментно:
+for (let i = 1; i < n; i++) {
+  if (pts[i].mid <= 0) continue;
+  const agg = pts[i].tape_aggression;
+  ctx.beginPath();
+  ctx.moveTo(getX(pts[i-1].ts_unix_ms, latestTs, W), toY(pts[i-1].mid, H, mn, mx));
+  ctx.lineTo(getX(pts[i].ts_unix_ms, latestTs, W), toY(pts[i].mid, H, mn, mx));
+  ctx.strokeStyle = agg > 0.15 ? '#26c26e' : agg < -0.15 ? '#e05050' : '#7a8fa8';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+```
+
+**3. Текущая цена — крупно в заголовке** — текст в `#080c16` хедере, 18px, цвет по направлению. Сейчас это теряется в `C.priceLine` 10px label на canvas.
+
+**4. OB density — только в правую колонку** — в `drawDensity` добавить горизонтальный clip:
+```ts
+// В drawDensity, самое начало colorize loop:
+const obStartX = Math.floor(physW * 0.85); // density только в правых 15%
+for (let x = 0; x < physW; x++) {
+  const fade = x < obStartX ? 0 : (x - obStartX) / (physW - obStartX);
+  img.data[off + 3] = a * fade;
+}
+```
+
+Это один день работы максимум — и чарт станет читаемым.
+
+Это живой прототип — чарт реально анимируется. Что изменилось по сравнению с текущим:
+
+**Чарт:** area fill под ценой (направление сразу видно), линия меняет цвет зелёный/серый/красный по моментуму, OB density ушла в правую колонку — не мешает читать.
+
+**Книга заказов:** depth-bars прямо в строках, spread выделен отдельно, bid/ask цвета не смешиваются.
+
+**Сигналы:** confidence bar под каждым — видно силу сигнала без цифр.
+
+**Топбар:** чище, текущая цена большая и всегда первой в глаза.

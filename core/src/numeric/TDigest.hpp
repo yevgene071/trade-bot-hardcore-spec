@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Kahan.hpp"
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -30,8 +31,8 @@ public:
 
     void add(double value, double weight = 1.0) {
         unmerged_.push_back({value, weight});
-        unmerged_weight_ += weight;
-        total_weight_ += weight;
+        unmerged_weight_.add(weight);
+        total_weight_.add(weight);
         
         // ARCH/SIGNAL § 3.3: online merge when unmerged buffer is large
         if (unmerged_.size() >= delta_ * 10) {
@@ -47,7 +48,7 @@ public:
         std::sort(all.begin(), all.end());
         
         unmerged_.clear();
-        unmerged_weight_ = 0;
+        unmerged_weight_ = {}; // reset Kahan
         centroids_.clear();
         
         if (all.empty()) return;
@@ -57,12 +58,12 @@ public:
         
         for (size_t i = 1; i < all.size(); ++i) {
             double next_weight = weight_so_far + all[i].weight;
-            double q0 = weight_so_far / total_weight_;
-            double q1 = next_weight / total_weight_;
+            double q0 = weight_so_far / total_weight_.sum();
+            double q1 = next_weight / total_weight_.sum();
             
             // Scale function k(q) = delta/2pi * arcsin(2q-1)
             // Limit cluster size by delta: weight <= total_weight * (k(q1) - k(q0))
-            double limit = total_weight_ * delta_inv_ * std::min(q1 * (1 - q1), q0 * (1 - q0)) * 4.0;
+            double limit = total_weight_.sum() * delta_inv_ * std::min(q1 * (1 - q1), q0 * (1 - q0)) * 4.0;
             
             if (cur.weight + all[i].weight <= std::max(1.0, limit)) {
                 cur.mean = (cur.mean * cur.weight + all[i].mean * all[i].weight) / (cur.weight + all[i].weight);
@@ -82,7 +83,7 @@ public:
         if (centroids_.empty()) return NAN;
         if (centroids_.size() == 1) return centroids_[0].mean;
         
-        double target = q * total_weight_;
+        double target = q * total_weight_.sum();
         double weight_so_far = 0;
         
         for (size_t i = 0; i < centroids_.size(); ++i) {
@@ -100,15 +101,15 @@ public:
         return centroids_.back().mean;
     }
 
-    double total_weight() const { return total_weight_ + unmerged_weight_; }
+    double total_weight() const { return total_weight_.sum() + unmerged_weight_.sum(); }
 
 private:
     double delta_;
     double delta_inv_;
     std::vector<Centroid> centroids_;
     std::vector<Centroid> unmerged_;
-    double total_weight_ = 0;
-    double unmerged_weight_ = 0;
+    KahanAccumulator<double> total_weight_;
+    KahanAccumulator<double> unmerged_weight_;
 };
 
 } // namespace trade_bot

@@ -4,6 +4,8 @@
 
 #include <random>
 
+namespace net = boost::asio;
+
 namespace trade_bot {
 
 ClusterSnapshotManager::ClusterSnapshotManager(ClusterSnapshotClient& client,
@@ -57,11 +59,11 @@ std::optional<ClusterSnapshot> ClusterSnapshotManager::get(const Ticker& ticker,
 void ClusterSnapshotManager::schedule_poll_() {
     if (!running_) return;
 
-    std::mt19937_64 rng{std::random_device{}()};
+    // V1: rng_ is a member — avoids expensive random_device syscall on each timer fire
     std::uniform_real_distribution<double> jitter_dist(
         1.0 - cfg_.poll_jitter_pct, 1.0 + cfg_.poll_jitter_pct);
-    
-    double sleep_sec = cfg_.poll_interval_sec.count() * jitter_dist(rng);
+
+    double sleep_sec = cfg_.poll_interval_sec.count() * jitter_dist(rng_);
     timer_->expires_after(std::chrono::milliseconds(static_cast<int64_t>(sleep_sec * 1000)));
     
     timer_->async_wait([this](const boost::system::error_code& ec) {
@@ -79,9 +81,26 @@ void ClusterSnapshotManager::poll_() {
         tickers = active_tickers_;
     }
 
+    // V3: evict stale tickers from cache so it doesn't grow unboundedly
+    {
+        std::lock_guard<std::mutex> lk(cache_mtx_);
+        for (auto it = cache_.begin(); it != cache_.end(); ) {
+            bool found = false;
+            for (const auto& t : tickers) {
+                if (t == it->first) { found = true; break; }
+            }
+            it = found ? std::next(it) : cache_.erase(it);
+        }
+    }
+
     for (const auto& ticker : tickers) {
         if (!running_) break;
-        refresh_ticker_(ticker);
+        // V2: Parallelize fetching to avoid blocking the ExternalIoContext thread
+        // with the sum of all RTTs. CurlHttpClient is thread-safe.
+        net::post(ExternalIoContext::instance().context(), [this, ticker]() {
+            if (!running_) return;
+            refresh_ticker_(ticker);
+        });
     }
 }
 

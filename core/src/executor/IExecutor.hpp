@@ -4,6 +4,7 @@
 #include "trading/ActiveTrade.hpp"
 #include "utils/FixedString.hpp"
 #include "transport/MarketDataFeed.hpp"
+#include "absl/container/btree_map.h"
 #include <vector>
 
 namespace trade_bot {
@@ -43,7 +44,10 @@ public:
     virtual void tick(std::chrono::system_clock::time_point now) = 0;
 
     /// Inject exchange mark prices for PnL calculation.
-    virtual void set_mark_prices(const std::unordered_map<Ticker, double>& marks) = 0;
+    virtual void set_mark_prices(const absl::btree_map<Ticker, double>& marks) = 0;
+
+    /// Update a single mark price.
+    virtual void set_mark_price(const Ticker& ticker, double price) = 0;
 
     /// Close an active trade for the given ticker (strategy-requested invalidation).
     virtual void close_trade(const Ticker& ticker, const FixedString<32>& reason) = 0;

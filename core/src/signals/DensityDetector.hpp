@@ -47,6 +47,8 @@ public:
     void on_frame(const FeatureFrame& frame) override;
     void on_trade(const Trade& trade) override;
     void on_book_update(const OrderBookUpdate& update) override;
+    
+    const char* perf_stage_name() const noexcept override { return "density_eval_us"; }
 
 private:
     struct LevelMeta {
@@ -59,6 +61,7 @@ private:
         double    eaten_volume{0.0};
         int       print_count{0};
         std::chrono::system_clock::time_point last_hit;
+        bool      eating_emitted{false}; // prevents re-firing DensityEating every trade
     };
 
     void check_sticky_levels_(std::chrono::system_clock::time_point now);

@@ -2,21 +2,26 @@
 #include "MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
 #include "metrics/MetricsRegistry.hpp"
+#include "signals/SignalLevelBridge.hpp"
 
 namespace trade_bot {
 
 NotificationFeed::NotificationFeed(std::shared_ptr<IWsClient> ws_client,
                                    TickerUniverse& universe,
-                                   Config cfg)
+                                   Config cfg,
+                                   std::function<void()> on_first_coin_callback,
+                                   SignalLevelBridge* signal_level_bridge)
     : ws_client_(std::move(ws_client))
     , universe_(universe)
-    , cfg_(cfg) {}
+    , cfg_(cfg)
+    , on_first_coin_callback_(std::move(on_first_coin_callback))
+    , signal_level_bridge_(signal_level_bridge) {}
 
 void NotificationFeed::start() {
     if (!cfg_.subscribe) return;
     
     active_ = true;
-    ws_client_->set_on_message([this](const nlohmann::json& j) {
+    ws_client_->set_on_message([this](const nlohmann::json& j, uint64_t /*recv_ns*/, TraceId /*tid*/) {
         if (!active_) return;
         handle_message_(j);
     });
@@ -103,10 +108,22 @@ void NotificationFeed::route_notification_(const Notification& n) {
             break;
         case NotificationKind::ScreenerNewCoin:
             LOG_INFO("[Universe] NotificationFeed: ScreenerNewCoin for {}", n.ticker);
-            universe_.on_screener_new_coin(n.ticker);
+            universe_.on_screener_new_coin(n.ticker, n.timestamp);
+            
+            // Fire callback on first coin (start processor after initial pool populated)
+            if (on_first_coin_callback_ && !first_coin_fired_.exchange(true)) {
+                on_first_coin_callback_();
+            }
+            break;
+        case NotificationKind::SignalLevel:
+            // AD3: Route SignalLevel notifications to bridge with event timestamp
+            if (signal_level_bridge_) {
+                signal_level_bridge_->on_server_trigger(
+                    n.level_id, n.ticker, n.price, n.timestamp);
+            }
             break;
         default:
-            // Trade and SignalLevel are ignored or routed elsewhere
+            // Trade notifications are ignored or routed elsewhere
             break;
     }
 }

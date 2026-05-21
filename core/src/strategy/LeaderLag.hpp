@@ -3,9 +3,13 @@
 #include "IStrategy.hpp"
 #include "StrategyContext.hpp"
 #include <chrono>
-#include <array>
+#include "utils/CircularBuffer.hpp"
+#include <mutex>
 
 namespace trade_bot {
+
+// Forward declaration for tier-based thresholds
+class TickerUniverse;
 
 /**
  * T3-LEADERLAG: Strategy that trades when a correlated asset lags behind its leader.
@@ -23,6 +27,11 @@ public:
         double max_our_change_2s_pct{0.1};          // C4: our move must not exceed 0.1%
         double density_on_path_search_bps{25.0};    // C5: scan for density within 25 bps on path
 
+        // Tier-based threshold arrays (tier0, tier1, tier2)
+        std::vector<double> tier_max_our_change_2s_pct{0.05, 0.1, 0.15};
+        std::vector<double> tier_density_on_path_search_bps{40.0, 30.0, 20.0};
+        std::vector<double> tier_stop_distance_bps{12.0, 8.0, 6.0};
+
         std::chrono::milliseconds lag_max_age{3000};
         std::chrono::seconds entry_timeout{5};
 
@@ -35,18 +44,24 @@ public:
         double no_progress_timeout_sec{15.0};
     };
 
-    LeaderLag(Ticker ticker, TickerInfo info, const Config& cfg);
-    LeaderLag(Ticker ticker, TickerInfo info);
+    LeaderLag(Ticker ticker, TickerInfo info, const Config& cfg, std::shared_ptr<IClock> clock = nullptr);
+    LeaderLag(Ticker ticker, TickerInfo info, std::shared_ptr<IClock> clock = nullptr);
+
+    // Set TickerUniverse for tier-based thresholds
+    void set_universe(const TickerUniverse* universe) { universe_ = universe; }
 
     const std::string& name() const override { return name_; }
     const Ticker& ticker() const override { return ticker_; }
 
     void on_frame(const FeatureFrame& frame) override;
-    void on_signal(const Signal& signal) override;
+    std::optional<TradePlan> on_signal(const Signal& signal, std::chrono::system_clock::time_point now) override;
     std::optional<TradePlan> tick(std::chrono::system_clock::time_point now) override;
     StrategyState get_state() const override;
 
-    bool has_active_plan() const override { return active_plan_.has_value(); }
+    bool has_active_plan() const override {
+        std::lock_guard<std::mutex> lk(plan_mtx_);
+        return active_plan_.has_value();
+    }
 
     // Post-entry invalidation (STRATEGIES.md § 3.7)
     void on_plan_accepted(const TradePlan& plan) override;
@@ -57,10 +72,7 @@ public:
 
 private:
     // Price history ring buffer for swing-low/high stop placement
-    static constexpr size_t kPriceHistorySize = 120;
-    std::array<double, kPriceHistorySize> price_history_{};
-    size_t price_history_idx_ = 0;
-    size_t price_history_count_ = 0;
+    CircularBuffer<double, 120> price_history_;
 
     [[nodiscard]] double find_swing_low(size_t lookback) const;
     [[nodiscard]] double find_swing_high(size_t lookback) const;
@@ -71,9 +83,17 @@ private:
     Config          cfg_;
     StrategyContext ctx_;
     
-    std::optional<TradePlan> active_plan_;
-    // Trade info for post-entry monitoring (set when executor accepts our plan)
-    std::optional<TradePlan> active_trade_info_;
+    // plan_mtx_ guards active_plan_ and active_trade_info_.
+    // Lock order: always plan_mtx_ before ctx_.mtx_ to prevent deadlocks.
+    mutable std::mutex        plan_mtx_;
+    std::optional<TradePlan>  active_plan_;
+    std::optional<TradePlan>  active_trade_info_;
+    
+    // Tier-based thresholds support
+    const TickerUniverse* universe_{nullptr};
+    
+    // P0 DETERMINISM: Clock abstraction for replay (injected via constructor)
+    std::shared_ptr<IClock> clock_;
 };
 
 } // namespace trade_bot

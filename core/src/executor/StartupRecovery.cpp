@@ -98,19 +98,27 @@ StartupRecovery::Result StartupRecovery::run() {
                 
                 drift_detected = true;
             }
-            trade.state = TradeState::Open;
-            trade.executed_size = std::abs(pit->size);
+            trade.state           = TradeState::Open;
+            trade.executed_size   = std::abs(pit->size);
             trade.avg_entry_price = pit->avg_price;
+            // Populate avg_price_fix from server so BE-stop after TP1 works correctly.
+            // Without this the field stays 0 and the BE-stop never fires for recovered trades.
+            if (pit->avg_price_fix > 0.0)
+                trade.avg_price_fix = pit->avg_price_fix;
+            else
+                trade.avg_price_fix = pit->avg_price;
             res.recovered_trades.push_back(trade);
             
-            // Check if stop exists
+            // Check if stop exists on the exchange.
             auto& orders = open_orders[ticker];
             bool has_stop = std::any_of(orders.begin(), orders.end(), [](const RestOrder& o) {
                 return o.type == OrderType::StopLoss || o.type == OrderType::Stop;
             });
-            
+
             if (!has_stop) {
-                res.log_entries.push_back("WARNING: No stop-loss found for recovered " + ticker);
+                // trade.stop_order_id stays 0; LiveExecutor::tick() re-arms it after 5s.
+                res.log_entries.push_back("WARNING: No stop-loss on exchange for recovered " +
+                    ticker + " — will be re-armed by executor tick");
             }
         } else {
             // No position on server
@@ -120,17 +128,41 @@ StartupRecovery::Result StartupRecovery::run() {
             }
         }
         
-        // Handle orphan orders
+        // Handle orphan orders.
+        // IMPORTANT: recovered trades often have order_id fields == 0 because
+        // they were not persisted. Matching by ID alone would mark every SL/TP
+        // as "orphan" and cancel them. Instead, for tickers with a recovered
+        // position we first try to assign unmatched SL/TP orders to that trade
+        // before falling back to the cancel policy.
         const auto& orders = open_orders[ticker];
+        auto trade_it = std::find_if(res.recovered_trades.begin(), res.recovered_trades.end(),
+            [&](const ActiveTrade& t) { return t.plan.ticker == ticker; });
+
         for (const auto& o : orders) {
-            // Order is "used" only if its ID matches a known order ID in a recovered trade
             bool is_used = std::any_of(res.recovered_trades.begin(), res.recovered_trades.end(),
                 [&](const ActiveTrade& t) {
-                    return o.id == t.entry_order_id ||
-                           o.id == t.stop_order_id  ||
-                           o.id == t.tp1_order_id   ||
-                           o.id == t.tp2_order_id;
+                    return o.id != 0 && (o.id == t.entry_order_id ||
+                                         o.id == t.stop_order_id  ||
+                                         o.id == t.tp1_order_id   ||
+                                         o.id == t.tp2_order_id);
                 });
+
+            if (!is_used && trade_it != res.recovered_trades.end()) {
+                // Assign this order to the recovered trade by type instead of cancelling.
+                if ((o.type == OrderType::StopLoss || o.type == OrderType::Stop)
+                        && trade_it->stop_order_id == 0) {
+                    trade_it->stop_order_id = o.id;
+                    is_used = true;
+                    res.log_entries.push_back("Assigned existing SL id=" + std::to_string(o.id) +
+                                              " to recovered " + ticker);
+                } else if (o.type == OrderType::TakeProfit && trade_it->tp1_order_id == 0) {
+                    trade_it->tp1_order_id = o.id;
+                    is_used = true;
+                    res.log_entries.push_back("Assigned existing TP id=" + std::to_string(o.id) +
+                                              " to recovered " + ticker);
+                }
+            }
+
             if (!is_used && cfg_.orphan_cancel_policy == "cancel") {
                 res.log_entries.push_back("Cancelling orphan order " + std::to_string(o.id) + " for " + ticker);
                 gateway_.cancel_order(connection_id_, o.id, ticker);

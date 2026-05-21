@@ -34,6 +34,7 @@ private:
     std::ofstream      out_;
     std::string        path_;
     std::atomic<bool>  active_{false};
+    uint32_t           write_count_{0};
 };
 
 } // namespace trade_bot

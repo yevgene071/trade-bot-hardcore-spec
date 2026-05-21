@@ -20,19 +20,26 @@ public:
         int  max_server_levels{50};
     };
 
-    SignalLevelBridge(SignalLevelGateway& gateway, 
+    SignalLevelBridge(SignalLevelGateway& gateway,
                      SignalBus& bus,
                      Config cfg);
 
-    SignalLevelBridge(SignalLevelGateway& gateway, 
+    SignalLevelBridge(SignalLevelGateway& gateway,
                      SignalBus& bus);
+
+    ~SignalLevelBridge(); // AD1: unsubscribe from bus in destructor
 
     /// Called by LevelDetector when a new level is formed.
     /// current_mid is used for distance-based eviction.
-    void on_level_formed(const Ticker& ticker, double price, double current_mid = 0.0);
+    /// timestamp is the event time from the signal (for deterministic replay).
+    void on_level_formed(const Ticker& ticker, double price, 
+                        std::chrono::system_clock::time_point timestamp,
+                        double current_mid = 0.0);
     
     /// Called when WS notification signal_level_triggered is received.
-    void on_server_trigger(int level_id, const Ticker& ticker, double price);
+    /// timestamp is the event time from the server notification.
+    void on_server_trigger(int64_t level_id, const Ticker& ticker, double price,
+                          std::chrono::system_clock::time_point timestamp);
 
 private:
     SignalLevelGateway& gateway_;
@@ -40,15 +47,16 @@ private:
     Config              cfg_;
 
     struct LevelInfo {
-        int id;
+        int64_t id;
         Ticker ticker;
         double price;
         std::chrono::system_clock::time_point created_at;
         bool triggered{false};
     };
 
-    std::map<int, LevelInfo> active_levels_;
-    std::mutex               mtx_;
+    std::map<int64_t, LevelInfo> active_levels_;
+    std::mutex                   mtx_;
+    SignalBus::SubscriptionId    subscription_id_{};  // AD1
 };
 
 } // namespace trade_bot

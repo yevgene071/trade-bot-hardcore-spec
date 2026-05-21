@@ -10,6 +10,8 @@ abseil/20230802.1
 hdrhistogram-c/0.11.8
 xsimd/13.0.0
 concurrentqueue/1.0.5
+flatbuffers/23.5.26
+simdjson/4.6.3
 
 [test_requires]
 gtest/1.14.0

@@ -22,10 +22,11 @@ public:
 
     size_t count() const { return n_; }
     T mean() const { return mean_; }
-    T variance() const { 
+    T variance() const {
         if (n_ < 2) return T(0);
         // T4-MATH: Ensure variance is never negative due to precision jitter (#143)
-        return std::max(T(0), m2_ / n_); 
+        // Bessel's correction: divide by (n-1) for unbiased sample variance.
+        return std::max(T(0), m2_ / static_cast<T>(n_ - 1));
     }
     T stdev() const { 
         T v = variance();
@@ -52,12 +53,10 @@ public:
         T r = delta * weight / weight_sum_;
         mean_ += r;
         m2_ += old_weight_sum * delta * r;
-        
-        // T4-MATH: Protect against runaway error accumulation
-        if (weight_sum_ > 1e18) { // Normalize if sum becomes too large
-            m2_ /= 2.0;
-            weight_sum_ /= 2.0;
-        }
+        // L2: Halving m2_ and weight_sum_ preserves variance() but biases
+        // subsequent mean_ updates (denominator becomes old/2 + new instead of
+        // old + new). Removed: overflow at 1e18 is theoretical for double weights
+        // and the "fix" introduced worse errors than it prevented.
     }
 
     T weight_sum() const { return weight_sum_; }

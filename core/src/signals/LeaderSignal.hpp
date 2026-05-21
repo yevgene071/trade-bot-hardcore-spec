@@ -35,6 +35,8 @@ public:
     void on_leader_frame(const FeatureFrame& frame);
     void on_trade(const Trade& trade) override;
     void on_book_update(const OrderBookUpdate& update) override;
+    
+    const char* perf_stage_name() const noexcept override { return "leader_eval_us"; }
 
 private:
     void check_signal_(std::chrono::system_clock::time_point now);

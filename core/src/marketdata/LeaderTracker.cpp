@@ -38,6 +38,10 @@ void LeaderTracker::update(double leader_price, double follower_price) {
             std::max(0.0, cusum_minus_ + (cfg_.cusum_baseline - c - cfg_.cusum_drift));
         if (cusum_minus_ > cfg_.cusum_threshold) {
             cusum_alarm_ = true;
+            cusum_minus_ = 0.0;  // T3: reset accumulator so monitor can re-arm
+        } else if (c >= cfg_.cusum_baseline && cusum_minus_ == 0.0) {
+            // T3: auto-reset alarm if correlation is healthy and accumulator is empty
+            cusum_alarm_ = false;
         }
     }
 }
@@ -75,8 +79,11 @@ double LeaderTracker::recompute_lag_observation_() {
     double best_corr = -2.0;
     int    best_shift = 0;
 
-    // Pre-center the windows for faster dot product
-    std::vector<double> dl(W), df(W);
+    // T1: reuse scratch buffers to avoid per-call heap allocation
+    scratch_dl_.resize(W);
+    scratch_df_.resize(W);
+    auto& dl = scratch_dl_;
+    auto& df = scratch_df_;
     for (size_t i = 0; i < W; ++i) {
         dl[i] = w_leader_[i] - mean_l;
         df[i] = w_follower_[i] - mean_f;

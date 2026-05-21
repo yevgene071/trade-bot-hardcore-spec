@@ -23,6 +23,10 @@ public:
         feeds_[kind] = std::move(feed);
     }
 
+    void clear() {
+        feeds_.clear();
+    }
+
     template<typename T>
     std::shared_ptr<T> get_feed(FeedKind kind) const {
         auto it = feeds_.find(kind);

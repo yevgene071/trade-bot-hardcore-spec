@@ -5,15 +5,16 @@
 
 namespace trade_bot {
 
-BinanceFundingClient::BinanceFundingClient(std::shared_ptr<IHttpClient> http)
-    : http_(std::move(http)) {}
+BinanceFundingClient::BinanceFundingClient(std::shared_ptr<IHttpClient> http, std::shared_ptr<IClock> clock)
+    : http_(std::move(http)), clock_(std::move(clock)) {}
 
 bool BinanceFundingClient::is_stale(std::chrono::seconds max_age) const {
     std::shared_lock lock(mutex_);
     if (active_tickers_.empty()) return false;
     
-    auto now = std::chrono::system_clock::now();
-    // Fix for #137: Staleness check only for ACTIVE tickers
+    // ФИКС: Используем инжектированные часы, если они доступны (для core_probe)
+    auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
+    
     for (const auto& ticker : active_tickers_) {
         auto it = funding_map_.find(ticker);
         if (it == funding_map_.end() || (now - it->second.timestamp > max_age)) {
@@ -34,7 +35,9 @@ std::optional<FundingData> BinanceFundingClient::get_funding(const std::string& 
 
 void BinanceFundingClient::update_funding(const std::string& ticker, FundingData data) {
     std::unique_lock lock(mutex_);
-    funding_map_[ticker] = {data, std::chrono::system_clock::now()};
+    // ФИКС: Временная метка сохраняется на базе виртуального или реального времени
+    auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
+    funding_map_[ticker] = {data, now};
 }
 
 void BinanceFundingClient::add_ticker(const std::string& ticker) {
@@ -66,18 +69,13 @@ void BinanceFundingClient::schedule_poll(std::chrono::seconds interval) {
 void BinanceFundingClient::poll() {
     std::set<std::string> tickers_to_poll;
     {
+        // ФИКС: Защищаем проверку active_tickers_.empty() и копирование мьютексом
         std::shared_lock lock(mutex_);
+        if (active_tickers_.empty()) return;
         tickers_to_poll = active_tickers_;
     }
 
-    if (tickers_to_poll.empty()) return;
-
     try {
-        // Optimization for #137: Use specific symbol polling if only few tickers are active
-        // But Binance /premiumIndex without symbol is actually quite efficient for many tickers.
-        // If we have < 5 tickers, we might want to poll them individually.
-        // For now, let's keep the bulk poll but filter the results to save processing.
-        
         auto resp = http_->get("https://fapi.binance.com/fapi/v1/premiumIndex");
         if (resp.status != 200) {
             LOG_WARN("BinanceFundingClient: failed to fetch funding, status: {}", resp.status);

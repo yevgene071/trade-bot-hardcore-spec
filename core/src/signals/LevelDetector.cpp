@@ -1,6 +1,7 @@
 #include "LevelDetector.hpp"
 #include "ApproachAnalyzer.hpp"
 #include "logger/Logger.hpp"
+#include "perf/TraceContext.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -24,6 +25,7 @@ LevelDetector::LevelDetector(Ticker ticker,
 
 void LevelDetector::on_frame(const FeatureFrame& frame) {
     if (frame.ticker != ticker_) return;
+    if (!frame.valid) return;
 
     update_extremes_(frame);
     
@@ -37,7 +39,11 @@ void LevelDetector::on_frame(const FeatureFrame& frame) {
 }
 
 void LevelDetector::rebuild() {
-    rebuild_levels_(std::chrono::system_clock::now());
+    rebuild_levels_(std::chrono::system_clock::now()); // AA3: non-deterministic; prefer rebuild(ts) in replay
+}
+
+void LevelDetector::rebuild(std::chrono::system_clock::time_point now) { // AA3
+    rebuild_levels_(now);
 }
 
 void LevelDetector::on_trade(const Trade& /*trade*/) {
@@ -49,13 +55,8 @@ void LevelDetector::on_book_update(const OrderBookUpdate& /*update*/) {
 void LevelDetector::update_extremes_(const FeatureFrame& frame) {
     mid_history_.push_back({frame.timestamp, frame.mid});
 
-    // Multi-scale extremes: short ~1s (hw=5), medium ~5s (hw=25), long ~15s (hw=75) at 10 Hz.
-    // Each scale checks a different lag point — no same-point overlap within one call.
-    // Duplicates across calls (medium/long revisiting a point short already caught) are
-    // rejected by binary-searching the chronologically-ordered extremes_ deque.
-    static constexpr struct { size_t hw; } kScales[] = {{5}, {25}, {75}};
-
-    for (const auto& [hw] : kScales) {
+    // AA4: multi-scale windows come from config (no longer hardcoded {5,25,75})
+    for (const size_t hw : cfg_.extreme_half_windows) {
         const size_t need = 2 * hw + 1;
         if (mid_history_.size() < need) continue;
         const size_t i = mid_history_.size() - (hw + 1);
@@ -209,14 +210,29 @@ void LevelDetector::rebuild_levels_(std::chrono::system_clock::time_point now) {
                 .confidence = nl.confidence,
                 .payload = {.touches = nl.touches}
             };
+            s.trigger_trace_id = current_trace_context().trace_id;
             bus_.publish(s);
         }
     }
 
     active_levels_ = std::move(new_levels);
+
+    // AA5: prune approach state for levels that were evicted from the active set
+    for (auto it = current_approaches_.begin(); it != current_approaches_.end(); ) {
+        bool still_active = false;
+        for (const auto& lv : active_levels_) {
+            if (std::abs(lv.price - it->second.level_price) < eps) { still_active = true; break; }
+        }
+        if (still_active) {
+            ++it; // AA5: erase returns void in this absl version
+        } else {
+            current_approaches_.erase(it++);
+        }
+    }
 }
 
 void LevelDetector::check_approaches_(const FeatureFrame& frame) {
+    if (frame.mid <= 0.0) return;
     const double price_inc = book_.price_increment();
     for (const auto& level : active_levels_) {
         double dist_bps = (frame.mid - level.price) / frame.mid * 10000.0;
@@ -227,7 +243,12 @@ void LevelDetector::check_approaches_(const FeatureFrame& frame) {
                 SignalPayload payload;
                 payload.dist_bps = dist_bps;
                 payload.touches = level.touches;
-                
+                // GAP-02: level age at approach time, in ms. Used by BounceFromDensity
+                // to enforce max_level_age (§1.3: level must be ≤ 60s old).
+                payload.age_ms = static_cast<int>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        frame.timestamp - level.created_at).count());
+
                 if (analyzer_) {
                     auto analysis = analyzer_->analyze(level.price, frame.timestamp);
                     payload.speed_bps = analysis.speed_bps_sec;
@@ -247,6 +268,7 @@ void LevelDetector::check_approaches_(const FeatureFrame& frame) {
                     .confidence = level.confidence,
                     .payload = payload
                 };
+                s.trigger_trace_id = current_trace_context().trace_id;
                 bus_.publish(s);
                 current_approaches_[tick] = {
                     .level_price = level.price,
@@ -276,6 +298,7 @@ void LevelDetector::check_approaches_(const FeatureFrame& frame) {
                     .confidence = level.confidence,
                     .payload = payload
                 };
+                s.trigger_trace_id = current_trace_context().trace_id;
                 bus_.publish(s);
                 current_approaches_.erase(it);
             }

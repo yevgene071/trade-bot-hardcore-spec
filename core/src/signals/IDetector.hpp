@@ -20,6 +20,9 @@ public:
 
     /// Process a book update (event-driven).
     virtual void on_book_update(const OrderBookUpdate& update) = 0;
+
+    /// Return performance stage name for latency tracking.
+    virtual const char* perf_stage_name() const noexcept = 0;
 };
 
 } // namespace trade_bot

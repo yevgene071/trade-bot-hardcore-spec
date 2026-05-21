@@ -1,4 +1,5 @@
 #include "TapeAnalyzer.hpp"
+#include "perf/TraceContext.hpp"
 #include <cmath>
 
 namespace trade_bot {
@@ -15,7 +16,7 @@ TapeAnalyzer::TapeAnalyzer(Ticker ticker,
     , stream_(stream)
     , universe_(universe)
     , cfg_(cfg)
-    , background_intensity_(Ema<double>::from_period(300)) // ~30s at 10Hz
+    , background_intensity_(Ema<double>::from_period(cfg.background_intensity_period)) // Z2
 {}
 
 TapeAnalyzer::TapeAnalyzer(Ticker ticker,
@@ -27,6 +28,7 @@ TapeAnalyzer::TapeAnalyzer(Ticker ticker,
 
 void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
     if (frame.ticker != ticker_) return;
+    if (!frame.valid) return;
 
     auto stats = stream_.get_stats();
     double current_rate = stats.hawkes_intensity_total;
@@ -35,14 +37,26 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
     background_intensity_.update(current_rate);
     double mu = background_intensity_.value();
 
-    // Update peak rate (simple 60s sliding peak)
-    if (current_rate > peak_intensity_60s_) {
-        peak_intensity_60s_ = current_rate;
-        last_peak_ts_ = frame.timestamp;
-    } else if (last_peak_ts_ != std::chrono::system_clock::time_point{} && 
-               (frame.timestamp - last_peak_ts_) > std::chrono::seconds(60)) {
-        peak_intensity_60s_ = current_rate;
-        last_peak_ts_ = frame.timestamp;
+    // Z4: keep last_pre_trade_mid_ valid even before the first book update arrives
+    if (frame.mid > 0.0 && last_pre_trade_mid_ == 0.0) {
+        last_pre_trade_mid_ = frame.mid;
+    }
+
+    // Z1: use a proper sliding window for peak intensity over the last 60 seconds.
+    intensity_history_.push_back({frame.timestamp, current_rate});
+    
+    // Evict old entries
+    while (intensity_history_.size() > 0 && 
+           (frame.timestamp - intensity_history_.front().ts) > std::chrono::seconds(60)) {
+        intensity_history_.pop_front();
+    }
+    
+    // Recalculate peak
+    peak_intensity_60s_ = 0.0;
+    for (size_t i = 0; i < intensity_history_.size(); ++i) {
+        if (intensity_history_[i].rate > peak_intensity_60s_) {
+            peak_intensity_60s_ = intensity_history_[i].rate;
+        }
     }
 
     // 1. TapeBurst Detection
@@ -53,11 +67,11 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
     if (stats.hawkes_intensity_buy >= stats.hawkes_intensity_sell * cfg_.burst_ratio) {
         burst_now = true;
         burst_side = Side::Buy;
-        ratio = stats.hawkes_intensity_buy / std::max(0.1, stats.hawkes_intensity_sell);
+        ratio = stats.hawkes_intensity_buy / std::max(cfg_.burst_min_denominator, stats.hawkes_intensity_sell); // Z3
     } else if (stats.hawkes_intensity_sell >= stats.hawkes_intensity_buy * cfg_.burst_ratio) {
         burst_now = true;
         burst_side = Side::Sell;
-        ratio = stats.hawkes_intensity_sell / std::max(0.1, stats.hawkes_intensity_buy);
+        ratio = stats.hawkes_intensity_sell / std::max(cfg_.burst_min_denominator, stats.hawkes_intensity_buy); // Z3
     }
 
     if (burst_now && current_rate >= cfg_.burst_total_intensity_k * mu) {
@@ -74,6 +88,7 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
                     .intensity = current_rate
                 }
             };
+            s.trigger_trace_id = current_trace_context().trace_id;
             bus_.publish(s);
             burst_signal_active_ = true;
         }
@@ -88,7 +103,7 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
     
     fade_cusum_.update(current_rate, target, drift);
 
-    if (fade_cusum_.value() >= cfg_.fade_cusum_h && peak_intensity_60s_ > 5.0) {
+    if (fade_cusum_.value() >= cfg_.fade_cusum_h && peak_intensity_60s_ > cfg_.fade_peak_gate) { // Z5
         if (!fade_signal_active_) {
             Signal s {
                 .kind = SignalKind::TapeFade,
@@ -102,10 +117,11 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
                     .cusum = fade_cusum_.value()
                 }
             };
+            s.trigger_trace_id = current_trace_context().trace_id;
             bus_.publish(s);
             fade_signal_active_ = true;
         }
-    } else if (current_rate > target * 1.5) {
+    } else if (current_rate > target * cfg_.fade_reset_ratio) { // Z5
         fade_signal_active_ = false;
         fade_cusum_.reset();
     }
@@ -142,6 +158,7 @@ void TapeAnalyzer::on_frame(const FeatureFrame& frame) {
                     .max_range_bps = cfg_.distribution_max_range_bps
                 }
             };
+            s.trigger_trace_id = current_trace_context().trace_id;
             bus_.publish(s);
             distribution_signal_active_ = true;
         }
@@ -163,11 +180,13 @@ void TapeAnalyzer::on_trade(const Trade& trade) {
         adaptive_threshold);
 
     if (size_usd >= min_threshold) {
-        // Check price move
-        auto mid = book_.mid();
-        if (mid) {
-            double delta_bps = std::abs(trade.price - *mid) / (*mid) * 10000.0;
-            if (delta_bps >= cfg_.flush_min_move_bps) {
+        const double mid_val = last_pre_trade_mid_;
+        if (mid_val > 0.0) {
+            double delta_bps = std::abs(trade.price - mid_val) / mid_val * 10000.0;
+            bool cooldown_ok = last_flush_ts_ == std::chrono::system_clock::time_point{} ||
+                               (trade.timestamp - last_flush_ts_) >= cfg_.flush_cooldown;
+            if (delta_bps >= cfg_.flush_min_move_bps && cooldown_ok) {
+                last_flush_ts_ = trade.timestamp;
                 Signal s {
                     .kind = SignalKind::TapeFlush,
                     .timestamp = trade.timestamp,
@@ -179,6 +198,7 @@ void TapeAnalyzer::on_trade(const Trade& trade) {
                         .delta_bps = delta_bps
                     }
                 };
+                s.trigger_trace_id = current_trace_context().trace_id;
                 bus_.publish(s);
             }
         }
@@ -186,7 +206,7 @@ void TapeAnalyzer::on_trade(const Trade& trade) {
 }
 
 void TapeAnalyzer::on_book_update(const OrderBookUpdate& /*update*/) {
-    // Distribution could be implemented here or in on_frame
+    if (auto m = book_.mid()) last_pre_trade_mid_ = *m;
 }
 
 } // namespace trade_bot

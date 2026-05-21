@@ -41,11 +41,12 @@ TEST(CodecTest, OrderUpdateParsing) {
     };
     
     auto update = MetaScalpCodec::parse_order_update(j);
-    EXPECT_EQ(update.order_id, 12345);
-    EXPECT_EQ(update.ticker, "BTCUSDT");
-    EXPECT_EQ(update.side, Side::Buy);
-    EXPECT_EQ(update.type, OrderType::Limit);
-    EXPECT_EQ(update.price, 60000.5);
+    ASSERT_TRUE(update.has_value());
+    EXPECT_EQ(update->order_id, 12345);
+    EXPECT_EQ(update->ticker, "BTCUSDT");
+    EXPECT_EQ(update->side, Side::Buy);
+    EXPECT_EQ(update->type, OrderType::Limit);
+    EXPECT_EQ(update->price, 60000.5);
 }
 
 TEST(CodecTest, PositionUpdateAvgPrice) {
@@ -62,9 +63,10 @@ TEST(CodecTest, PositionUpdateAvgPrice) {
     };
     
     auto pos = MetaScalpCodec::parse_position_update(j);
-    EXPECT_EQ(pos.avg_price, 2500.0);
-    EXPECT_EQ(pos.avg_price_fix, 2510.0);
-    EXPECT_EQ(pos.avg_price_dyn, 2490.0);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->avg_price, 2500.0);
+    EXPECT_EQ(pos->avg_price_fix, 2510.0);
+    EXPECT_EQ(pos->avg_price_dyn, 2490.0);
 }
 
 TEST(CodecTest, MissingRequiredField) {
@@ -72,7 +74,8 @@ TEST(CodecTest, MissingRequiredField) {
         {"Ticker", "BTCUSDT"}
         // Missing OrderId
     };
-    EXPECT_THROW(MetaScalpCodec::parse_order_update(j), CodecError);
+    auto res = MetaScalpCodec::parse_order_update(j);
+    EXPECT_FALSE(res.has_value());
 }
 
 TEST(CodecTest, FinresUpdateParsing) {
@@ -91,9 +94,10 @@ TEST(CodecTest, FinresUpdateParsing) {
     };
     
     auto finres = MetaScalpCodec::parse_finres_update(j);
-    ASSERT_EQ(finres.finreses.size(), 1);
-    EXPECT_EQ(finres.finreses[0].currency, "USDT");
-    EXPECT_EQ(finres.finreses[0].result, 10.5);
+    ASSERT_TRUE(finres.has_value());
+    ASSERT_EQ(finres->finreses.size(), 1);
+    EXPECT_EQ(finres->finreses[0].currency, "USDT");
+    EXPECT_EQ(finres->finreses[0].result, 10.5);
 }
 
 TEST(CodecTest, CamelCaseParsing) {
@@ -107,8 +111,9 @@ TEST(CodecTest, CamelCaseParsing) {
         {"status", "New"}
     };
     auto update = MetaScalpCodec::parse_order_update(j_order);
-    EXPECT_EQ(update.order_id, 12345);
-    EXPECT_EQ(update.ticker, "BTCUSDT");
+    ASSERT_TRUE(update.has_value());
+    EXPECT_EQ(update->order_id, 12345);
+    EXPECT_EQ(update->ticker, "BTCUSDT");
 
     // Test orderbook snapshot with lowercase keys
     nlohmann::json j_ob = {
@@ -122,9 +127,10 @@ TEST(CodecTest, CamelCaseParsing) {
         }}
     };
     auto snap = MetaScalpCodec::parse_orderbook_snapshot(j_ob, "ETHUSDT");
-    ASSERT_EQ(snap.asks.size(), 1);
-    EXPECT_DOUBLE_EQ(snap.asks[0].price, 2500.1);
-    ASSERT_EQ(snap.bids.size(), 1);
-    EXPECT_DOUBLE_EQ(snap.bids[0].price, 2499.9);
+    ASSERT_TRUE(snap.has_value());
+    ASSERT_EQ(snap->asks.size(), 1);
+    EXPECT_DOUBLE_EQ(snap->asks[0].price, 2500.1);
+    ASSERT_EQ(snap->bids.size(), 1);
+    EXPECT_DOUBLE_EQ(snap->bids[0].price, 2499.9);
 }
 

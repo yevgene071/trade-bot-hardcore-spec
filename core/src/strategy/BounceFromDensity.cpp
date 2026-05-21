@@ -1,4 +1,5 @@
 #include "BounceFromDensity.hpp"
+#include "universe/TickerUniverse.hpp"
 #include "logger/Logger.hpp"
 #include "numeric/PriceUtils.hpp"
 #include <cmath>
@@ -6,63 +7,101 @@
 
 namespace trade_bot {
 
-BounceFromDensity::BounceFromDensity(Ticker ticker, TickerInfo info, const Config& cfg)
+BounceFromDensity::BounceFromDensity(Ticker ticker, TickerInfo info, const Config& cfg, std::shared_ptr<IClock> clock)
     : ticker_(std::move(ticker))
     , info_(std::move(info))
     , name_("BounceFromDensity")
-    , cfg_(cfg) {}
+    , cfg_(cfg)
+    , clock_(std::move(clock)) {}
 
-BounceFromDensity::BounceFromDensity(Ticker ticker, TickerInfo info)
-    : BounceFromDensity(std::move(ticker), std::move(info), Config{}) {}
+BounceFromDensity::BounceFromDensity(Ticker ticker, TickerInfo info, std::shared_ptr<IClock> clock)
+    : BounceFromDensity(std::move(ticker), std::move(info), Config{}, std::move(clock)) {}
 
 void BounceFromDensity::on_frame(const FeatureFrame& frame) {
     if (frame.ticker == ticker_) {
+        std::lock_guard<std::recursive_mutex> lk(ctx_.mtx_);
         ctx_.update(frame);
     }
 }
 
-void BounceFromDensity::on_signal(const Signal& signal) {
-    if (signal.ticker == ticker_) {
+std::optional<TradePlan> BounceFromDensity::on_signal(const Signal& signal, std::chrono::system_clock::time_point now) {
+    if (signal.ticker != ticker_) return std::nullopt;
+    
+    // Update context with new signal
+    {
+        std::lock_guard<std::recursive_mutex> ctx_lock(ctx_.mtx_);
         ctx_.update(signal);
     }
-}
+    
+    // Event-driven: react immediately to LevelApproach signals
+    if (signal.kind != SignalKind::LevelApproach) return std::nullopt;
+    
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> ctx_lock(ctx_.mtx_);
+    
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    if (clock_) now = clock_->now();
+    if (active_trade_info_) return std::nullopt; // trade already open — no new entries
+    if (active_plan_) return std::nullopt; // plan already pending
+    
+    // 1. Check conditions C1-C7
+    const auto& frame = ctx_.last_frame;
 
-std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time_point now) {
-    std::lock_guard<std::mutex> lock(ctx_.mtx_);
-    if (active_plan_) {
-        // TTL check
-        if (now > active_plan_->valid_until) {
-            active_plan_ = std::nullopt;
-        } else {
+    // C-Spread: reject if spread is too wide (STRATEGIES.md § 1.x)
+    if (frame.spread_bps > cfg_.max_spread_bps) {
+        LOG_TRACE("[Bounce] {} spread too wide: {:.2f} bps (max {:.2f})", ticker_, frame.spread_bps, cfg_.max_spread_bps);
+        return std::nullopt;
+    }
+
+    // C1: LevelApproach (most recent)
+    auto it_approach = ctx_.recent_signals.find(SignalKind::LevelApproach);
+    if (it_approach == ctx_.recent_signals.end() || 
+        (now - it_approach->second.timestamp) > cfg_.approach_signal_max_age) return std::nullopt;
+    
+    double level_price = it_approach->second.price;
+
+    // GAP-02 §1.3: level must be ≤ max_level_age old at time of approach.
+    // payload.age_ms = level age at signal emit; add time elapsed since emit.
+    {
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - it_approach->second.timestamp).count();
+        auto total_level_age_ms = it_approach->second.payload.age_ms + static_cast<int>(elapsed_ms);
+        if (total_level_age_ms > static_cast<int>(cfg_.max_level_age.count() * 1000)) {
+            LOG_TRACE("[Bounce] {} level {:.4f} too old: {}ms (max {}ms)",
+                      ticker_, level_price, total_level_age_ms, cfg_.max_level_age.count() * 1000);
             return std::nullopt;
         }
     }
 
-    // 1. Check conditions C1-C7
-    const auto& frame = ctx_.last_frame;
-    
-    // C1: LevelApproach (most recent)
-    auto it_approach = ctx_.recent_signals.find(SignalKind::LevelApproach);
-    if (it_approach == ctx_.recent_signals.end() || 
-        (now - it_approach->second.timestamp) > std::chrono::seconds(5)) return std::nullopt;
-    
-    double level_price = it_approach->second.price;
-    
+    // §0.8: N-th approach filter — 3rd+ approach = breakout only, skip bounce
+    if (cfg_.max_level_touches_for_bounce > 0 &&
+        it_approach->second.payload.touches > cfg_.max_level_touches_for_bounce) {
+        LOG_TRACE("[Bounce] {} level {:.4f} has {} touches > {} max (3rd+ approach)",
+                  ticker_, level_price, it_approach->second.payload.touches, cfg_.max_level_touches_for_bounce);
+        return std::nullopt;
+    }
+
     // C2: Impulse approach requirement
     // T3-BOUNCE: Fix #172 - price_change_1s is 0 after 2s of sticky density.
     // Use speed and type from the LevelApproach signal.
     double approach_speed = it_approach->second.payload.speed_bps;
     std::string_view approach_type = it_approach->second.payload.approach_type;
 
-    if (approach_speed < cfg_.min_approach_speed_bps_1s && approach_type != "impulse") {
-        LOG_TRACE("[Bounce] {} approach speed too low: {} (type: {})", ticker_, approach_speed, approach_type);
+    // Tier-based threshold: use universe_->get_tiered_threshold() if available
+    const double min_speed = universe_ 
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_min_approach_speed_bps_1s)
+        : cfg_.min_approach_speed_bps_1s;
+    
+    if (approach_speed < min_speed && approach_type != "impulse") {
+        LOG_TRACE("[Bounce] {} approach speed {:.1f} < {:.1f} (tiered, type: {})", 
+                  ticker_, approach_speed, min_speed, approach_type);
         return std::nullopt;
     }
 
     // C3: DensityDetected on the same level
     auto it_density = std::find_if(ctx_.signal_history.rbegin(), ctx_.signal_history.rend(), [&](const auto& sig) {
         if (sig.kind != SignalKind::DensityDetected) return false;
-        if ((now - sig.timestamp) > std::chrono::seconds(15)) return false;
+        if ((now - sig.timestamp) > cfg_.max_level_age) return false;
         double dist_bps = std::abs(sig.price - level_price) / level_price * kBpsBase;
         return dist_bps <= 1.5; // 1.5 bps tolerance
     });
@@ -72,7 +111,9 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
     }
 
     // C3b: Density age ≥ configured minimum (STRATEGIES.md § 1.4 — min density maturity)
-    auto density_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - it_density->timestamp).count();
+    // Total age = age at emission (payload.age_ms) + time since emission.
+    auto since_emission_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - it_density->timestamp).count();
+    auto density_age_ms = it_density->payload.age_ms + static_cast<int>(since_emission_ms);
     if (density_age_ms < cfg_.min_density_age_ms.count()) {
         LOG_TRACE("[Bounce] {} density too young: {}ms (need ≥{}ms)", ticker_, density_age_ms, cfg_.min_density_age_ms.count());
         return std::nullopt;
@@ -83,6 +124,26 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
     std::string_view side_str = it_density->payload.side;
     double density_size = it_density->payload.size;
     Side plan_side = (side_str == "Bid") ? Side::Buy : Side::Sell;
+
+    // C-Funding: skip if funding rate is strongly against our direction
+    if (cfg_.max_funding_against_bps > 0.0 && frame.funding_rate != 0.0) {
+        const double rate_bps = frame.funding_rate * 10000.0;
+        bool against = (plan_side == Side::Buy  && rate_bps >  cfg_.max_funding_against_bps) ||
+                       (plan_side == Side::Sell && rate_bps < -cfg_.max_funding_against_bps);
+        if (against) {
+            LOG_TRACE("[Bounce] {} rejected: funding {:.2f} bps against side", ticker_, rate_bps);
+            return std::nullopt;
+        }
+    }
+
+    // C-MarkMid: skip if mark price diverges from mid (exchange price distortion)
+    if (cfg_.max_mark_mid_bps > 0.0 && frame.mark_price > 0.0 && frame.mid > 0.0) {
+        const double diverge_bps = std::abs(frame.mark_price - frame.mid) / frame.mid * kBpsBase;
+        if (diverge_bps > cfg_.max_mark_mid_bps) {
+            LOG_TRACE("[Bounce] {} rejected: mark/mid divergence {:.2f} bps", ticker_, diverge_bps);
+            return std::nullopt;
+        }
+    }
 
     // C-Invalidation: DensityRemoved on this level (STRATEGIES.md § 1.7)
     {
@@ -113,10 +174,15 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
         }
     }
 
-    // Relative density check
+    // Relative density check (tier-based)
+    const double min_rel_density = universe_
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_min_relative_density)
+        : cfg_.min_relative_density;
+    
     double book_depth = (side_str == "Bid") ? frame.bid_depth_10 : frame.ask_depth_10;
-    if (book_depth > 0 && (density_size / book_depth) < cfg_.min_relative_density) {
-        LOG_TRACE("[Bounce] {} density too small vs depth: {}", ticker_, density_size / book_depth);
+    if (book_depth > 0 && (density_size / book_depth) < min_rel_density) {
+        LOG_TRACE("[Bounce] {} density {:.2f} / depth {:.2f} = {:.3f} < {:.3f} (tiered)", 
+                  ticker_, density_size, book_depth, density_size / book_depth, min_rel_density);
         return std::nullopt;
     }
 
@@ -134,13 +200,17 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
         }
     }
 
-    // C5: Driver (Leader) alignment
+    // C5: Driver (Leader) alignment (tier-based)
     // "Поводырь: Желательно чтобы шел в сторону отскока / Разворачивался"
+    const double min_driver_reversal = universe_
+        ? universe_->get_tiered_threshold(ticker_, cfg_.tier_min_driver_reversal_bps)
+        : cfg_.min_driver_reversal_bps;
+    
     double leader_move = (plan_side == Side::Buy) ? frame.leader_change_1s : -frame.leader_change_1s;
     // T0-BUGFIX: Removed division by 100 — leader_move is a fractional decimal,
     // kBpsBase=10000 converts to bps. Previously /100 turned bps→percent, which
     // never exceeded min_driver_reversal_bps (nominally 2 bps), making this check dead.
-    if (leader_move < 0 && std::abs(leader_move * kBpsBase) > cfg_.min_driver_reversal_bps) {
+    if (leader_move < 0 && std::abs(leader_move * kBpsBase) > min_driver_reversal) {
         // Driver is moving AGAINST the bounce (i.e. still going towards the density)
         LOG_TRACE("[Bounce] {} leader moving against bounce: {}", ticker_, leader_move);
         return std::nullopt;
@@ -194,28 +264,68 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
 
     LOG_INFO("[Strategy] BounceFromDensity TRIGGERED for {}! Submitting plan.", ticker_);
 
+    // §5.6: Density cluster — scan for additional same-side densities within cluster range.
+    // Entry anchors to the first (nearest) density; stop anchors beyond the furthest.
+    double stop_anchor_price = density_price;
+    if (cfg_.density_cluster_enabled) {
+        double far_price = density_price;
+        for (auto rit = ctx_.signal_history.rbegin(); rit != ctx_.signal_history.rend(); ++rit) {
+            if (rit->kind != SignalKind::DensityDetected) continue;
+            if ((now - rit->timestamp) > cfg_.max_level_age) continue;
+            if (rit->payload.side != side_str) continue;
+            double dist_bps = std::abs(rit->price - density_price) / density_price * kBpsBase;
+            if (dist_bps > cfg_.density_cluster_max_bps || dist_bps < 0.5) continue; // skip primary itself
+            if (plan_side == Side::Buy  && rit->price < far_price) far_price = rit->price;
+            if (plan_side == Side::Sell && rit->price > far_price) far_price = rit->price;
+        }
+        if (far_price != density_price) {
+            LOG_INFO("[Bounce] {} density cluster: first={:.4f} far={:.4f} — stop anchored to far density",
+                     ticker_, density_price, far_price);
+            stop_anchor_price = far_price;
+        }
+    }
+
     // Calculate Prices
-    // FIX: stop_price is based on density_price, NOT level_price.
-    // The stop should be PLACED BEYOND THE DENSITY, not beyond the approach level.
-    // This is critical for correct R:R — stop is ~5 bps past the density, not 5 bps
-    // past the approach level which could be much further.
+    // Entry anchors to first (nearest) density; stop goes beyond stop_anchor_price (may be cluster far).
     double entry_price, stop_price;
     double offset = level_price * (cfg_.entry_offset_bps / kBpsBase);
-    double buffer = density_price * (cfg_.stop_buffer_bps / kBpsBase);
+    double buffer = stop_anchor_price * (cfg_.stop_buffer_bps / kBpsBase);
 
     if (plan_side == Side::Buy) {
         entry_price = level_price + offset;
-        stop_price = density_price - buffer;  // below the density (support)
+        stop_price = stop_anchor_price - buffer;  // below the furthest support density
     } else {
         entry_price = level_price - offset;
-        stop_price = density_price + buffer;  // above the density (resistance)
+        stop_price = stop_anchor_price + buffer;  // above the furthest resistance density
     }
 
     entry_price = round_to_tick(entry_price, info_.price_increment);
     stop_price = round_to_tick(stop_price, info_.price_increment);
 
+    // C-Anchor: §1.8 — a level must anchor the stop within stop_anchor_max_bps
+    if (cfg_.stop_anchor_max_bps > 0.0) {
+        bool has_anchor = false;
+        if (plan_side == Side::Buy && frame.nearest_support.has_value()) {
+            double dist = std::abs(*frame.nearest_support - stop_price) / stop_price * kBpsBase;
+            has_anchor = (dist <= cfg_.stop_anchor_max_bps);
+        } else if (plan_side == Side::Sell && frame.nearest_resistance.has_value()) {
+            double dist = std::abs(*frame.nearest_resistance - stop_price) / stop_price * kBpsBase;
+            has_anchor = (dist <= cfg_.stop_anchor_max_bps);
+        } else {
+            has_anchor = true; // LevelDetector not yet populated — skip check
+        }
+        if (!has_anchor) {
+            LOG_TRACE("[Bounce] {} no anchor within {:.0f} bps of stop {:.4f}", ticker_, cfg_.stop_anchor_max_bps, stop_price);
+            return std::nullopt;
+        }
+    }
+
     double risk_per_coin = std::abs(entry_price - stop_price);
-    double tp1_price = (plan_side == Side::Buy) ? entry_price + cfg_.tp1_r * risk_per_coin 
+    if (risk_per_coin <= 0.0) {
+        LOG_TRACE("[Bounce] {} zero risk (entry==stop after rounding), skip", ticker_);
+        return std::nullopt;
+    }
+    double tp1_price = (plan_side == Side::Buy) ? entry_price + cfg_.tp1_r * risk_per_coin
                                                : entry_price - cfg_.tp1_r * risk_per_coin;
     tp1_price = round_to_tick(tp1_price, info_.price_increment);
 
@@ -235,15 +345,61 @@ std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time
         .evidence = {*it_density, it_approach->second},
         .valid_until = now + cfg_.entry_timeout,
         .no_progress_timeout_sec = cfg_.no_progress_timeout_sec,
-        .density_price_for_stop = density_price
+        .min_follow_through_bps = 0.0,  // M-06: Bounce uses no_progress_timeout, not follow-through
+        .density_price_for_stop = density_price,
+        .approach_count = it_approach->second.payload.touches,
+        .frame_at_entry = {} // Will be set below
     };
+    plan.trace_id = plan.evidence.empty() ? 0 : plan.evidence.back().trigger_trace_id;
+    
+    // P0 DETERMINISM: Use frame snapshot from history matching the trigger trace_id
+    if (plan.trace_id != 0) {
+        auto historical_frame = ctx_.get_frame_by_trace_id(plan.trace_id);
+        if (historical_frame) {
+            plan.frame_at_entry = *historical_frame;
+            // Debug assertion: verify frame snapshot matches trigger
+            if (plan.frame_at_entry.derived_from != plan.trace_id) {
+                LOG_ERROR("[Bounce] {}: frame_at_entry.derived_from ({}) != plan.trace_id ({})",
+                          ticker_, plan.frame_at_entry.derived_from, plan.trace_id);
+            }
+        } else {
+            LOG_WARN("[Bounce] {}: No frame snapshot found for trace_id {}, using current frame",
+                     ticker_, plan.trace_id);
+            plan.frame_at_entry = frame;
+        }
+    } else {
+        plan.frame_at_entry = frame;
+    }
 
     active_plan_ = plan;
     return plan;
 }
 
+std::optional<TradePlan> BounceFromDensity::tick(std::chrono::system_clock::time_point now) {
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    if (clock_) now = clock_->now();
+    
+    // TTL check for pending plans
+    if (active_plan_ && now > active_plan_->valid_until) {
+        LOG_DEBUG("[Bounce] {} plan expired (TTL)", ticker_);
+        active_plan_ = std::nullopt;
+    }
+    
+    // All entry logic moved to on_signal() for event-driven processing.
+    // tick() only handles TTL cleanup.
+    return std::nullopt;
+}
+
+bool BounceFromDensity::has_active_plan() const {
+    std::lock_guard<std::mutex> lock(plan_mtx_);
+    return active_plan_.has_value();
+}
+
 void BounceFromDensity::on_plan_accepted(const TradePlan& plan) {
     if (plan.strategy_name == name_) {
+        std::lock_guard<std::mutex> lock(plan_mtx_);
         active_trade_info_ = plan;
         LOG_INFO("[Bounce] {}: trade accepted, beginning post-entry monitoring (density_price_for_stop={:.2f})",
                  ticker_, plan.density_price_for_stop);
@@ -251,15 +407,19 @@ void BounceFromDensity::on_plan_accepted(const TradePlan& plan) {
 }
 
 void BounceFromDensity::reset_active_plan() {
+    std::lock_guard<std::mutex> lock(plan_mtx_);
     active_plan_ = std::nullopt;
     active_trade_info_ = std::nullopt;
     LOG_INFO("[Bounce] {}: plan rejected/reset, post-entry monitoring cleared", ticker_);
 }
 
 std::optional<FixedString<32>> BounceFromDensity::check_close_conditions(const FeatureFrame&) {
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> ctx_lock(ctx_.mtx_);
     if (!active_trade_info_) return std::nullopt;
     const auto& plan = *active_trade_info_;
-    auto now = std::chrono::system_clock::now();
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
 
     // STRATEGIES.md § 1.7: Density removed before TP1 → close by market
     // Per spec: unbounded scan — scan ALL signal history within no_progress_timeout.
@@ -304,7 +464,8 @@ std::optional<FixedString<32>> BounceFromDensity::check_close_conditions(const F
 }
 
 StrategyState BounceFromDensity::get_state() const {
-    std::lock_guard<std::mutex> lock(ctx_.mtx_);
+    std::lock_guard<std::mutex> plan_lock(plan_mtx_);
+    std::lock_guard<std::recursive_mutex> ctx_lock(ctx_.mtx_);
     StrategyState state;
     state.ticker        = ticker_;
     state.strategy_name = "BounceFromDensity";
@@ -316,7 +477,8 @@ StrategyState BounceFromDensity::get_state() const {
     }
 
     const auto& frame = ctx_.last_frame;
-    const auto now = std::chrono::system_clock::now();
+    // P0-DETERMINISM: Use injected clock for replay determinism
+    const auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
 
     if (frame.ticker.empty()) {
         state.ready_state = StrategyReadyState::Cold;
@@ -324,11 +486,7 @@ StrategyState BounceFromDensity::get_state() const {
         return state;
     }
 
-    int sig_count = 0;
-    for (const auto& sig : ctx_.signal_history) {
-        if ((now - sig.timestamp) <= std::chrono::seconds(60)) ++sig_count;
-    }
-    state.signals_last_60s = sig_count;
+    state.signals_last_60s = ctx_.recent_signal_count_locked(now, std::chrono::seconds(60));
 
     std::vector<StrategyCondition> conds;
 
@@ -370,12 +528,14 @@ StrategyState BounceFromDensity::get_state() const {
         auto it_approach = ctx_.recent_signals.find(SignalKind::LevelApproach);
         double level_price = it_approach != ctx_.recent_signals.end() ?
             it_approach->second.price : 0.0;
-        for (auto rit = ctx_.signal_history.rbegin();
-             rit != ctx_.signal_history.rend(); ++rit) {
-            if (rit->kind != SignalKind::DensityDetected) continue;
-            if ((now - rit->timestamp) > std::chrono::seconds(15)) break;
-            double dist = std::abs(rit->price - level_price) / level_price * kBpsBase;
-            if (dist <= 1.5) { c.current = 1.0; break; }
+        if (level_price > 0.0) { // M-02: guard against division by zero
+            for (auto rit = ctx_.signal_history.rbegin();
+                 rit != ctx_.signal_history.rend(); ++rit) {
+                if (rit->kind != SignalKind::DensityDetected) continue;
+                if ((now - rit->timestamp) > cfg_.max_level_age) break;
+                double dist = std::abs(rit->price - level_price) / level_price * kBpsBase;
+                if (dist <= 1.5) { c.current = 1.0; break; }
+            }
         }
         c.met = (c.current >= 1.0);
         conds.push_back(c);
@@ -391,7 +551,7 @@ StrategyState BounceFromDensity::get_state() const {
         auto it_density = std::find_if(ctx_.signal_history.rbegin(),
             ctx_.signal_history.rend(), [&](const auto& sig) {
                 return sig.kind == SignalKind::DensityDetected &&
-                    (now - sig.timestamp) <= std::chrono::seconds(15);
+                    (now - sig.timestamp) <= cfg_.max_level_age;
             });
         if (it_density != ctx_.signal_history.rend()) {
             std::string_view s = it_density->payload.side;
@@ -426,8 +586,9 @@ StrategyState BounceFromDensity::get_state() const {
         c.target = cfg_.min_driver_reversal_bps;
         // More nuanced: leader not strongly against us
         auto it_d = ctx_.recent_signals.find(SignalKind::DensityDetected);
-        std::string_view side_str = it_d != ctx_.recent_signals.end() ?
-            it_d->second.payload.side : "";
+        bool density_fresh = it_d != ctx_.recent_signals.end() &&
+                             (now - it_d->second.timestamp) <= cfg_.max_level_age;
+        std::string_view side_str = density_fresh ? it_d->second.payload.side : "";
         Side plan_side = (side_str == "Bid") ? Side::Buy : Side::Sell;
         double leader_move = (plan_side == Side::Buy) ?
             frame.leader_change_1s : -frame.leader_change_1s;
@@ -480,14 +641,55 @@ StrategyState BounceFromDensity::get_state() const {
         auto it_approach = ctx_.recent_signals.find(SignalKind::LevelApproach);
         double level_price = it_approach != ctx_.recent_signals.end() ?
             it_approach->second.price : 0.0;
-        for (auto rit = ctx_.signal_history.rbegin();
-             rit != ctx_.signal_history.rend(); ++rit) {
-            if (rit->kind != SignalKind::IcebergSuspected) continue;
-            if ((now - rit->timestamp) > std::chrono::seconds(30)) break;
-            double dist = std::abs(rit->price - level_price) / level_price * kBpsBase;
-            if (dist <= 2.0) { c.current = 1.0; break; }
+        if (level_price > 0.0) { // M-02: guard against division by zero
+            for (auto rit = ctx_.signal_history.rbegin();
+                 rit != ctx_.signal_history.rend(); ++rit) {
+                if (rit->kind != SignalKind::IcebergSuspected) continue;
+                if ((now - rit->timestamp) > std::chrono::seconds(30)) break;
+                double dist = std::abs(rit->price - level_price) / level_price * kBpsBase;
+                if (dist <= 2.0) { c.current = 1.0; break; }
+            }
         }
         c.met = (c.current < 1.0);
+        conds.push_back(c);
+    }
+
+    // C-Funding: funding rate vs our planned side
+    {
+        StrategyCondition c;
+        c.name = "Funding rate";
+        c.unit = "bps";
+        c.target = cfg_.max_funding_against_bps;
+        c.met = true;
+        c.current = 0.0;
+        if (cfg_.max_funding_against_bps > 0.0 && frame.funding_rate != 0.0) {
+            auto it_d = ctx_.recent_signals.find(SignalKind::DensityDetected);
+            bool density_fresh = it_d != ctx_.recent_signals.end() &&
+                                 (now - it_d->second.timestamp) <= cfg_.max_level_age;
+            std::string_view side_str = density_fresh ? it_d->second.payload.side : "";
+            Side plan_side_c = (side_str == "Bid") ? Side::Buy : Side::Sell;
+            const double rate_bps = frame.funding_rate * 10000.0;
+            c.current = std::abs(rate_bps);
+            bool against = (plan_side_c == Side::Buy  && rate_bps >  cfg_.max_funding_against_bps) ||
+                           (plan_side_c == Side::Sell && rate_bps < -cfg_.max_funding_against_bps);
+            c.met = !against;
+        }
+        conds.push_back(c);
+    }
+
+    // C-MarkMid: mark/mid divergence
+    {
+        StrategyCondition c;
+        c.name = "Mark/mid divergence";
+        c.unit = "bps";
+        c.target = cfg_.max_mark_mid_bps;
+        c.met = true;
+        if (cfg_.max_mark_mid_bps > 0.0 && frame.mark_price > 0.0 && frame.mid > 0.0) {
+            c.current = std::abs(frame.mark_price - frame.mid) / frame.mid * kBpsBase;
+            c.met = (c.current <= cfg_.max_mark_mid_bps);
+        } else {
+            c.current = 0.0;
+        }
         conds.push_back(c);
     }
 

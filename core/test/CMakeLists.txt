@@ -611,3 +611,34 @@ target_link_libraries(dashboard_server_test PRIVATE
     obj_logger
     GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost OpenSSL::SSL OpenSSL::Crypto)
 add_test(NAME dashboard_server COMMAND dashboard_server_test)
+
+# ── replay_determinism ─────────────────────────────────
+add_executable(replay_determinism_test
+    integration/replay_determinism_test.cpp
+    ../src/transport/ReplayFeed.cpp
+    ../src/transport/MarketDataFeed.cpp
+    ../src/marketdata/ClusterSnapshot.cpp
+    ../src/transport/ClusterSnapshotClient.cpp
+    ../src/signals/DensityDetector.cpp
+    ../src/signals/IcebergDetector.cpp
+    ../src/signals/TapeAnalyzer.cpp
+    ../src/signals/LevelDetector.cpp
+    ../src/signals/ApproachAnalyzer.cpp
+    ../src/features/FeatureExtractor.cpp
+    ../src/strategy/StrategyEngine.cpp
+    ../src/strategy/BounceFromDensity.cpp
+    ../src/strategy/BreakoutEatThrough.cpp
+    ../src/risk/RiskManager.cpp
+    ../src/risk/NewsCalendar.cpp
+    ../src/risk/AccountStatePersister.cpp
+    ../src/logger/TradeJournal.cpp
+)
+target_link_libraries(replay_determinism_test PRIVATE
+    obj_logger obj_codec obj_orderbook obj_trade_stream obj_signal_bus
+    obj_leader_tracker obj_kalman_lag obj_ticker_universe obj_universe_filters obj_simd_ops
+    obj_metrics_registry obj_perf_registry
+    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog 
+    nlohmann_json::nlohmann_json nlohmann_json_schema_validator
+    absl::btree absl::flat_hash_map absl::hash xsimd 
+    hdr_histogram::hdr_histogram_static boost::boost)
+add_test(NAME replay_determinism COMMAND replay_determinism_test)

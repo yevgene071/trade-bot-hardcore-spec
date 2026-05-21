@@ -10,9 +10,10 @@ namespace trade_bot {
 
 BeastWsClient::BeastWsClient(net::io_context& ioc)
     : m_ioc(ioc)
-    , m_resolver(net::make_strand(ioc))
-    , m_reconnect_timer(ioc)
-    , m_ping_timer(ioc) {
+    , m_strand(net::make_strand(ioc))   // P1: one shared strand for all async ops
+    , m_resolver(m_strand)
+    , m_reconnect_timer(m_strand)       // P1: timers on strand, not bare ioc
+    , m_ping_timer(m_strand) {
     m_ctx.set_default_verify_paths();
     m_ctx.set_verify_mode(net::ssl::verify_peer);
 }
@@ -26,6 +27,7 @@ BeastWsClient::~BeastWsClient() {
 void BeastWsClient::connect(const std::string& url) {
     m_url = url;
     m_closing = false;
+    m_reconnect_delay_s = 1;  // P6: reset backoff on every explicit connect()
     
     try {
         auto parsed_url = boost::urls::parse_uri(url);
@@ -61,9 +63,10 @@ void BeastWsClient::disconnect() {
     if (m_ws && m_connected) {
         std::visit([self = shared_from_this()](auto& ws) {
             ws.async_close(websocket::close_code::normal, [self](beast::error_code ec) {
-                if (ec) {
-                    LOG_DEBUG("WS close error: {}", ec.message());
-                }
+                if (ec) LOG_DEBUG("WS close error: {}", ec.message());
+                // P5: release stream so stale do_ping/do_read callbacks see null m_ws
+                std::lock_guard<std::mutex> lk(self->m_ws_mutex);
+                self->m_ws.reset();
             });
         }, *m_ws);
     }
@@ -76,8 +79,7 @@ void BeastWsClient::send(std::string_view message) {
     std::lock_guard<std::mutex> ws_lock(m_ws_mutex);
     if (!m_ws) {
         std::lock_guard<std::mutex> lock(m_write_mutex);
-        constexpr size_t kMaxQueueSize = 1000;
-        if (m_write_queue.size() >= kMaxQueueSize) m_write_queue.pop();
+        if (m_write_queue.size() >= m_max_queue_size) m_write_queue.pop();
         m_write_queue.push(std::move(msg));
         return;
     }
@@ -87,8 +89,7 @@ void BeastWsClient::send(std::string_view message) {
         {
             std::lock_guard<std::mutex> lock(self->m_write_mutex);
             write_in_progress = !self->m_write_queue.empty();
-            constexpr size_t kMaxQueueSize = 1000;
-            if (self->m_write_queue.size() >= kMaxQueueSize) {
+            if (self->m_write_queue.size() >= self->m_max_queue_size) {
                 self->m_write_queue.pop();
                 LOG_WARN("BeastWsClient: write queue overflow");
             }
@@ -114,12 +115,13 @@ void BeastWsClient::on_resolve(beast::error_code ec, tcp::resolver::results_type
 
     {
         std::lock_guard<std::mutex> lock(m_ws_mutex);
+        // P1: use the shared strand for the stream so all ops are serialized
         if (m_use_ssl) {
             m_ws = std::make_unique<std::variant<plain_stream, ssl_stream>>(
-                std::in_place_type<ssl_stream>, net::make_strand(m_ioc), m_ctx);
+                std::in_place_type<ssl_stream>, m_strand, m_ctx);
         } else {
             m_ws = std::make_unique<std::variant<plain_stream, ssl_stream>>(
-                std::in_place_type<plain_stream>, net::make_strand(m_ioc));
+                std::in_place_type<plain_stream>, m_strand);
         }
     }
 
@@ -148,6 +150,8 @@ void BeastWsClient::on_connect(beast::error_code ec, tcp::resolver::results_type
                 schedule_reconnect();
                 return;
             }
+            // P7: enable RFC-2818 hostname verification (peer cert CN/SAN must match m_host)
+            ws.next_layer().set_verify_callback(net::ssl::rfc2818_verification(m_host));
             ws.next_layer().async_handshake(net::ssl::stream_base::client,
                 beast::bind_front_handler(&BeastWsClient::on_ssl_handshake, shared_from_this()));
         } else {
@@ -201,6 +205,7 @@ void BeastWsClient::do_read() {
 
 void BeastWsClient::on_read(beast::error_code ec, std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
+    
     if (ec) {
         if (!m_closing) {
             LOG_WARN("WS read error: {}", ec.message());
@@ -210,31 +215,43 @@ void BeastWsClient::on_read(beast::error_code ec, std::size_t bytes_transferred)
         return;
     }
 
-    if (m_on_message) {
+    // P8: capture timestamp and trace_id only for successful reads
+    auto recv_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+    auto trace_id = next_trace_id();
+
+    auto data = beast::buffers_to_string(m_buffer.data());
+
+    // Event-driven path: deliver raw bytes to processor thread (zero-copy)
+    if (m_on_message_raw) {
+        m_on_message_raw(data.data(), data.size(), recv_ns, trace_id);
+    }
+    // JSON path: parse and deliver for non-hot-path consumers (MarketDataFeed etc.)
+    if (m_on_message_json) {
         try {
-            auto data = beast::buffers_to_string(m_buffer.data());
             auto j = nlohmann::json::parse(data);
-            m_on_message(j);
+            m_on_message_json(j, recv_ns, trace_id);
         } catch (const std::exception& e) {
             LOG_ERROR("WS JSON parse error: {}", e.what());
         }
     }
 
-    m_buffer.consume(m_buffer.size());
+    // P8: clear the buffer to reuse its internal capacity without reallocation
+    m_buffer.clear();
     do_read();
 }
 
 void BeastWsClient::do_write() {
-    // B8-FIX: Always lock m_ws_mutex first, then m_write_mutex
-    // (same order as send()), to prevent AB/BA deadlock.
     std::lock_guard<std::mutex> ws_lock(m_ws_mutex);
+    // P3: check m_ws BEFORE moving the message out of the queue to avoid message loss
+    if (!m_ws) return;
+
     {
         std::lock_guard<std::mutex> lock(m_write_mutex);
         if (m_write_queue.empty()) return;
         m_write_msg = std::move(m_write_queue.front());
     }
-
-    if (!m_ws) return;
 
     std::visit([&](auto& ws) {
         ws.async_write(net::buffer(m_write_msg), beast::bind_front_handler(&BeastWsClient::on_write, shared_from_this()));
@@ -268,9 +285,14 @@ void BeastWsClient::schedule_reconnect() {
     MetricsRegistry::instance().counter_inc("trade_bot_ws_reconnects_total");
     LOG_INFO("WS reconnecting in {}s...", m_reconnect_delay_s);
     m_reconnect_timer.expires_after(std::chrono::seconds(m_reconnect_delay_s));
-    m_reconnect_timer.async_wait([self = shared_from_this()](beast::error_code ec) {
+    
+    std::weak_ptr<BeastWsClient> weak_self = shared_from_this();
+    m_reconnect_timer.async_wait([weak_self](beast::error_code ec) {
+        if (ec == boost::asio::error::operation_aborted) return;
         if (!ec) {
-            self->connect(self->m_url);
+            if (auto self = weak_self.lock()) {
+                self->connect(self->m_url);
+            }
         }
     });
 
