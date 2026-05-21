@@ -20,21 +20,33 @@
 | OrderBook | ✅ | ✅ | book_cross |
 | FeatureExtractor | ✅ | partial | — |
 | StrategyEngine | ✅ | — | density_*, tape_burst |
-| RiskManager | ❓ | — | — |
+| RiskManager | ✅ | ✅ | risk_limit_rejection |
 | PaperExecutor | ✅ | — | — |
 
 ## Session History
-27: ### Session 2026-05-21 — Replay Timestamp Alignment & Trace ID Propagation
-28: - **Objective**: Synchronize orderbook updates with historical trades in MetaScalp replay dumps; ensure matching trace IDs across trades and features; report correct market duration.
-29: - **Implementation**:
-30:   - Scanned first 1000 lines of NDJSON in `ReplayFeed` to calculate offset `trade_ts - recv_ts`.
-31:   - Overrode orderbook snapshot and update timestamps with this offset during dispatch.
-32:   - Tracked session start/end boundary times in `ProbePipeline` and recorded duration based on virtual clock.
-33:   - Propagated active trace context `trace_id` to trade events in `on_trade`.
-34: - **Results**:
-35:   - ZEC_USDT replay correctly outputs matching trace IDs for trades and feature frame ticks.
-36:   - Summary blocks report the correct duration (`6m 02s of market time`).
-37:   - All synthetic scenarios run cleanly.
+
+### Session 2026-05-21 — RiskManager Strict Verification
+- **Objective**: Verify all 15 risk limits under strict invariants (`--invariants strict`) in the `core_probe` environment without modifying core logic.
+- **Implementation**:
+  - Implemented the `risk_limit_rejection` scenario in `SyntheticFeed.cpp`.
+  - Created a local `MockRiskTestStrategy` inside `SyntheticFeed.cpp` to sequence 8 different risk limit violations: `KillSwitchActive`, `DailyLossLimitHit`, `TooManyPositions`, `StopTooTight`, `StopTooWide`, `PoorRewardRisk`, `SizeBelowMinimum`, and `InsufficientMargin`.
+  - Bypassed the strategy affinity / universe admission check by whitelisting the synthetic `"SYNTH"` ticker in `load_risk_config` dynamically.
+  - Cached ticker metadata inside `ProbePipeline` constructor to correctly handle volume steps and minimum size limits.
+- **Results**:
+  - All 8 rules correctly rejected with exactly matching rejection categories and no invariant violations.
+  - All 3 previous synthetic scenarios passed successfully.
+
+### Session 2026-05-21 — Replay Timestamp Alignment & Trace ID Propagation
+- **Objective**: Synchronize orderbook updates with historical trades in MetaScalp replay dumps; ensure matching trace IDs across trades and features; report correct market duration.
+- **Implementation**:
+  - Scanned first 1000 lines of NDJSON in `ReplayFeed` to calculate offset `trade_ts - recv_ts`.
+  - Overrode orderbook snapshot and update timestamps with this offset during dispatch.
+  - Tracked session start/end boundary times in `ProbePipeline` and recorded duration based on virtual clock.
+  - Propagated active trace context `trace_id` to trade events in `on_trade`.
+- **Results**:
+  - ZEC_USDT replay correctly outputs matching trace IDs for trades and feature frame ticks.
+  - Summary blocks report the correct duration (`6m 02s of market time`).
+  - All synthetic scenarios run cleanly.
 
 ## [2026-05-21] Session 2 (Synthetic Feed Trace Context Integration)
 

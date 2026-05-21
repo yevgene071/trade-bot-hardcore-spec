@@ -1,5 +1,9 @@
 #include "SyntheticFeed.hpp"
 #include "perf/TraceContext.hpp"
+#include "strategy/IStrategy.hpp"
+#include "strategy/TradePlan.hpp"
+#include "signals/SignalBus.hpp"
+#include "ProbePipeline.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,6 +13,50 @@ namespace trade_bot::probe {
 using namespace std::chrono;
 
 namespace {
+
+class MockRiskTestStrategy final : public IStrategy {
+public:
+    explicit MockRiskTestStrategy(Ticker ticker)
+        : ticker_(std::move(ticker))
+        , name_("MockRiskTestStrategy") {}
+
+    const std::string& name() const override { return name_; }
+    const Ticker& ticker() const override { return ticker_; }
+
+    void on_frame(const FeatureFrame&) override {}
+
+    std::optional<TradePlan> on_signal(const Signal&, std::chrono::system_clock::time_point) override {
+        return next_plan_;
+    }
+
+    std::optional<TradePlan> tick(std::chrono::system_clock::time_point) override {
+        return next_plan_;
+    }
+
+    bool has_active_plan() const override { return next_plan_.has_value(); }
+
+    void reset_active_plan() override { next_plan_.reset(); }
+
+    void on_plan_accepted(const TradePlan&) override {}
+
+    StrategyState get_state() const override {
+        StrategyState state;
+        state.ticker = ticker_;
+        state.strategy_name = name_;
+        state.ready_state = StrategyReadyState::Ready;
+        state.readiness_pct = 100.0;
+        return state;
+    }
+
+    void set_next_plan(const std::optional<TradePlan>& plan) {
+        next_plan_ = plan;
+    }
+
+private:
+    Ticker ticker_;
+    std::string name_;
+    std::optional<TradePlan> next_plan_;
+};
 
 /// Synthetic origin epoch — fixed so two runs of the same scenario produce
 /// identical timestamps.  Determinism is non-negotiable (see AGENTS.md §5).
@@ -34,6 +82,7 @@ std::vector<std::string> SyntheticFeed::available_scenarios() {
         "density_appears",
         "density_eaten_then_breakout",
         "leader_moves_alt_lags",
+        "risk_limit_rejection",
     };
 }
 
@@ -42,7 +91,7 @@ bool SyntheticFeed::is_known_scenario(const std::string& name) {
     return std::find(all.begin(), all.end(), name) != all.end();
 }
 
-SyntheticFeed::RunStats SyntheticFeed::run() {
+SyntheticFeed::RunStats SyntheticFeed::run(ProbePipeline* pipeline) {
     RunStats stats;
     if (scenario_ == "density_appears") {
         run_density_appears(stats);
@@ -50,6 +99,8 @@ SyntheticFeed::RunStats SyntheticFeed::run() {
         run_density_eaten_then_breakout(stats);
     } else if (scenario_ == "leader_moves_alt_lags") {
         run_leader_moves_alt_lags(stats);
+    } else if (scenario_ == "risk_limit_rejection") {
+        run_risk_limit_rejection(stats, pipeline);
     }
     return stats;
 }
@@ -243,6 +294,124 @@ void SyntheticFeed::run_leader_moves_alt_lags(RunStats& stats) {
         ++stats.trades; ++stats.messages_dispatched;
         notify_tick(u.ts);
     }
+}
+
+void SyntheticFeed::run_risk_limit_rejection(RunStats& stats, ProbePipeline* pipeline) {
+    if (!pipeline) return;
+
+    // 1. Initial snapshot to set mid price, spread, etc.
+    OrderBookSnapshot snap;
+    snap.ticker = ticker_;
+    snap.ts = ns_offset(0);
+    // Simple symmetric levels around 100.0
+    for (int i = 0; i < 10; ++i) {
+        snap.bids.push_back(lvl(100.00 - i * 0.01, 10.0, Side::Buy));
+        snap.asks.push_back(lvl(100.01 + i * 0.01, 10.0, Side::Sell));
+    }
+    dispatch_snapshot(snap);
+    ++stats.snapshots; ++stats.messages_dispatched;
+    notify_tick(snap.ts);
+
+    // 2. Instantiate and register the mock strategy
+    auto mock_strat = std::make_unique<MockRiskTestStrategy>(ticker_);
+    auto* mock_strat_ptr = mock_strat.get();
+    pipeline->strategy_engine().add_strategy(std::move(mock_strat));
+
+    // Save initial account state
+    const auto orig_account = pipeline->account();
+
+    // Trace Id buffer
+    uint64_t next_trace_id = 999001;
+
+    // Helper to run a test case
+    auto run_test_case = [&](const std::string& name, const std::function<void(TradePlan&, AccountState&)>& setup_fn) {
+        // Reset account to clean defaults
+        pipeline->account() = orig_account;
+
+        // Construct standard valid baseline plan
+        TradePlan plan;
+        plan.ticker = ticker_;
+        plan.side = Side::Buy;
+        plan.entry_type = OrderType::Limit;
+        plan.entry_price = 100.00;
+        plan.stop_price = 99.90; // stop distance = 10 bps
+        plan.tp1_price = 100.10; // TP distance = 10 bps (1.0 R:R)
+        plan.tp1_size_ratio = 0.5;
+        plan.size_coin = 1.0;
+        plan.strategy_name = "MockRiskTestStrategy";
+        plan.reason.assign("Risk Test Case: " + name);
+        plan.trace_id = next_trace_id++;
+        plan.valid_until = ns_offset(10'000'000'000LL); // 10s valid
+
+        // Apply setup adjustments
+        setup_fn(plan, pipeline->account());
+
+        // Set the plan on mock strategy
+        mock_strat_ptr->set_next_plan(plan);
+
+        // Publish a dummy signal to trigger the strategy
+        Signal sig;
+        sig.ticker = ticker_;
+        sig.kind = SignalKind::LevelApproach;
+        sig.price = 100.0;
+        sig.trigger_trace_id = plan.trace_id;
+        sig.timestamp = ns_offset(0);
+        sig.payload.touches = 1;
+        sig.payload.speed_bps = 5.0;
+        sig.payload.original_size = 10.0;
+        sig.payload.size = 10.0;
+        sig.payload.side = "Bid";
+
+        // Dispatch signal through signal bus
+        pipeline->signal_bus().publish(sig);
+
+        // Clear next plan
+        mock_strat_ptr->set_next_plan(std::nullopt);
+    };
+
+    // Test Case 1: R1 Kill-Switch Active
+    run_test_case("KillSwitchActive", [](TradePlan&, AccountState& state) {
+        state.kill_switch_triggered = true;
+    });
+
+    // Test Case 2: R2 Daily Loss Limit Hit
+    run_test_case("DailyLossLimitHit", [](TradePlan&, AccountState& state) {
+        state.realized_pnl_today_usd = -state.starting_equity_usd * 0.5;
+    });
+
+    // Test Case 3: R3 Too Many Positions
+    run_test_case("TooManyPositions", [](TradePlan&, AccountState& state) {
+        state.active_positions = 100;
+    });
+
+    // Test Case 4: R6 Stop Too Tight
+    run_test_case("StopTooTight", [](TradePlan& plan, AccountState&) {
+        plan.stop_price = 99.98;
+    });
+
+    // Test Case 5: R6 Stop Too Wide
+    run_test_case("StopTooWide", [](TradePlan& plan, AccountState&) {
+        plan.stop_price = 99.00;
+    });
+
+    // Test Case 6: R7 TP1 R:R Too Low
+    run_test_case("PoorRewardRisk", [](TradePlan& plan, AccountState&) {
+        plan.tp1_price = 100.01;
+    });
+
+    // Test Case 7: R8 Size Below Minimum
+    run_test_case("SizeBelowMinimum", [](TradePlan&, AccountState& state) {
+        state.equity_usd = 0.01;
+    });
+
+    // Test Case 8: R9 Insufficient Margin
+    run_test_case("InsufficientMargin", [](TradePlan&, AccountState& state) {
+        state.free_balance_usd = 1.0;
+    });
+
+    // Clean up
+    pipeline->account() = orig_account;
+    pipeline->strategy_engine().remove_strategy(ticker_, "MockRiskTestStrategy");
 }
 
 } // namespace trade_bot::probe

@@ -49,6 +49,7 @@ RiskManager::Config load_risk_config() {
     rm.max_stop_bps              = Config::get_or<double> ("risk.max_stop_bps",             20.0);
     rm.min_rr_ratio              = Config::get_or<double> ("risk.min_rr_ratio",              1.0);
     rm.max_positions_per_ticker  = static_cast<int>(Config::get_or<int64_t>("risk.max_positions_per_ticker",  1));
+    rm.whitelist_tickers.push_back("SYNTH"); // Always whitelist synthetic ticker in probe runs
     return rm;
 }
 
@@ -203,6 +204,10 @@ ProbePipeline::ProbePipeline(const CliOptions& opts)
         }
         return stats;
     });
+
+    for (const auto& t : opts_.tickers) {
+        universe_.cache_meta(t, TickerMeta{0.01, 1e-4, 0.001, 10000.0});
+    }
 
     // Build per-ticker controllers, mirroring perf_replay/main.cpp
     Ticker leader_ticker = MetaScalpCodec::normalize_ticker(

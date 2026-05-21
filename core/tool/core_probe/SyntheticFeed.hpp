@@ -10,6 +10,7 @@
 #include <vector>
 
 namespace trade_bot::probe {
+class ProbePipeline;
 
 /// Deterministic synthetic market-data feed for `core_probe synth`.
 ///
@@ -46,7 +47,7 @@ public:
     };
 
     /// Run the scenario through to completion.  Returns dispatch counts.
-    RunStats run();
+    RunStats run(ProbePipeline* pipeline = nullptr);
 
 private:
     void dispatch_snapshot(const OrderBookSnapshot& s);
@@ -58,6 +59,7 @@ private:
     void run_density_appears(RunStats& stats);
     void run_density_eaten_then_breakout(RunStats& stats);
     void run_leader_moves_alt_lags(RunStats& stats);
+    void run_risk_limit_rejection(RunStats& stats, ProbePipeline* pipeline);
 
     std::string scenario_;
     Ticker      ticker_;

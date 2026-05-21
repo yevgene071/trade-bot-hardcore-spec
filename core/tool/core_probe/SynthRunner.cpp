@@ -73,7 +73,7 @@ int SynthRunner::run(const CliOptions& opts) {
     }
 
     auto wall_start = std::chrono::steady_clock::now();
-    auto stats = feed.run();
+    auto stats = feed.run(&pipeline);
     auto wall_end = std::chrono::steady_clock::now();
 
     double wall_sec = std::chrono::duration<double>(wall_end - wall_start).count();
