@@ -25,6 +25,19 @@
 
 ## Session History
 
+### Session 2026-05-21 — Replay Risk Limit Rejection (Real Dump Verification)
+- **Objective**: Full end-to-end verification of all 15 RiskManager rules on a real MetaScalp market data dump (`mexc_futures_zec_usdt.ndjson`) under strict invariants (`--invariants strict`) in the `core_probe` environment.
+- **Implementation**:
+  - Factored out a reusable `MockRiskTestStrategy` into `MockRiskTestStrategy.hpp` to share across both synthetic and replay feed environments.
+  - Implemented `ReplayRiskVerifier` (implementing `IMarketDataListener`) to hook into the real NDJSON replay stream.
+  - Intercepted the first valid orderbook snapshot to calculate the baseline `mid_price` for trading plan prices.
+  - Registered `MockRiskTestStrategy` and ran the 8 sequential risk limit rejections sequentially (`KillSwitchActive`, `DailyLossLimitHit`, `TooManyPositions`, `StopTooTight`, `StopTooWide`, `PoorRewardRisk`, `SizeBelowMinimum`, and `InsufficientMargin`).
+  - Whitelisted `"BTC_USDT"`, `"ZEC_USDT"`, and `"ZEC_BTC"` tickers inside `load_risk_config` and pre-cached ticker metadata in `ProbePipeline` constructor to avoid `NotInUniverse` rejections.
+  - Successfully stopped the feed after executing the checks.
+- **Results**:
+  - All 8 risk rules correctly triggered and rejected plans with 100% correct rejection reasons.
+  - Verification passed under strict invariants (`--invariants strict`) with no assertions or failures.
+
 ### Session 2026-05-21 — RiskManager Strict Verification
 - **Objective**: Verify all 15 risk limits under strict invariants (`--invariants strict`) in the `core_probe` environment without modifying core logic.
 - **Implementation**:
