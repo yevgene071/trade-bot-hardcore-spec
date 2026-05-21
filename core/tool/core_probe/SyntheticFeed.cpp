@@ -1,4 +1,5 @@
 #include "SyntheticFeed.hpp"
+#include "perf/TraceContext.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -56,19 +57,29 @@ SyntheticFeed::RunStats SyntheticFeed::run() {
 // ── Dispatch helpers ─────────────────────────────────────────────────────────
 
 void SyntheticFeed::dispatch_snapshot(const OrderBookSnapshot& s) {
+    uint64_t ts_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(s.ts.time_since_epoch()).count());
+    TraceContextScope scope(ts_ns, ts_ns);
     for (auto* l : listeners_) l->on_orderbook_snapshot(s);
 }
 
 void SyntheticFeed::dispatch_update(const OrderBookUpdate& u) {
+    uint64_t ts_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(u.ts.time_since_epoch()).count());
+    TraceContextScope scope(ts_ns, ts_ns);
     for (auto* l : listeners_) l->on_orderbook_update(u);
 }
 
 void SyntheticFeed::dispatch_trade(const Trade& t) {
+    uint64_t ts_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(t.timestamp.time_since_epoch()).count());
+    TraceContextScope scope(ts_ns, ts_ns);
     for (auto* l : listeners_) l->on_trade(ticker_, t);
 }
 
 void SyntheticFeed::notify_tick(system_clock::time_point ts) {
-    if (tick_cb_) tick_cb_(ticker_, ts);
+    if (tick_cb_) {
+        uint64_t ts_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(ts.time_since_epoch()).count());
+        TraceContextScope scope(ts_ns, ts_ns);
+        tick_cb_(ticker_, ts);
+    }
 }
 
 // ── Scenario: density_appears ────────────────────────────────────────────────
