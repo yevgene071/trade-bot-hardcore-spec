@@ -139,19 +139,11 @@ echo ""
 if [ "$NO_CONAN" = false ]; then
     STAGE_START=$SECONDS
     step "Conan install …"
-    if [ "$MODE" = "debug" ]; then
-        conan install core \
-            --output-folder="$BUILD_DIR" \
-            --build=missing \
-            -pr debug-asan \
-            2>&1 | grep -E "^(ERROR|WARN|Requirement|Install)" || true
-    else
-        conan install core \
-            --output-folder="$BUILD_DIR" \
-            --build=missing \
-            -s build_type="$BUILD_TYPE" \
-            2>&1 | grep -E "^(ERROR|WARN|Requirement|Install)" || true
-    fi
+    conan install core \
+        --output-folder="$BUILD_DIR" \
+        --build=missing \
+        -s build_type="$BUILD_TYPE" \
+        2>&1 | grep -E "^(ERROR|WARN|Requirement|Install)" || true
     ok "Conan done  $(( SECONDS - STAGE_START ))s"
 else
     warn "Skipping conan install (--no-conan / --quick)"
