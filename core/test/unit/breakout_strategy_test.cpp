@@ -37,9 +37,9 @@ TEST_F(BreakoutStrategyTest, GeneratesLongPlanFromAskEating) {
     Signal s_eating{SignalKind::DensityEating, now, "BTCUSDT", price, 1.0, {.side = "Ask", .size = 400.0, .original_size = 1000.0}};
     Signal s_burst{SignalKind::TapeBurst, now, "BTCUSDT", price, 1.0, {.side = "Buy", .ratio = 2.0}};
 
-    strategy.on_signal(s_support);
-    strategy.on_signal(s_eating);
-    strategy.on_signal(s_burst);
+    strategy.on_signal(s_support, now);
+    strategy.on_signal(s_eating, now);
+    strategy.on_signal(s_burst, now);
 
     auto plan = strategy.tick(now);
 
@@ -57,8 +57,8 @@ TEST_F(BreakoutStrategyTest, NoPlanWithoutSupport) {
     auto now = std::chrono::system_clock::now();
     double price = 50000.0;
     
-    strategy.on_signal({SignalKind::DensityEating, now, "BTCUSDT", price, 1.0, {.side = "Ask"}});
-    strategy.on_signal({SignalKind::TapeBurst, now, "BTCUSDT", price, 1.0, {.side = "Buy"}});
+    strategy.on_signal({SignalKind::DensityEating, now, "BTCUSDT", price, 1.0, {.side = "Ask"}}, now);
+    strategy.on_signal({SignalKind::TapeBurst, now, "BTCUSDT", price, 1.0, {.side = "Buy"}}, now);
     
     auto plan = strategy.tick(now);
     EXPECT_FALSE(plan.has_value());

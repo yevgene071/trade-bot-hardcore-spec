@@ -39,9 +39,9 @@ TEST_F(BounceStrategyTest, GeneratesLongPlanFromBidDensity) {
     Signal s2{SignalKind::DensityDetected, now, "BTCUSDT", price, 1.0, {.side = "Bid", .size = 500.0}};
     Signal s3{SignalKind::TapeFade, now, "BTCUSDT", price, 1.0, {}};
 
-    strategy.on_signal(s1);
-    strategy.on_signal(s2);
-    strategy.on_signal(s3);
+    strategy.on_signal(s1, now);
+    strategy.on_signal(s2, now);
+    strategy.on_signal(s3, now);
 
     auto plan = strategy.tick(now);
 
@@ -75,12 +75,12 @@ TEST_F(BounceStrategyTest, InvalidatesWhenIcebergAppears) {
     frame.price_change_1s = 0.0;
     strategy.on_frame(frame);
 
-    strategy.on_signal({SignalKind::LevelApproach, now, "BTCUSDT", price, 1.0, {.speed_bps = 10.0, .approach_type = "impulse"}});
-    strategy.on_signal({SignalKind::DensityDetected, now, "BTCUSDT", price, 1.0, {.side = "Bid", .size = 500.0}});
-    strategy.on_signal({SignalKind::TapeFade, now, "BTCUSDT", price, 1.0, {}});
+    strategy.on_signal({SignalKind::LevelApproach, now, "BTCUSDT", price, 1.0, {.speed_bps = 10.0, .approach_type = "impulse"}}, now);
+    strategy.on_signal({SignalKind::DensityDetected, now, "BTCUSDT", price, 1.0, {.side = "Bid", .size = 500.0}}, now);
+    strategy.on_signal({SignalKind::TapeFade, now, "BTCUSDT", price, 1.0, {}}, now);
 
     // Before tick, an iceberg appears on the same level
-    strategy.on_signal({SignalKind::IcebergSuspected, now, "BTCUSDT", price, 1.0, {.side = "Bid"}});
+    strategy.on_signal({SignalKind::IcebergSuspected, now, "BTCUSDT", price, 1.0, {.side = "Bid"}}, now);
 
     auto plan = strategy.tick(now);
     EXPECT_FALSE(plan.has_value());

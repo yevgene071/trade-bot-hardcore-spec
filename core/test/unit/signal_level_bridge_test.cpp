@@ -10,8 +10,8 @@ using namespace trade_bot;
 class MockSignalLevelGateway : public SignalLevelGateway {
 public:
     MockSignalLevelGateway(IHttpClient& h) : SignalLevelGateway(h, "", 0) {}
-    MOCK_METHOD(int, create, (const Ticker&, double), ());
-    MOCK_METHOD(void, remove, (int), ());
+    MOCK_METHOD(int64_t, create, (const Ticker&, double), ());
+    MOCK_METHOD(void, remove, (int64_t), ());
 };
 
 class FakeHttpClient5 : public IHttpClient {
@@ -35,7 +35,7 @@ TEST_F(SignalLevelBridgeTest, CreatesServerLevelOnFormed) {
     SignalLevelBridge bridge(gateway, bus);
     
     EXPECT_CALL(gateway, create(Ticker("BTCUSDT"), 50000.0)).WillOnce(testing::Return(123));
-    bridge.on_level_formed("BTCUSDT", 50000.0);
+    bridge.on_level_formed("BTCUSDT", 50000.0, std::chrono::system_clock::now(), 50000.0);
 }
 
 TEST_F(SignalLevelBridgeTest, PublishesSignalOnTrigger) {
@@ -49,6 +49,6 @@ TEST_F(SignalLevelBridgeTest, PublishesSignalOnTrigger) {
         if (s.kind == SignalKind::LevelBreak) signals++;
     });
     
-    bridge.on_server_trigger(123, "BTCUSDT", 50000.0);
+    bridge.on_server_trigger(123, "BTCUSDT", 50000.0, std::chrono::system_clock::now());
     EXPECT_EQ(signals, 1);
 }

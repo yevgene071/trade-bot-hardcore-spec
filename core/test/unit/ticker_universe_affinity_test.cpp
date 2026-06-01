@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <memory>
 #include <unordered_map>
 
 using namespace trade_bot;
@@ -14,15 +15,15 @@ class TickerUniverseAffinityTest : public ::testing::Test {
 protected:
     void SetUp() override { Logger::init(); }
 
-    TickerUniverse make_pool(std::vector<Ticker> tickers) {
+    std::unique_ptr<TickerUniverse> make_pool(std::vector<Ticker> tickers) {
         TickerUniverse::Config cfg{};
         cfg.min_volume_24h_usd = 1.0;
         cfg.max_avg_spread_bps = 1000.0;
-        TickerUniverse u{cfg};
-        u.set_stats_lookup([](const Ticker&) {
+        auto u = std::make_unique<TickerUniverse>(cfg);
+        u->set_stats_lookup([](const Ticker&) {
             return std::optional<TickerStats>{TickerStats{1e6, 5.0}};
         });
-        u.refresh_pool(tickers, std::chrono::system_clock::now());
+        u->refresh_pool(tickers, std::chrono::system_clock::now());
         return u;
     }
 };
@@ -35,15 +36,15 @@ TEST_F(TickerUniverseAffinityTest, BounceFromDensityEnabledAtThreshold) {
     std::unordered_map<Ticker, int> events_per_hour = {
         {"BTCUSDT", 5}, {"ETHUSDT", 4}, {"DOGEUSDT", 2}};
 
-    u.register_strategy("BounceFromDensity", [&](const Ticker& t) {
+    u->register_strategy("BounceFromDensity", [&](const Ticker& t) {
         auto it = events_per_hour.find(t);
         return it != events_per_hour.end() && it->second >= min_events_per_hour;
     });
-    u.refresh_affinity();
+    u->refresh_affinity();
 
-    EXPECT_TRUE (u.is_strategy_enabled("BTCUSDT", "BounceFromDensity"));
-    EXPECT_TRUE (u.is_strategy_enabled("ETHUSDT", "BounceFromDensity"));
-    EXPECT_FALSE(u.is_strategy_enabled("DOGEUSDT", "BounceFromDensity"));
+    EXPECT_TRUE (u->is_strategy_enabled("BTCUSDT", "BounceFromDensity"));
+    EXPECT_TRUE (u->is_strategy_enabled("ETHUSDT", "BounceFromDensity"));
+    EXPECT_FALSE(u->is_strategy_enabled("DOGEUSDT", "BounceFromDensity"));
 }
 
 TEST_F(TickerUniverseAffinityTest, LeaderLagRespectsCorrelationAndSelfExclude) {
@@ -55,35 +56,35 @@ TEST_F(TickerUniverseAffinityTest, LeaderLagRespectsCorrelationAndSelfExclude) {
     std::unordered_map<Ticker, double> corr_60s = {
         {"BTCUSDT", 1.0}, {"ETHUSDT", 0.7}, {"SOLUSDT", 0.4}};
 
-    u.register_strategy("LeaderLag", [&](const Ticker& t) {
+    u->register_strategy("LeaderLag", [&](const Ticker& t) {
         if (exclude_self_for_leader && t == leader) return false;
         auto it = corr_60s.find(t);
         return it != corr_60s.end() && it->second >= min_corr;
     });
-    u.refresh_affinity();
+    u->refresh_affinity();
 
-    EXPECT_FALSE(u.is_strategy_enabled("BTCUSDT", "LeaderLag"));   // self-excluded
-    EXPECT_TRUE (u.is_strategy_enabled("ETHUSDT", "LeaderLag"));   // 0.7 >= 0.6
-    EXPECT_FALSE(u.is_strategy_enabled("SOLUSDT", "LeaderLag"));   // 0.4 < 0.6
+    EXPECT_FALSE(u->is_strategy_enabled("BTCUSDT", "LeaderLag"));   // self-excluded
+    EXPECT_TRUE (u->is_strategy_enabled("ETHUSDT", "LeaderLag"));   // 0.7 >= 0.6
+    EXPECT_FALSE(u->is_strategy_enabled("SOLUSDT", "LeaderLag"));   // 0.4 < 0.6
 }
 
 TEST_F(TickerUniverseAffinityTest, BoostDoesNotChangeAffinityUntilRefresh) {
     auto u = make_pool({"BTCUSDT"});
     bool toggle = false;
-    u.register_strategy("Strat", [&](const Ticker&) { return toggle; });
-    u.refresh_affinity();
-    EXPECT_FALSE(u.is_strategy_enabled("BTCUSDT", "Strat"));
+    u->register_strategy("Strat", [&](const Ticker&) { return toggle; });
+    u->refresh_affinity();
+    EXPECT_FALSE(u->is_strategy_enabled("BTCUSDT", "Strat"));
 
     // Boost the ticker — score function is *not* called automatically.
     auto now = std::chrono::system_clock::now();
-    u.on_big_event("BTCUSDT", now);
+    u->on_big_event("BTCUSDT", now);
     toggle = true;                                                  // pretend score now would fire
-    EXPECT_TRUE(u.is_boosted("BTCUSDT", now));
-    EXPECT_FALSE(u.is_strategy_enabled("BTCUSDT", "Strat"))
+    EXPECT_TRUE(u->is_boosted("BTCUSDT", now));
+    EXPECT_FALSE(u->is_strategy_enabled("BTCUSDT", "Strat"))
         << "boost must NOT change affinity state until refresh_affinity()";
 
-    u.refresh_affinity();
-    EXPECT_TRUE(u.is_strategy_enabled("BTCUSDT", "Strat"));
+    u->refresh_affinity();
+    EXPECT_TRUE(u->is_strategy_enabled("BTCUSDT", "Strat"));
 }
 
 TEST_F(TickerUniverseAffinityTest, BoostExpiresAfterTtl) {

@@ -1,4 +1,5 @@
 #include "executor/LiveExecutor.hpp"
+#include "universe/TickerUniverse.hpp"
 #include "logger/Logger.hpp"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -49,7 +50,8 @@ TEST_F(ExecutorStateMachineTest, EntryToOpenOnFill) {
     MockMarketDataFeedForExecutor feed;
     
     EXPECT_CALL(feed, add_listener(_)).Times(1);
-    LiveExecutor executor(1, gateway, feed);
+    TickerUniverse universe;
+    LiveExecutor executor(1, gateway, feed, universe);
 
     TradePlan plan;
     plan.ticker = "BTCUSDT";

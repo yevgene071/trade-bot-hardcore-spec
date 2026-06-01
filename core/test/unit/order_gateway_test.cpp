@@ -65,7 +65,7 @@ TEST_F(OrderGatewayTest, PlaceOrder) {
     
     http->m_next_response = {200, result_json.dump(), {}};
     
-    PlaceOrderRequest req{"BTCUSDT", Side::Buy, 60000.0, 0.1, OrderType::Limit};
+    PlaceOrderRequest req{"BTCUSDT", Side::Buy, 60000.0, 0.1, OrderType::Limit, false, ""};
     auto result = gateway.place_order(1, req);
     
     EXPECT_EQ(result.status, "ok");

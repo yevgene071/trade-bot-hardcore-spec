@@ -9,7 +9,7 @@ public:
     MOCK_METHOD(const std::string&, name, (), (const, override));
     MOCK_METHOD(const Ticker&, ticker, (), (const, override));
     MOCK_METHOD(void, on_frame, (const FeatureFrame&), (override));
-    MOCK_METHOD(void, on_signal, (const Signal&), (override));
+    MOCK_METHOD(std::optional<TradePlan>, on_signal, (const Signal&, std::chrono::system_clock::time_point), (override));
     MOCK_METHOD(std::optional<TradePlan>, tick, (std::chrono::system_clock::time_point), (override));
     MOCK_METHOD(void, reset_active_plan, (), (override));
     MOCK_METHOD(StrategyState, get_state, (), (const, override));
@@ -37,7 +37,7 @@ TEST(StrategyEngineTest, RoutesEventsAndCollectsPlans) {
     signal.ticker = "BTCUSDT";
     
     EXPECT_CALL(*strat_ptr, on_frame(testing::_)).Times(1);
-    EXPECT_CALL(*strat_ptr, on_signal(testing::_)).Times(1);
+    EXPECT_CALL(*strat_ptr, on_signal(testing::_, testing::_)).Times(1);
     
     TradePlan mock_plan{};
     mock_plan.ticker = "BTCUSDT";

@@ -27,7 +27,7 @@ TEST_F(LeaderLagStrategyTest, GeneratesLongPlanOnPositiveLag) {
         SignalKind::LeaderMove, now, "ALTUSDT", 100.0, 0.8,
         {.lag_pct = 0.25, .correlation = 0.8}
     };
-    strategy.on_signal(s);
+    strategy.on_signal(s, now);
     
     auto plan = strategy.tick(now);
     
@@ -46,7 +46,7 @@ TEST_F(LeaderLagStrategyTest, NoPlanOnLowCorrelation) {
         SignalKind::LeaderMove, now, "ALTUSDT", 100.0, 0.8,
         {.lag_pct = 0.25, .correlation = 0.4} // low
     };
-    strategy.on_signal(s);
+    strategy.on_signal(s, now);
     
     auto plan = strategy.tick(now);
     EXPECT_FALSE(plan.has_value());

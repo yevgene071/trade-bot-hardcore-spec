@@ -73,7 +73,7 @@ add_executable(ws_test
     ../src/transport/BeastWsClient.cpp
 )
 target_link_libraries(ws_test PRIVATE
-    obj_logger obj_metrics_registry
+    obj_logger obj_metrics_registry obj_perf_registry
     GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
 add_test(NAME ws COMMAND ws_test)
 
@@ -83,7 +83,7 @@ add_executable(ws_smoke_test
     ../src/transport/BeastWsClient.cpp
 )
 target_link_libraries(ws_smoke_test PRIVATE
-    obj_logger obj_metrics_registry
+    obj_logger obj_metrics_registry obj_perf_registry
     GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
 add_test(NAME ws_smoke COMMAND ws_smoke_test)
 
@@ -100,8 +100,8 @@ add_executable(feed_test
     ../src/transport/MarketDataFeed.cpp
 )
 target_link_libraries(feed_test PRIVATE
-    obj_logger obj_codec
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    obj_logger obj_codec obj_config obj_perf_registry
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME feed COMMAND feed_test)
 
 # ── feed_smoke ─────────────────────────────────────────
@@ -111,8 +111,8 @@ add_executable(feed_smoke_test
     ../src/transport/BeastWsClient.cpp
 )
 target_link_libraries(feed_smoke_test PRIVATE
-    obj_logger obj_codec obj_metrics_registry
-    GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
+    obj_logger obj_codec obj_metrics_registry obj_config obj_perf_registry
+    GTest::gtest GTest::gtest_main spdlog::spdlog boost::boost nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME feed_smoke COMMAND feed_smoke_test)
 
 # ── order_gateway ──────────────────────────────────────
@@ -132,8 +132,8 @@ add_executable(timestamp_monitor_test
     ../src/transport/MarketDataFeed.cpp
 )
 target_link_libraries(timestamp_monitor_test PRIVATE
-    obj_logger obj_codec
-    GTest::gtest GTest::gtest_main spdlog::spdlog hdr_histogram::hdr_histogram_static nlohmann_json::nlohmann_json boost::boost)
+    obj_logger obj_codec obj_config obj_perf_registry
+    GTest::gtest GTest::gtest_main spdlog::spdlog hdr_histogram::hdr_histogram_static nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME timestamp_monitor COMMAND timestamp_monitor_test)
 
 # ── timestamp_jitter ───────────────────────────────────
@@ -146,8 +146,8 @@ add_executable(timestamp_jitter_test
     ../src/transport/MetaScalpDiscovery.cpp
 )
 target_link_libraries(timestamp_jitter_test PRIVATE
-    obj_logger obj_codec obj_metrics_registry
-    GTest::gtest GTest::gtest_main spdlog::spdlog hdr_histogram::hdr_histogram_static nlohmann_json::nlohmann_json boost::boost CURL::libcurl OpenSSL::SSL OpenSSL::Crypto)
+    obj_logger obj_codec obj_metrics_registry obj_config obj_perf_registry
+    GTest::gtest GTest::gtest_main spdlog::spdlog hdr_histogram::hdr_histogram_static nlohmann_json::nlohmann_json boost::boost CURL::libcurl OpenSSL::SSL OpenSSL::Crypto absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME timestamp_jitter COMMAND timestamp_jitter_test)
 
 # ── order_reconciliator ────────────────────────────────
@@ -157,7 +157,7 @@ add_executable(order_reconciliator_test
 )
 target_link_libraries(order_reconciliator_test PRIVATE
     obj_logger
-    GTest::gtest GTest::gtest_main spdlog::spdlog)
+    GTest::gtest GTest::gtest_main spdlog::spdlog absl::btree)
 add_test(NAME order_reconciliator COMMAND order_reconciliator_test)
 
 # ── replay ─────────────────────────────────────────────
@@ -167,8 +167,8 @@ add_executable(replay_test
     ../src/transport/MarketDataFeed.cpp
 )
 target_link_libraries(replay_test PRIVATE
-    obj_logger obj_codec
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    obj_logger obj_codec obj_config obj_perf_registry
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME replay COMMAND replay_test)
 
 # ── killswitch ─────────────────────────────────────────
@@ -237,10 +237,12 @@ add_test(NAME cluster_snapshot_manager COMMAND cluster_snapshot_manager_test)
 add_executable(notification_routing_test
     unit/notification_routing_test.cpp
     ../src/transport/NotificationFeed.cpp
+    ../src/signals/SignalLevelBridge.cpp
+    ../src/transport/SignalLevelGateway.cpp
 )
 target_link_libraries(notification_routing_test PRIVATE
-    obj_logger obj_codec obj_ticker_universe obj_universe_filters obj_metrics_registry
-    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json)
+    obj_logger obj_codec obj_ticker_universe obj_universe_filters obj_metrics_registry obj_signal_bus
+    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json xsimd absl::btree absl::flat_hash_map absl::hash boost::boost)
 add_test(NAME notification_routing COMMAND notification_routing_test)
 
 # ── orderbook_settings_loader ──────────────────────────
@@ -250,7 +252,7 @@ add_executable(orderbook_settings_loader_test
 )
 target_link_libraries(orderbook_settings_loader_test PRIVATE
     obj_logger obj_codec obj_ticker_universe obj_universe_filters
-    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json)
+    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME orderbook_settings_loader COMMAND orderbook_settings_loader_test)
 
 # ── signal_bus ─────────────────────────────────────────
@@ -357,7 +359,7 @@ add_executable(leader_signal_test
 )
 target_link_libraries(leader_signal_test PRIVATE
     obj_logger obj_signal_bus obj_leader_tracker obj_kalman_lag
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree)
 add_test(NAME leader_signal COMMAND leader_signal_test)
 
 # ── strategy_engine ────────────────────────────────────
@@ -366,8 +368,8 @@ add_executable(strategy_engine_test
     ../src/strategy/StrategyEngine.cpp
 )
 target_link_libraries(strategy_engine_test PRIVATE
-    obj_logger obj_signal_bus
-    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    obj_logger obj_signal_bus obj_perf_registry
+    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME strategy_engine COMMAND strategy_engine_test)
 
 # ── bounce_strategy ────────────────────────────────────
@@ -376,8 +378,8 @@ add_executable(bounce_strategy_test
     ../src/strategy/BounceFromDensity.cpp
 )
 target_link_libraries(bounce_strategy_test PRIVATE
-    obj_logger obj_signal_bus
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    obj_logger obj_signal_bus obj_ticker_universe obj_universe_filters
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME bounce_strategy COMMAND bounce_strategy_test)
 
 # ── breakout_strategy ──────────────────────────────────
@@ -386,8 +388,8 @@ add_executable(breakout_strategy_test
     ../src/strategy/BreakoutEatThrough.cpp
 )
 target_link_libraries(breakout_strategy_test PRIVATE
-    obj_logger obj_signal_bus
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    obj_logger obj_signal_bus obj_ticker_universe obj_universe_filters
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME breakout_strategy COMMAND breakout_strategy_test)
 
 # ── leaderlag_strategy ─────────────────────────────────
@@ -396,8 +398,8 @@ add_executable(leaderlag_strategy_test
     ../src/strategy/LeaderLag.cpp
 )
 target_link_libraries(leaderlag_strategy_test PRIVATE
-    obj_logger obj_signal_bus
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost)
+    obj_logger obj_signal_bus obj_ticker_universe obj_universe_filters
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME leaderlag_strategy COMMAND leaderlag_strategy_test)
 
 # ── signal_level_bridge ────────────────────────────────
@@ -419,7 +421,7 @@ add_executable(risk_manager_test
 )
 target_link_libraries(risk_manager_test PRIVATE
     obj_logger obj_ticker_universe obj_universe_filters
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator boost::boost)
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME risk_manager COMMAND risk_manager_test)
 
 # ── r13_funding ────────────────────────────────────────
@@ -430,7 +432,7 @@ add_executable(r13_funding_test
 )
 target_link_libraries(r13_funding_test PRIVATE
     obj_logger obj_ticker_universe obj_universe_filters
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator boost::boost)
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME r13_funding COMMAND r13_funding_test)
 
 # ── trading_day_reset ──────────────────────────────────
@@ -451,7 +453,7 @@ add_executable(risk_flow_test
 )
 target_link_libraries(risk_flow_test PRIVATE
     obj_logger obj_ticker_universe obj_universe_filters
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator)
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json nlohmann_json_schema_validator absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME risk_flow COMMAND risk_flow_test)
 
 # ── state_persistence ──────────────────────────────────
@@ -478,8 +480,8 @@ add_executable(metrics_exporter_test
     ../src/transport/CurlHttpClient.cpp
 )
 target_link_libraries(metrics_exporter_test PRIVATE
-    obj_logger obj_metrics_registry
-    GTest::gtest GTest::gtest_main CURL::libcurl spdlog::spdlog boost::boost)
+    obj_logger obj_metrics_registry obj_perf_registry
+    GTest::gtest GTest::gtest_main CURL::libcurl spdlog::spdlog boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME metrics_exporter COMMAND metrics_exporter_test)
 
 # ── startup_recovery ───────────────────────────────────
@@ -503,8 +505,8 @@ add_executable(executor_state_machine_test
     ../src/transport/MarketDataFeed.cpp
 )
 target_link_libraries(executor_state_machine_test PRIVATE
-    obj_logger obj_codec obj_metrics_registry
-    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json CURL::libcurl)
+    obj_logger obj_codec obj_metrics_registry obj_config obj_perf_registry obj_ticker_universe obj_universe_filters
+    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json CURL::libcurl absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME executor_state_machine COMMAND executor_state_machine_test)
 
 # ── stop_contract ──────────────────────────────────────
@@ -517,8 +519,8 @@ add_executable(stop_contract_test
     ../src/transport/BeastWsClient.cpp
 )
 target_link_libraries(stop_contract_test PRIVATE
-    obj_logger obj_codec obj_metrics_registry
-    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json CURL::libcurl boost::boost OpenSSL::SSL OpenSSL::Crypto)
+    obj_logger obj_codec obj_metrics_registry obj_config obj_perf_registry
+    GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog nlohmann_json::nlohmann_json CURL::libcurl boost::boost OpenSSL::SSL OpenSSL::Crypto absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME stop_contract COMMAND stop_contract_test)
 
 # ── leader_correlation_welford ─────────────────────────
@@ -590,26 +592,27 @@ add_test(NAME connection_selector COMMAND connection_selector_test)
 add_executable(ticker_universe_pool_test unit/ticker_universe_pool_test.cpp)
 target_link_libraries(ticker_universe_pool_test PRIVATE
     obj_logger obj_ticker_universe obj_universe_filters
-    GTest::gtest GTest::gtest_main spdlog::spdlog)
+    GTest::gtest GTest::gtest_main spdlog::spdlog absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME ticker_universe_pool COMMAND ticker_universe_pool_test)
 
 # ── ticker_universe_affinity ───────────────────────────
 add_executable(ticker_universe_affinity_test unit/ticker_universe_affinity_test.cpp)
 target_link_libraries(ticker_universe_affinity_test PRIVATE
     obj_logger obj_ticker_universe obj_universe_filters
-    GTest::gtest GTest::gtest_main spdlog::spdlog)
+    GTest::gtest GTest::gtest_main spdlog::spdlog absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME ticker_universe_affinity COMMAND ticker_universe_affinity_test)
 
 # ── dashboard_server ───────────────────────────────────
 add_executable(dashboard_server_test
     unit/dashboard_server_test.cpp
     ../src/control/DashboardServer.cpp
+    ../src/control/DashboardServerBinary.cpp
     ../src/transport/DumpRecorder.cpp
 )
 target_include_directories(dashboard_server_test PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(dashboard_server_test PRIVATE
     obj_logger
-    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost OpenSSL::SSL OpenSSL::Crypto)
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost OpenSSL::SSL OpenSSL::Crypto flatbuffers::flatbuffers)
 add_test(NAME dashboard_server COMMAND dashboard_server_test)
 
 # ── replay_determinism ─────────────────────────────────
@@ -636,7 +639,7 @@ add_executable(replay_determinism_test
 target_link_libraries(replay_determinism_test PRIVATE
     obj_logger obj_codec obj_orderbook obj_trade_stream obj_signal_bus
     obj_leader_tracker obj_kalman_lag obj_ticker_universe obj_universe_filters obj_simd_ops
-    obj_metrics_registry obj_perf_registry
+    obj_metrics_registry obj_perf_registry obj_config
     GTest::gtest GTest::gtest_main GTest::gmock spdlog::spdlog 
     nlohmann_json::nlohmann_json nlohmann_json_schema_validator
     absl::btree absl::flat_hash_map absl::hash xsimd 

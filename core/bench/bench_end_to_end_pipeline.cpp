@@ -34,6 +34,7 @@ public:
     std::vector<ActiveTrade> get_active_trades() const override { return {}; }
     std::vector<ClosedTrade> pop_closed_trades() override { return {}; }
     void set_mark_prices(const absl::btree_map<Ticker, double>&) override {}
+    void set_mark_price(const Ticker&, double) override {}
     
     // IMarketDataListener
     void on_trade(const Ticker&, const Trade&) override {}

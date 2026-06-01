@@ -311,6 +311,17 @@ void TickerUniverse::on_screener_new_coin(const Ticker& ticker, std::chrono::sys
     fire_affinity_changes_(changes);
 }
 
+void TickerUniverse::on_big_event(const Ticker& ticker,
+                                  std::chrono::system_clock::time_point now) {
+    PendingChanges changes;
+    {
+        std::unique_lock lock(rw_mtx_);
+        on_big_event_locked(ticker, now);
+        changes = collect_affinity_changes_();
+    }
+    fire_affinity_changes_(changes);
+}
+
 void TickerUniverse::on_big_event_locked(const Ticker& ticker,
                                    std::chrono::system_clock::time_point now) {
     // AG3: also clean expired boosts before adding a new one
