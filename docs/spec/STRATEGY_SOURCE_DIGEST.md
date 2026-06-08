@@ -28,6 +28,13 @@
 `docs/СТРАТЕГИИЯ.docx` был удалён как текстовый дубль
 `docs/крупные участники.docx`.
 
+Подробная traceability-формализация понятий «крупный участник» и
+«неэффективность» вынесена в
+[`LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md`](./LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md):
+там указано, какие признаки уже покрыты `DensityDetected`, `IcebergSuspected`,
+`TapeBurst/Fade/Flush`, `DensityStack`, какие требуют новых detector/features,
+а какие остаются live-only или ambiguous.
+
 ---
 
 ## 1. Базовая торговая модель

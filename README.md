@@ -214,6 +214,7 @@ trade_bot/
 
 - [Архитектура](docs/spec/ARCHITECTURE.md) — модули, потоки, performance engineering, численная корректность
 - [Стратегии](docs/spec/STRATEGIES.md) — детальная бизнес-логика всех стратегий
+- [Крупные участники и неэффективности](docs/spec/LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md) — traceability от DOCX к сигналам, стратегиям и live-only gates
 - [Сигналы](docs/spec/SIGNAL_DETECTION.md) — формулы и пороги детекторов
 - [Риск-менеджмент](docs/spec/RISK_MANAGEMENT.md) — 15 правил + kill-switch
 - [API-контракт](docs/spec/METASCALP_API_CONTRACT.md) — документированный контракт MetaScalp

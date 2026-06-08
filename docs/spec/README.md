@@ -26,10 +26,11 @@
 | 2 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Модули, структуры данных, потоки, кодовая структура, 3rd-party зависимости | Исполнитель |
 | 3 | [`METASCALP_API_CONTRACT.md`](./METASCALP_API_CONTRACT.md) | Фактическая поверхность MetaScalp API из SDK-документации: endpoints, WS events, ограничения | Исполнитель |
 | 4 | [`STRATEGY_SOURCE_DIGEST.md`](./STRATEGY_SOURCE_DIGEST.md) | Выжимка ручных методических материалов из `docs/*.docx` | Исполнитель |
-| 5 | [`SIGNAL_DETECTION.md`](./SIGNAL_DETECTION.md) | Формальные детекторы рыночных паттернов: плотности, айсберги, лента, уровни, подход, поводырь | Исполнитель |
-| 6 | [`STRATEGIES.md`](./STRATEGIES.md) | Формализация торговых стратегий: BounceFromDensity, BreakoutEatThrough, LeaderLag, FlushReversal | Исполнитель |
-| 7 | [`RISK_MANAGEMENT.md`](./RISK_MANAGEMENT.md) | 15 правил риска с числами, kill-switch, сайзинг, ежедневный ресет | Исполнитель + compliance |
-| 8 | [`TASK_SPECS.md`](./TASK_SPECS.md) | Тикеты T0–T5 с acceptance criteria для каждой задачи | Исполнитель |
+| 5 | [`LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md`](./LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md) | Traceability для крупных участников и неэффективностей: signal mapping, live-only/ambiguous gates | Исполнитель |
+| 6 | [`SIGNAL_DETECTION.md`](./SIGNAL_DETECTION.md) | Формальные детекторы рыночных паттернов: плотности, айсберги, лента, уровни, подход, поводырь | Исполнитель |
+| 7 | [`STRATEGIES.md`](./STRATEGIES.md) | Формализация торговых стратегий: BounceFromDensity, BreakoutEatThrough, LeaderLag, FlushReversal | Исполнитель |
+| 8 | [`RISK_MANAGEMENT.md`](./RISK_MANAGEMENT.md) | 15 правил риска с числами, kill-switch, сайзинг, ежедневный ресет | Исполнитель + compliance |
+| 9 | [`TASK_SPECS.md`](./TASK_SPECS.md) | Тикеты T0–T5 с acceptance criteria для каждой задачи | Исполнитель |
 
 Приложения:
 
@@ -58,6 +59,9 @@ ROADMAP.md
                                           │       (тикеты реализации)
 ```
 
+- `LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md` уточняет ручные понятия крупных
+  участников и неэффективностей перед тем, как они становятся detector/strategy
+  requirements.
 - `STRATEGIES.md` строится поверх сигналов из `SIGNAL_DETECTION.md` и правил
   `RISK_MANAGEMENT.md`.
 - Всё, что касается MetaScalp endpoints, WS events и JSON fields, сверяется с
@@ -109,7 +113,7 @@ ROADMAP.md
 | Структура проекта (топ-уровень) | `README.md` (корень) | полное дерево |
 | C++ ядро (src/) | `README.md` → `├── src/` | 18 поддиректорий |
 | React-дашборд (dashboard/) | `dashboard/README.md` | 20+ компонентов |
-| Документация (spec/, docs/spec/) | `docs/spec/README.md` | 9 документов |
+| Документация (spec/, docs/spec/) | `docs/spec/README.md` | 10 документов |
 | Тесты (test/) | `README.md` → `├── test/` | ~70 unit + integration + contract |
 | Runtime данные (replay/, journal/) | `README.md` → `├── replay/, ├── journal/` | WS-dumps, JSONL журнал |
 | Аудиты и инспекции (reports/) | `README.md` → `├── reports/` | 5 отчётов |
@@ -117,6 +121,7 @@ ROADMAP.md
 | Numerical primitives infrastructure | `TASK_SPECS.md` | T0-NUMERIC |
 | Performance infrastructure | `TASK_SPECS.md` | T0-PERF |
 | Что такое «плотность» формально | `SIGNAL_DETECTION.md` | § 1 |
+| Крупные участники и неэффективности | `LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md` | весь |
 | Когда входим на отскок | `STRATEGIES.md` | § 1 |
 | Когда входим на пробой | `STRATEGIES.md` | § 2 |
 | Размер позиции | `RISK_MANAGEMENT.md` | § 2 R8 |
@@ -135,6 +140,7 @@ ROADMAP.md
 | `ARCHITECTURE.md` | ✅ v1.1 (+ ExternalFeeds § 2.12, WS-loss recovery, signal-levels) |
 | `METASCALP_API_CONTRACT.md` | ✅ v1.1 (MetaScalp SDK v1.0.7: orderbook-snapshot, mark/funding, FetchSnapshot, stop trigger Price) |
 | `STRATEGY_SOURCE_DIGEST.md` | ✅ v1.0 (ручные стратегии из DOCX, дубль `СТРАТЕГИИЯ.docx` удалён) |
+| `LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md` | ✅ v1.0 (формализация крупных участников/неэффективностей, signal mapping, live-only/ambiguous gates) |
 | `SIGNAL_DETECTION.md` | ✅ v1.1 (минимум 200 положительных примеров, LiquidationDetector) |
 | `STRATEGIES.md` | ✅ v1.2 (manual strategy gap-analysis: continuation, large participant, spot/futures dislocation) |
 | `RISK_MANAGEMENT.md` | ✅ v1.2 (R1-R15, R14 runtime hard-kill, R15 slippage) |
