@@ -198,6 +198,7 @@ struct ReplayRunState {
 class ReplayDeterminismTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        Logger::init("test_logs/replay_determinism_test.log");
         temp_dir_ = std::filesystem::temp_directory_path() / "replay_determinism_test";
         std::filesystem::create_directories(temp_dir_);
         

@@ -32,8 +32,8 @@ TEST(NumericTest, WelfordStats) {
     
     EXPECT_EQ(acc.count(), 3);
     EXPECT_DOUBLE_EQ(acc.mean(), 20.0);
-    EXPECT_DOUBLE_EQ(acc.variance(), 200.0/3.0); // (10^2 + 0^2 + 10^2) / 3
-    EXPECT_NEAR(acc.stdev(), 8.1649, 0.0001);
+    EXPECT_DOUBLE_EQ(acc.variance(), 100.0); // sample variance: 200 / (3 - 1)
+    EXPECT_NEAR(acc.stdev(), 10.0, 0.0001);
 }
 
 TEST(NumericTest, KahanSummation) {

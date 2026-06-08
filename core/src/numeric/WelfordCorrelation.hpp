@@ -25,8 +25,8 @@ public:
     size_t count() const { return n_; }
     T correlation() const {
         if (n_ < 2) return T(0);
-        T var_x = acc_x_.variance() * n_; // This is actually M2_x
-        T var_y = acc_y_.variance() * n_; // This is actually M2_y
+        T var_x = acc_x_.variance() * static_cast<T>(n_ - 1); // M2_x
+        T var_y = acc_y_.variance() * static_cast<T>(n_ - 1); // M2_y
         if (var_x == T(0) || var_y == T(0)) return T(0);
         return c_xy_ / std::sqrt(var_x * var_y);
     }

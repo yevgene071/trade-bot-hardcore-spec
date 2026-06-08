@@ -2,6 +2,7 @@
 
 #include "UniverseFilters.hpp"
 #include "domain/Types.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
@@ -109,7 +110,7 @@ public:
     void set_stats_lookup(StatsLookup fn);
     /// Lookup stats for a ticker using the configured stats provider.
     std::optional<TickerStats> get_stats(const Ticker& ticker) const {
-        return stats_lookup_ ? stats_lookup_(ticker) : std::nullopt;
+        return stats_lookup_ ? stats_lookup_(to_internal_ticker(ticker)) : std::nullopt;
     }
     void set_affinity_change_handler(AffinityChange fn);
     void register_strategy(const std::string& name, AffinityScore fn);
@@ -139,7 +140,7 @@ public:
     bool is_affinity_stable(const Ticker& ticker,
                             std::chrono::seconds min_stable,
                             std::chrono::system_clock::time_point now) const {
-        auto it = active_since_.find(ticker);
+        auto it = active_since_.find(to_internal_ticker(ticker));
         if (it == active_since_.end()) return false;
         return (now - it->second) >= min_stable;
     }

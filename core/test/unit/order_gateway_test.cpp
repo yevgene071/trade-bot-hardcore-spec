@@ -9,11 +9,12 @@ using namespace trade_bot;
 class MockHttpClient : public IHttpClient {
 public:
     HttpResponse get(const std::string& url) override { 
-        boost::ignore_unused(url);
+        m_last_get_url = url;
         return m_next_response; 
     }
     HttpResponse post(const std::string& url, const std::string& body) override { 
-        boost::ignore_unused(url, body);
+        m_last_post_url = url;
+        m_last_post_body = body;
         return m_next_response; 
     }
     HttpResponse put(const std::string& url, const std::string& body) override { 
@@ -27,6 +28,9 @@ public:
     void set_timeout_ms(int timeout_ms) override { boost::ignore_unused(timeout_ms); }
 
     HttpResponse m_next_response;
+    std::string m_last_get_url;
+    std::string m_last_post_url;
+    std::string m_last_post_body;
 };
 
 class OrderGatewayTest : public ::testing::Test {
@@ -65,11 +69,17 @@ TEST_F(OrderGatewayTest, PlaceOrder) {
     
     http->m_next_response = {200, result_json.dump(), {}};
     
-    PlaceOrderRequest req{"BTCUSDT", Side::Buy, 60000.0, 0.1, OrderType::Limit, false, ""};
+    PlaceOrderRequest req{"BTC_USDT", Side::Buy, 60000.0, 0.1, OrderType::Limit, false, ""};
     auto result = gateway.place_order(1, req);
     
     EXPECT_EQ(result.status, "ok");
     EXPECT_EQ(result.client_id, "ms_123");
+    const auto body = nlohmann::json::parse(http->m_last_post_body);
+    EXPECT_EQ(body["Ticker"], "BTCUSDT");
+    EXPECT_EQ(body["Side"], 1);
+    EXPECT_FALSE(body.contains("ClientOrderId"));
+    EXPECT_FALSE(body.contains("clientOrderId"));
+    EXPECT_FALSE(body.contains("ClientId"));
 }
 
 TEST_F(OrderGatewayTest, GetConnectionsWrapped) {
@@ -105,6 +115,33 @@ TEST_F(OrderGatewayTest, GetTickersWrapped) {
     
     auto tickers = gateway.get_tickers(1);
     ASSERT_EQ(tickers.size(), 1);
-    EXPECT_EQ(tickers[0].name, "BTCUSDT");
+    EXPECT_EQ(tickers[0].name, "BTC_USDT");
 }
 
+TEST_F(OrderGatewayTest, GetOrderBookSnapshotBuildsSdkV107Url) {
+    auto http = std::make_shared<MockHttpClient>();
+    OrderGateway gateway(http);
+
+    nlohmann::json snapshot_json = {
+        {"ConnectionId", 1},
+        {"Ticker", "BTCUSDT"},
+        {"UpdateId", 12345678},
+        {"Asks", {{{"Price", 65010.0}, {"Size", 0.5}, {"Type", "Ask"}}}},
+        {"Bids", {{{"Price", 65000.0}, {"Size", 0.3}, {"Type", "Bid"}}}},
+        {"BestAsk", {{"Price", 65010.0}, {"Size", 0.5}, {"Type", "BestAsk"}}},
+        {"BestBid", {{"Price", 65000.0}, {"Size", 0.3}, {"Type", "BestBid"}}}
+    };
+    http->m_next_response = {200, snapshot_json.dump(), {}};
+
+    auto snap = gateway.get_orderbook_snapshot(1, "BTC_USDT", 2, 50, 0.5);
+
+    EXPECT_NE(http->m_last_get_url.find("/api/connections/1/orderbook-snapshot?Ticker=BTCUSDT"), std::string::npos);
+    EXPECT_NE(http->m_last_get_url.find("ZoomIndex=2"), std::string::npos);
+    EXPECT_NE(http->m_last_get_url.find("DepthLevels=50"), std::string::npos);
+    EXPECT_NE(http->m_last_get_url.find("DepthPercent=0.500000"), std::string::npos);
+    EXPECT_EQ(snap.ticker, "BTC_USDT");
+    ASSERT_EQ(snap.asks.size(), 1);
+    ASSERT_EQ(snap.bids.size(), 1);
+    EXPECT_DOUBLE_EQ(snap.asks[0].price, 65010.0);
+    EXPECT_DOUBLE_EQ(snap.bids[0].price, 65000.0);
+}

@@ -34,16 +34,14 @@ TEST_F(BounceStrategyTest, GeneratesLongPlanFromBidDensity) {
     frame.price_change_1s = 0.0;
     strategy.on_frame(frame);
 
-    // Signals for bounce: Approach -> Density -> Fade
+    // Signals for bounce: Density + Fade context, then LevelApproach triggers entry.
     Signal s1{SignalKind::LevelApproach, now, "BTCUSDT", price, 1.0, {.speed_bps = 10.0, .approach_type = "impulse"}};
-    Signal s2{SignalKind::DensityDetected, now, "BTCUSDT", price, 1.0, {.side = "Bid", .size = 500.0}};
+    Signal s2{SignalKind::DensityDetected, now, "BTCUSDT", price, 1.0, {.side = "Bid", .size = 500.0, .age_ms = 5000}};
     Signal s3{SignalKind::TapeFade, now, "BTCUSDT", price, 1.0, {}};
 
-    strategy.on_signal(s1, now);
     strategy.on_signal(s2, now);
     strategy.on_signal(s3, now);
-
-    auto plan = strategy.tick(now);
+    auto plan = strategy.on_signal(s1, now);
 
     ASSERT_TRUE(plan.has_value());
     EXPECT_EQ(plan->side, Side::Buy);
@@ -75,13 +73,12 @@ TEST_F(BounceStrategyTest, InvalidatesWhenIcebergAppears) {
     frame.price_change_1s = 0.0;
     strategy.on_frame(frame);
 
-    strategy.on_signal({SignalKind::LevelApproach, now, "BTCUSDT", price, 1.0, {.speed_bps = 10.0, .approach_type = "impulse"}}, now);
-    strategy.on_signal({SignalKind::DensityDetected, now, "BTCUSDT", price, 1.0, {.side = "Bid", .size = 500.0}}, now);
+    strategy.on_signal({SignalKind::DensityDetected, now, "BTCUSDT", price, 1.0, {.side = "Bid", .size = 500.0, .age_ms = 5000}}, now);
     strategy.on_signal({SignalKind::TapeFade, now, "BTCUSDT", price, 1.0, {}}, now);
 
-    // Before tick, an iceberg appears on the same level
+    // Before trigger, an iceberg appears on the same level
     strategy.on_signal({SignalKind::IcebergSuspected, now, "BTCUSDT", price, 1.0, {.side = "Bid"}}, now);
 
-    auto plan = strategy.tick(now);
+    auto plan = strategy.on_signal({SignalKind::LevelApproach, now, "BTCUSDT", price, 1.0, {.speed_bps = 10.0, .approach_type = "impulse"}}, now);
     EXPECT_FALSE(plan.has_value());
 }

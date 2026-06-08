@@ -402,6 +402,16 @@ target_link_libraries(leaderlag_strategy_test PRIVATE
     GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME leaderlag_strategy COMMAND leaderlag_strategy_test)
 
+# ── flushreversal_strategy ─────────────────────────────
+add_executable(flushreversal_strategy_test
+    unit/flushreversal_strategy_test.cpp
+    ../src/strategy/FlushReversal.cpp
+)
+target_link_libraries(flushreversal_strategy_test PRIVATE
+    obj_logger obj_signal_bus obj_ticker_universe obj_universe_filters
+    GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
+add_test(NAME flushreversal_strategy COMMAND flushreversal_strategy_test)
+
 # ── signal_level_bridge ────────────────────────────────
 add_executable(signal_level_bridge_test
     unit/signal_level_bridge_test.cpp

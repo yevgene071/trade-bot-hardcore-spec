@@ -21,17 +21,20 @@ TEST(OrderbookSettingsLoaderTest, ParsesValidResponse) {
     OrderbookSettingsLoader loader(http, "http://localhost", 1);
     
     std::string body = R"({
+        "ConnectionId": 1,
         "Ticker": "BTCUSDT",
-        "LargeAmountUsd": 250000.0,
-        "LargeAmountUsd2": 500000.0
+        "Settings": {
+            "LargeAmountUsd": 250000.0,
+            "LargeAmountUsd2": 500000.0
+        }
     })";
     
-    EXPECT_CALL(http, get(testing::_))
+    EXPECT_CALL(http, get(testing::HasSubstr("/api/connections/1/orderbook-settings?Ticker=BTCUSDT")))
         .WillOnce(testing::Return(HttpResponse{200, body, {}}));
         
-    auto res = loader.fetch("BTCUSDT");
+    auto res = loader.fetch("BTC_USDT");
     ASSERT_TRUE(res.has_value());
-    EXPECT_EQ(res->ticker, "BTCUSDT");
+    EXPECT_EQ(res->ticker, "BTC_USDT");
     EXPECT_DOUBLE_EQ(res->large_amount_usd, 250000.0);
 }
 

@@ -37,8 +37,8 @@ public:
         std::vector<std::string>  sources{"pool.ntp.org", "time.google.com"};
         std::chrono::seconds      check_interval{30};
         std::chrono::milliseconds query_timeout{1500};
-        int64_t                   warn_drift_ms{1000};
-        int64_t                   max_clock_drift_ms{5000};
+        int64_t                   warn_drift_ms{200};
+        int64_t                   max_clock_drift_ms{500};
         // Window for the Knuth-style rolling mean. Per spec AC
         // ("+700 ms → 1 poll WARN, 2 polls KILL") a window of 2 dilutes a
         // single sample below the kill threshold while still crossing warn,
@@ -77,7 +77,6 @@ private:
     mutable std::mutex           mtx_;
     std::vector<int64_t>         window_;       // ring buffer of last N samples
     size_t                       window_idx_{0};
-    size_t                       window_fill_{0}; // filled slots; < window_.size() during cold-start
     int64_t                      drift_ms_{0};
     bool                         kill_triggered_{false};
 

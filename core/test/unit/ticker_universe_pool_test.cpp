@@ -107,4 +107,20 @@ TEST_F(TickerUniversePoolTest, TickerMetaCache) {
     ASSERT_TRUE(m.has_value());
     EXPECT_DOUBLE_EQ(m->price_increment, 0.01);
     EXPECT_DOUBLE_EQ(m->size_increment, 1e-5);
+    EXPECT_TRUE(u.meta("BTC_USDT").has_value());
+}
+
+TEST_F(TickerUniversePoolTest, NormalizesWireTickersInPool) {
+    TickerUniverse::Config cfg{};
+    cfg.min_volume_24h_usd = 1.0;
+    cfg.max_avg_spread_bps = 1000.0;
+    TickerUniverse u{cfg};
+
+    u.set_stats_lookup([](const Ticker& t) -> std::optional<TickerStats> {
+        if (t == "BTC_USDT") return TickerStats{1'000'000.0, 5.0};
+        return std::nullopt;
+    });
+
+    u.refresh_pool({"BTCUSDT"}, std::chrono::system_clock::now());
+    EXPECT_EQ(u.active(), std::vector<Ticker>{"BTC_USDT"});
 }

@@ -1,8 +1,11 @@
 #include "SignalLevelGateway.hpp"
 #include "MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
+#include "utils/UrlEncoder.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include <nlohmann/json.hpp>
+#include <cmath>
 #include <sstream>
 
 namespace trade_bot {
@@ -16,15 +19,24 @@ SignalLevelGateway::SignalLevelGateway(IHttpClient& http,
 
 std::vector<SignalLevel> SignalLevelGateway::get_all(const Ticker& ticker) {
     std::stringstream ss;
-    ss << base_url_ << "/api/connections/" << connection_id_ << "/signal-levels?Ticker=" << ticker;
+    ss << base_url_ << "/api/connections/" << connection_id_
+       << "/signal-levels?Ticker=" << url_encode(to_metascalp_symbol(ticker));
     try {
         auto resp = http_.get(ss.str());
         if (resp.status != 200) return {};
         auto j = nlohmann::json::parse(resp.body);
-        std::vector<SignalLevel> out;
+        const nlohmann::json* arr = nullptr;
         if (j.is_array()) {
-            out.resize(j.size());
-            std::transform(j.begin(), j.end(), out.begin(), [](const auto& item) {
+            arr = &j;
+        } else if (j.contains(api::fields::kSignalLevels) && j[api::fields::kSignalLevels].is_array()) {
+            arr = &j[api::fields::kSignalLevels];
+        } else if (j.contains("signalLevels") && j["signalLevels"].is_array()) {
+            arr = &j["signalLevels"];
+        }
+        std::vector<SignalLevel> out;
+        if (arr) {
+            out.resize(arr->size());
+            std::transform(arr->begin(), arr->end(), out.begin(), [](const auto& item) {
                 return MetaScalpCodec::parse_signal_level(item);
             });
         }
@@ -38,12 +50,24 @@ std::vector<SignalLevel> SignalLevelGateway::get_all(const Ticker& ticker) {
 int64_t SignalLevelGateway::create(const Ticker& ticker, double price) {
     std::stringstream ss;
     ss << base_url_ << "/api/connections/" << connection_id_ << "/signal-levels";
-    nlohmann::json body = {{"Ticker", ticker}, {"Price", price}};
+    nlohmann::json body = {{"Ticker", to_metascalp_symbol(ticker)}, {"Price", price}};
     try {
         auto resp = http_.post(ss.str(), body.dump());
         if (resp.status != 200) return -1;
         auto j = nlohmann::json::parse(resp.body);
-        return j.value("Id", -1LL);
+        auto id = j.value("Id", -1LL);
+        if (id > 0) return id;
+
+        // SDK v1.0.7 documents place response as {"Status":"ok"} without Id.
+        // Recover the server id from the list endpoint so the bridge can later
+        // remove/mark this level deterministically.
+        constexpr double kPriceEps = 1e-9;
+        for (const auto& level : get_all(ticker)) {
+            if (!level.triggered && std::abs(level.price - price) <= kPriceEps) {
+                return level.id;
+            }
+        }
+        return -1;
     } catch (const std::exception& ex) {
         LOG_WARN("SignalLevelGateway::create({}, {}) failed: {}", ticker, price, ex.what());
         return -1;
@@ -58,7 +82,8 @@ void SignalLevelGateway::remove(int64_t id) {
 
 void SignalLevelGateway::remove_all(const Ticker& ticker) {
     std::stringstream ss;
-    ss << base_url_ << "/api/connections/" << connection_id_ << "/signal-levels?Ticker=" << ticker;
+    ss << base_url_ << "/api/connections/" << connection_id_
+       << "/signal-levels?Ticker=" << url_encode(to_metascalp_symbol(ticker));
     http_.del(ss.str());
 }
 

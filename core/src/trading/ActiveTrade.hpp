@@ -23,9 +23,10 @@ struct ActiveTrade {
     // asynchronously. Issue #129.
     int64_t    entry_order_id{0};
     int64_t    stop_order_id{0};
-    // Client-generated idempotency key for the entry order. Set before
-    // place_order() is called; used in on_order_update() for deterministic
-    // first-sight matching when entry_order_id is not yet known.
+    // Local correlation key for the entry order. MetaScalp does not document
+    // caller-supplied ClientId in POST /orders; this is not sent on the wire.
+    // First-sight matching normally falls back to side+type+size until a
+    // server OrderId is observed.
     std::string entry_client_order_id;
     int64_t    tp1_order_id{0};
     int64_t    tp2_order_id{0};

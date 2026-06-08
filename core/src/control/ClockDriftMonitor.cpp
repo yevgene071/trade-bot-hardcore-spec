@@ -93,12 +93,11 @@ void ClockDriftMonitor::update_average_(int64_t sample) {
     }
     window_[window_idx_] = sample;
     window_idx_ = (window_idx_ + 1) % window_.size();
-    // Track fill count so cold-start zeros don't dilute early measurements.
-    if (window_fill_ < window_.size()) ++window_fill_;
-    const int64_t sum = std::accumulate(window_.begin(),
-                                        window_.begin() + static_cast<std::ptrdiff_t>(window_fill_),
-                                        int64_t{0});
-    drift_ms_ = sum / static_cast<int64_t>(window_fill_);
+    // Keep the zero-initialized cold-start slots in the moving average. This
+    // preserves the T0-CLOCK acceptance rule: a persistent +700 ms offset warns
+    // on the first poll and kills on the second poll with the default window=2.
+    const int64_t sum = std::accumulate(window_.begin(), window_.end(), int64_t{0});
+    drift_ms_ = sum / static_cast<int64_t>(window_.size());
 }
 
 void ClockDriftMonitor::evaluate_thresholds_locked_(std::unique_lock<std::mutex>& lk) {

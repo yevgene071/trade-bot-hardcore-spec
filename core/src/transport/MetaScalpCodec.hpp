@@ -79,6 +79,10 @@ namespace api::fields {
     inline constexpr auto kLargeAmountUsd = "LargeAmountUsd";
     inline constexpr auto kLargeAmountUsd2 = "LargeAmountUsd2";
     inline constexpr auto kTriggered = "Triggered";
+    inline constexpr auto kIsTriggered = "IsTriggered";
+    inline constexpr auto kTriggerTime = "TriggerTime";
+    inline constexpr auto kSignalLevels = "SignalLevels";
+    inline constexpr auto kSettings = "Settings";
 }
 
 class MetaScalpCodec {

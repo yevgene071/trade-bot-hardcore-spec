@@ -2,8 +2,6 @@
 #include "logger/Logger.hpp"
 #include "perf/TraceContext.hpp"
 
-#include <absl/container/flat_hash_map.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>

@@ -1,6 +1,7 @@
 #include "NewsCalendar.hpp"
 
 #include "logger/Logger.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include <nlohmann/json-schema.hpp>
 #include <nlohmann/json.hpp>
@@ -141,7 +142,7 @@ std::vector<NewsCalendar::Event> NewsCalendar::parse_(const std::string& path) {
         e.ts_utc     = parse_iso8601(item["ts_utc"].get<std::string>());
         e.importance = item["importance"].get<int>();
         if (item.contains("ticker")) {
-            e.ticker = item["ticker"].get<std::string>();
+            e.ticker = to_internal_ticker(item["ticker"].get<std::string>());
         }
         if (item.contains("note")) {
             e.note = item["note"].get<std::string>();
@@ -187,6 +188,7 @@ void NewsCalendar::reload() {
 
 std::optional<int64_t> NewsCalendar::minutes_to_next_news(
     std::chrono::system_clock::time_point now, const Ticker& ticker) const {
+    const Ticker key = to_internal_ticker(ticker);
     std::shared_ptr<const std::vector<Event>> snap;
     {
         std::lock_guard<std::mutex> lk(mtx_);
@@ -197,7 +199,7 @@ std::optional<int64_t> NewsCalendar::minutes_to_next_news(
     }
     auto it = std::find_if(snap->begin(), snap->end(), [&](const auto& e) {
         if (e.ts_utc < now) return false;
-        if (e.ticker.has_value() && *e.ticker != ticker) return false;
+        if (e.ticker.has_value() && *e.ticker != key) return false;
         return true;
     });
 

@@ -19,8 +19,17 @@ ws_max_reconnect_delay_ms = 30000
 metascalp_max_rps = 20
 
 [trading]
-symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+# Bot config uses internal BASE_QUOTE symbols. Transport converts them to
+# MetaScalp wire symbols (BTCUSDT) at the API boundary.
+symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
 max_concurrent_orders = 5
+
+[feed]
+depth_levels = 50
+depth_percent = 0.5
+# true  = MetaScalp sends initial snapshot on orderbook_subscribe.
+# false = bot seeds via REST orderbook-snapshot and sends FetchSnapshot=false.
+fetch_snapshot_on_subscribe = true
 
 [risk]
 # R2: Daily limit (morj)
@@ -152,6 +161,12 @@ break_distance_bps = 25
 break_min_volume_usd = 30000.0
 cluster_kde_smoothness = 1.0
 
+[signals.level_bridge]
+enabled = true
+signal_level_subscribe = true
+cleanup_interval_min = 60
+max_server_levels = 50
+
 [signals.approach]
 impulse_min_distance_bps = 30
 impulse_max_pullbacks = 1
@@ -210,10 +225,21 @@ correlation_exit_threshold = 0.3   # exit if correlation drops below this
 leader_exit_reversal_bps = 5.0     # exit if leader reverses more than this
 swing_lookback_ticks = 30          # ticks for local extremum stop placement
 
-[strategies.flush]
+[strategies.flushreversal]
+allow_live = false
 tp1_size_ratio = 0.7
+tp1_r = 2.0
 no_progress_timeout_sec = 90
+entry_timeout_sec = 8
+entry_offset_bps = 2
+stop_buffer_bps = 8
+max_spread_bps = 4
+min_flush_dist_bps = 3
+min_flush_count = 2
 flush_window_sec = 120
+max_vol_fade_ratio = 0.5
+min_price_reversal_bps = 1.5
+min_level_touches = 2
 affinity_threshold = 0.4
 affinity_stable_min = 5
 
@@ -262,7 +288,7 @@ min_follow_through_rate_7d = 0.35
 min_breakout_events_per_day = 5
 
 [universe.affinity.leaderlag]
-require_leader = "BTCUSDT"
+require_leader = "BTC_USDT"
 exclude_self_for_leader = true
 min_correlation_60s = 0.6
 min_volume_24h_usd = 50000000.0
@@ -271,12 +297,20 @@ min_leader_lag_events_per_hour = 2
 avg_catchup_completion_rate_7d = 0.50
 leader_lag_consistency_7d = 0.40
 
-[universe.affinity.flush]
+[universe.affinity.flushreversal]
 min_volume_24h_usd = 50000000.0
 max_avg_spread_bps = 6.0
+max_funding_rate_bps = 4.0
 min_flush_events_per_day = 3
 flush_return_rate_7d = 0.60
 liquidation_availability = true
+
+[notifications]
+subscribe = true
+exchange_id = 0
+market_type = 0
+forward_big_tick_to_universe = true
+forward_big_amount_to_signals = false
 
 # T4-DASHBOARD / T4-METRICS — operator-facing HTTP endpoints
 # Default: loopback-only. To expose on the network, set bind_address AND

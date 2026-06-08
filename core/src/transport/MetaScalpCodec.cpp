@@ -1,5 +1,6 @@
 #include "MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
+#include "utils/TickerSymbol.hpp"
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
@@ -190,7 +191,7 @@ std::expected<OrderUpdate, std::string> MetaScalpCodec::parse_order_update(const
 
     return OrderUpdate {
         .order_id = get_val<int64_t>(j, fields::kOrderId, 0L),
-        .ticker = get_val<std::string>(j, fields::kTicker, ""),
+        .ticker = normalize_ticker(get_val<std::string>(j, fields::kTicker, "")),
         .side = parse_side(get_val<nlohmann::json>(j, fields::kSide, nlohmann::json())),
         .type = *type,
         .price = get_val<double>(j, fields::kPrice, 0.0),
@@ -220,7 +221,7 @@ RestOrder MetaScalpCodec::parse_rest_order(const nlohmann::json& j) {
     return RestOrder {
         .id = get_val<int64_t>(j, fields::kId, 0L),
         .client_id = client_id,
-        .ticker = get_val<std::string>(j, fields::kTicker, ""),
+        .ticker = normalize_ticker(get_val<std::string>(j, fields::kTicker, "")),
         .side = parse_side(get_val<nlohmann::json>(j, fields::kSide, nlohmann::json())),
         .type = parse_order_type(get_val<nlohmann::json>(j, fields::kType, nlohmann::json())),
         .price = get_val<double>(j, fields::kPrice, 0.0),
@@ -250,7 +251,7 @@ std::expected<PositionUpdate, std::string> MetaScalpCodec::parse_position_update
     return PositionUpdate {
         .connection_id = get_val<int>(j, fields::kConnectionId, 0),
         .position_id = get_val<int64_t>(j, fields::kId, 0L),
-        .ticker = get_val<std::string>(j, fields::kTicker, ""),
+        .ticker = normalize_ticker(get_val<std::string>(j, fields::kTicker, "")),
         .side = parse_side(get_val<nlohmann::json>(j, fields::kSide, nlohmann::json())),
         .size = get_val<double>(j, fields::kSize, 0.0),
         .avg_price = get_val<double>(j, fields::kAvgPrice, 0.0),
@@ -355,7 +356,7 @@ std::expected<OrderBookSnapshot, std::string> MetaScalpCodec::parse_orderbook_sn
     auto ts = ts_str.empty() ? std::chrono::system_clock::now() : parse_timestamp(ts_str);
 
     return OrderBookSnapshot {
-        .ticker = ticker,
+        .ticker = normalize_ticker(ticker),
         .asks = asks,
         .bids = bids,
         .ts = ts
@@ -394,7 +395,7 @@ std::expected<OrderBookUpdate, std::string> MetaScalpCodec::parse_orderbook_upda
     std::string ts_str = get_val<std::string>(j, fields::kTime, "");
     auto ts = ts_str.empty() ? std::chrono::system_clock::now() : parse_timestamp(ts_str);
     return OrderBookUpdate {
-        .ticker = ticker,
+        .ticker = normalize_ticker(ticker),
         .changes = changes,
         .ts = ts
     };
@@ -439,14 +440,7 @@ TickerInfo MetaScalpCodec::parse_ticker_info(const nlohmann::json& j) {
 }
 
 Ticker MetaScalpCodec::normalize_ticker(const Ticker& raw) {
-    if (raw.find('_') != std::string::npos) return raw;
-    for (const char* q : {"USDT", "USDC", "BTC", "ETH", "BNB", "BUSD"}) {
-        std::size_t qlen = std::strlen(q);
-        if (raw.size() > qlen && raw.substr(raw.size() - qlen) == q) {
-            return raw.substr(0, raw.size() - qlen) + "_" + q;
-        }
-    }
-    return raw;
+    return to_internal_ticker(raw);
 }
 
 std::expected<FinresUpdate, std::string> MetaScalpCodec::parse_finres_update(const nlohmann::json& j) {
@@ -543,28 +537,43 @@ int MetaScalpCodec::parse_market_type(const nlohmann::json& v) {
 }
 
 SignalLevel MetaScalpCodec::parse_signal_level(const nlohmann::json& j) {
+    const bool triggered = get_val<bool>(j, fields::kIsTriggered,
+        get_val<bool>(j, fields::kTriggered, false));
+    std::string ts = get_val<std::string>(j, fields::kTriggerTime, "");
+    if (ts.empty()) ts = get_val<std::string>(j, fields::kTime, "");
     return SignalLevel {
         .id = get_val<int64_t>(j, fields::kId, 0),
-        .ticker = get_val<std::string>(j, fields::kTicker, ""),
+        .ticker = normalize_ticker(get_val<std::string>(j, fields::kTicker, "")),
         .price = get_val<double>(j, fields::kPrice, 0.0),
-        .triggered = get_val<bool>(j, fields::kTriggered, false),
-        .created_at = parse_timestamp(get_val<std::string>(j, fields::kTime, ""))
+        .triggered = triggered,
+        .created_at = parse_timestamp(ts)
     };
 }
 
 OrderbookSettings MetaScalpCodec::parse_orderbook_settings(const nlohmann::json& j) {
+    const nlohmann::json* settings = &j;
+    if (j.contains(fields::kSettings) && j[fields::kSettings].is_object()) {
+        settings = &j[fields::kSettings];
+    } else if (j.contains("settings") && j["settings"].is_object()) {
+        settings = &j["settings"];
+    }
+
+    auto ticker = get_val<std::string>(j, fields::kTicker, "");
+    if (ticker.empty()) ticker = get_val<std::string>(*settings, fields::kTicker, "");
+
     return OrderbookSettings {
-        .ticker = get_val<std::string>(j, fields::kTicker, ""),
-        .large_amount_usd = get_val<double>(j, fields::kLargeAmountUsd, 0.0),
-        .large_amount_usd2 = get_val<double>(j, fields::kLargeAmountUsd2, 0.0)
+        .ticker = normalize_ticker(ticker),
+        .large_amount_usd = get_val<double>(*settings, fields::kLargeAmountUsd, 0.0),
+        .large_amount_usd2 = get_val<double>(*settings, fields::kLargeAmountUsd2, 0.0)
     };
 }
 
 SignalLevelTriggered MetaScalpCodec::parse_signal_level_triggered(const nlohmann::json& j) {
     // R3: use server timestamp if present for replay determinism
-    std::string ts_str = get_val<std::string>(j, fields::kTime, "");
+    std::string ts_str = get_val<std::string>(j, fields::kTriggerTime, "");
+    if (ts_str.empty()) ts_str = get_val<std::string>(j, fields::kTime, "");
     return SignalLevelTriggered {
-        .ticker = get_val<std::string>(j, fields::kTicker, ""),
+        .ticker = normalize_ticker(get_val<std::string>(j, fields::kTicker, "")),
         .price = get_val<double>(j, fields::kPrice, 0.0),
         .timestamp = ts_str.empty() ? std::chrono::system_clock::now() : parse_timestamp(ts_str)
     };
@@ -599,7 +608,7 @@ ClusterSnapshot MetaScalpCodec::parse_cluster_snapshot(const nlohmann::json& j) 
         }
     }
     return ClusterSnapshot {
-        .ticker     = get_val<std::string>(j, fields::kTicker,    ""),
+        .ticker     = normalize_ticker(get_val<std::string>(j, fields::kTicker, "")),
         .timeframe  = get_val<std::string>(j, fields::kTimeFrame, ""),
         .zoom_index = get_val<int>(j, fields::kZoomIndex, 0),
         .items      = std::move(items),

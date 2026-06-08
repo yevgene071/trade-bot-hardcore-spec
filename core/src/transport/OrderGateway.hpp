@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <atomic>
+#include <optional>
 
 namespace trade_bot {
 
@@ -16,6 +17,11 @@ public:
     ConnectionInfo get_connection(int id) override;
     
     std::vector<TickerInfo> get_tickers(int connection_id, bool refresh = false) override;
+    OrderBookSnapshot get_orderbook_snapshot(int connection_id,
+                                             const Ticker& ticker,
+                                             int zoom_index = 0,
+                                             std::optional<int> depth_levels = std::nullopt,
+                                             std::optional<double> depth_percent = std::nullopt);
     std::vector<RestOrder> get_open_orders(int connection_id, const Ticker& ticker) override;
     std::vector<PositionUpdate> get_positions(int connection_id) override;
     BalanceUpdate get_balance(int connection_id) override;

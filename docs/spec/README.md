@@ -4,9 +4,9 @@
 формализованные стратегии, правила риска и тикеты для ИИ-исполнителя.
 
 **Аудитория:** разработчик (ИИ или человек), реализующий торгового бота
-для [MetaScalp](../metascalp-sdk/docs/MetaScalp-Api.md).
+для [MetaScalp](../../metascalp-sdk/docs/MetaScalp-Api.md).
 
-**Язык реализации:** C++17/20, CMake, Conan.
+**Язык реализации:** C++23, CMake, Conan.
 **Runtime:** headless-демон, подключается к MetaScalp на localhost (REST + WebSocket).
 **Рынок:** крипто-фьючерсы (BTC/ETH/SOL-USDT perpetual), скальпинг (секунды–минуты).
 
@@ -25,17 +25,18 @@
 | 1 | [`ROADMAP.md`](./ROADMAP.md) | Фазы разработки, milestones, критерии готовности каждой фазы | Менеджер + исполнитель |
 | 2 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Модули, структуры данных, потоки, кодовая структура, 3rd-party зависимости | Исполнитель |
 | 3 | [`METASCALP_API_CONTRACT.md`](./METASCALP_API_CONTRACT.md) | Фактическая поверхность MetaScalp API из SDK-документации: endpoints, WS events, ограничения | Исполнитель |
-| 4 | [`SIGNAL_DETECTION.md`](./SIGNAL_DETECTION.md) | Формальные детекторы рыночных паттернов: плотности, айсберги, лента, уровни, подход, поводырь | Исполнитель |
-| 5 | [`STRATEGIES.md`](./STRATEGIES.md) | Формализация торговых стратегий: BounceFromDensity, BreakoutEatThrough, LeaderLag, FlushReversal | Исполнитель |
-| 6 | [`RISK_MANAGEMENT.md`](./RISK_MANAGEMENT.md) | 13 правил риска с числами, kill-switch, сайзинг, ежедневный ресет | Исполнитель + compliance |
-| 7 | [`TASK_SPECS.md`](./TASK_SPECS.md) | Тикеты T0–T5 с acceptance criteria для каждой задачи | Исполнитель |
+| 4 | [`STRATEGY_SOURCE_DIGEST.md`](./STRATEGY_SOURCE_DIGEST.md) | Выжимка ручных методических материалов из `docs/*.docx` | Исполнитель |
+| 5 | [`SIGNAL_DETECTION.md`](./SIGNAL_DETECTION.md) | Формальные детекторы рыночных паттернов: плотности, айсберги, лента, уровни, подход, поводырь | Исполнитель |
+| 6 | [`STRATEGIES.md`](./STRATEGIES.md) | Формализация торговых стратегий: BounceFromDensity, BreakoutEatThrough, LeaderLag, FlushReversal | Исполнитель |
+| 7 | [`RISK_MANAGEMENT.md`](./RISK_MANAGEMENT.md) | 15 правил риска с числами, kill-switch, сайзинг, ежедневный ресет | Исполнитель + compliance |
+| 8 | [`TASK_SPECS.md`](./TASK_SPECS.md) | Тикеты T0–T5 с acceptance criteria для каждой задачи | Исполнитель |
 
 Приложения:
 
-- [`strategies_raw.txt`](./strategies_raw.txt) — исходные методические материалы
-  (DOCX, сконвертированные в текст). Источник истины для формализации в
-  `STRATEGIES.md`/`SIGNAL_DETECTION.md`. Новая логика без ссылки на этот
-  документ не добавляется.
+- Исходные ручные `.docx` лежат в `docs/`. Их нормализованная выжимка —
+  [`STRATEGY_SOURCE_DIGEST.md`](./STRATEGY_SOURCE_DIGEST.md). Новая
+  торговая логика должна быть привязана либо к этому digest, либо к явно
+  указанному ручному источнику.
 
 ---
 
@@ -47,7 +48,7 @@ ROADMAP.md
    └─► ARCHITECTURE.md
            │
            ├─► METASCALP_API_CONTRACT.md
-           │
+           ├─► STRATEGY_SOURCE_DIGEST.md
            ├─► SIGNAL_DETECTION.md
            │        │
            │        ▼
@@ -60,8 +61,8 @@ ROADMAP.md
 - `STRATEGIES.md` строится поверх сигналов из `SIGNAL_DETECTION.md` и правил
   `RISK_MANAGEMENT.md`.
 - Всё, что касается MetaScalp endpoints, WS events и JSON fields, сверяется с
-  `METASCALP_API_CONTRACT.md`; новые догадки о неописанных полях туда не
-  добавляются без demo contract test.
+  `METASCALP_API_CONTRACT.md`, который привязан к `metascalp-sdk` v1.0.7.
+  Новые догадки о неописанных полях туда не добавляются без demo contract test.
 - Числовые дефолты рисков и глобальных фильтров стратегий — **только** в
   `RISK_MANAGEMENT.md § 6`. `STRATEGIES.md § 5` ссылается на них по именам
   конфиг-параметров.
@@ -93,7 +94,7 @@ ROADMAP.md
 
 | Тема | Документ | Раздел |
 |------|----------|--------|
-| Как подключиться к MetaScalp | `METASCALP_API_CONTRACT.md` + `../metascalp-sdk/docs/MetaScalp-Api.md` | весь |
+| Как подключиться к MetaScalp | `METASCALP_API_CONTRACT.md` + `../../metascalp-sdk/docs/MetaScalp-Api.md` | весь |
 | Как устроен OrderBook в проекте | `ARCHITECTURE.md` | § 2.3 |
 | Где задаётся частота FeatureFrame | `ARCHITECTURE.md` | § 2.4, § 5 |
 | Как бот находит и фильтрует тикеры | `ARCHITECTURE.md` | § 2.11 (TickerUniverse) |
@@ -132,11 +133,12 @@ ROADMAP.md
 |------|--------|
 | `ROADMAP.md` | ✅ v1.1 (уточнены фазы после hard-review) |
 | `ARCHITECTURE.md` | ✅ v1.1 (+ ExternalFeeds § 2.12, WS-loss recovery, signal-levels) |
-| `METASCALP_API_CONTRACT.md` | ✅ v1.0 (фактическая поверхность MetaScalp API, без догадок) |
+| `METASCALP_API_CONTRACT.md` | ✅ v1.1 (MetaScalp SDK v1.0.7: orderbook-snapshot, mark/funding, FetchSnapshot, stop trigger Price) |
+| `STRATEGY_SOURCE_DIGEST.md` | ✅ v1.0 (ручные стратегии из DOCX, дубль `СТРАТЕГИИЯ.docx` удалён) |
 | `SIGNAL_DETECTION.md` | ✅ v1.1 (минимум 200 положительных примеров, LiquidationDetector) |
-| `STRATEGIES.md` | ✅ v1.1 (явные affinity weights, hard-критерии, R13 funding blackout) |
-| `RISK_MANAGEMENT.md` | ✅ v1.1 (+ R13 funding blackout, max_stop_bps=20, WS-loss sequence, persist state) |
-| `TASK_SPECS.md` | ✅ v1.1 (+ T0-CLOCK, T0-NEWS, T2-LABELING, T3-SIGLEVEL, T4-RECOVERY, T4-FUNDING, T4-FINRES, T4-EXTERNAL) |
+| `STRATEGIES.md` | ✅ v1.2 (manual strategy gap-analysis: continuation, large participant, spot/futures dislocation) |
+| `RISK_MANAGEMENT.md` | ✅ v1.2 (R1-R15, R14 runtime hard-kill, R15 slippage) |
+| `TASK_SPECS.md` | ✅ v1.2 (+ T1-BOOK-SEED, SDK v1.0.7 order body, R1-R15 split) |
 
 Изменения документов — только через PR с описанием, **что именно** меняется
 и **почему**. Любая правка чисел в defaults обязана сопровождаться
@@ -160,6 +162,8 @@ contract test на demo.
 **Факт по API:** `POST /api/connections/{id}/orders` возвращает auto-generated `ClientId`.
 В таблице `GET open orders` `ClientId` назван client-generated, но
 документация не показывает request-поле для caller-supplied client id.
+Поэтому `OrderGateway` не отправляет `ClientId`, `ClientOrderId` или другие
+idempotency-key поля в request body.
 `GET /api/connections/{id}/orders?Ticker=...` принимает только обязательный `Ticker` и возвращает open orders;
 timestamp/status/history фильтров нет.
 
@@ -173,17 +177,19 @@ body или статус неизвестен, `LiveExecutor` делает recon
 `SubmitUnknown`, тикер ставится на pause, запускается recovery/операторский ack.
 В paper можно тестировать повторный POST, но это не live-политика.
 
-### OQ-2. Стоп-ордера: поле `TriggerPrice` в `POST /api/connections/{id}/orders`
+### OQ-2. Стоп-ордера: `Price` как trigger price
 
-**Факт по API:** `POST /api/connections/{id}/orders` поддерживает `Type=1 Stop`, `Type=2 StopLoss`,
-`Type=3 TakeProfit`, но request schema содержит только `Price`, не содержит
-`TriggerPrice`. `GET /api/connections/{id}/orders?Ticker=...` показывает
+**Факт по API v1.0.7:** `POST /api/connections/{id}/orders` поддерживает
+`Type=1 Stop`, `Type=2 StopLoss`, `Type=3 TakeProfit`. Для этих типов
+`Price` документирован как trigger price. Отдельного request-поля
+`TriggerPrice` нет. `GET /api/connections/{id}/orders?Ticker=...` показывает
 `TriggerPrice`, если ордер уже создан.
 
-**Решение:** до live обязательно выполнить demo contract test: поставить
-`Stop`/`StopLoss`/`TakeProfit` документированным request body и проверить,
-становится ли `Price` фактическим `TriggerPrice`. Пока это не доказано, live
-не стартует. Soft-stop разрешён только как paper/test fallback.
+**Решение:** до live всё равно выполнить demo contract test: поставить
+`Stop`/`StopLoss`/`TakeProfit` с `Price=X` и проверить, что REST open-orders
+отражает `TriggerPrice == X`, а WS/fill-семантика соответствует ожиданиям.
+Если тест не пройден, live не стартует. Soft-stop разрешён только как
+paper/test fallback.
 
 **Импакт:** soft-stop уязвим к WS-разрыву — при потере связи стоп не
 сработает. Потому в WS-loss kill-switch sequence (RISK § 4) добавлено
@@ -199,6 +205,10 @@ body или статус неизвестен, `LiveExecutor` делает recon
 **Решение:** T1-NOTIF фильтрует только по документированным полям:
 `ExchangeId`, `MarketType`, allowlist/pool тикеров. Фильтра по `ConnectionId`
 для notifications нет.
+
+Signal-level trading logic не опирается на app-wide notification stream:
+`SignalLevelBridge` использует отдельный WS `signal_level_subscribe`, а
+`notification_subscribe` остаётся каналом screener/activity/fallback.
 
 ### OQ-4. `BalanceUpdate` debounce и race с `POST /api/connections/{id}/orders`
 

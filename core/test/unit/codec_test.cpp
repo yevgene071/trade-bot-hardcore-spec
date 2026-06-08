@@ -43,7 +43,7 @@ TEST(CodecTest, OrderUpdateParsing) {
     auto update = MetaScalpCodec::parse_order_update(j);
     ASSERT_TRUE(update.has_value());
     EXPECT_EQ(update->order_id, 12345);
-    EXPECT_EQ(update->ticker, "BTCUSDT");
+    EXPECT_EQ(update->ticker, "BTC_USDT");
     EXPECT_EQ(update->side, Side::Buy);
     EXPECT_EQ(update->type, OrderType::Limit);
     EXPECT_EQ(update->price, 60000.5);
@@ -64,6 +64,7 @@ TEST(CodecTest, PositionUpdateAvgPrice) {
     
     auto pos = MetaScalpCodec::parse_position_update(j);
     ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->ticker, "ETH_USDT");
     EXPECT_EQ(pos->avg_price, 2500.0);
     EXPECT_EQ(pos->avg_price_fix, 2510.0);
     EXPECT_EQ(pos->avg_price_dyn, 2490.0);
@@ -100,6 +101,25 @@ TEST(CodecTest, FinresUpdateParsing) {
     EXPECT_EQ(finres->finreses[0].result, 10.5);
 }
 
+TEST(CodecTest, SignalLevelParsingSdkShape) {
+    nlohmann::json j = {
+        {"Id", 42},
+        {"ConnectionId", 1},
+        {"Ticker", "BTCUSDT"},
+        {"Price", 95000.0},
+        {"IsTriggered", true},
+        {"TriggerTime", "2026-04-13T10:30:00+00:00"},
+        {"TriggerRule", "GreaterThanEqual"}
+    };
+
+    auto level = MetaScalpCodec::parse_signal_level(j);
+    EXPECT_EQ(level.id, 42);
+    EXPECT_EQ(level.ticker, "BTC_USDT");
+    EXPECT_DOUBLE_EQ(level.price, 95000.0);
+    EXPECT_TRUE(level.triggered);
+    EXPECT_NE(level.created_at, std::chrono::system_clock::time_point{});
+}
+
 TEST(CodecTest, CamelCaseParsing) {
     // Test order update with camelCase
     nlohmann::json j_order = {
@@ -113,7 +133,7 @@ TEST(CodecTest, CamelCaseParsing) {
     auto update = MetaScalpCodec::parse_order_update(j_order);
     ASSERT_TRUE(update.has_value());
     EXPECT_EQ(update->order_id, 12345);
-    EXPECT_EQ(update->ticker, "BTCUSDT");
+    EXPECT_EQ(update->ticker, "BTC_USDT");
 
     // Test orderbook snapshot with lowercase keys
     nlohmann::json j_ob = {
@@ -128,9 +148,9 @@ TEST(CodecTest, CamelCaseParsing) {
     };
     auto snap = MetaScalpCodec::parse_orderbook_snapshot(j_ob, "ETHUSDT");
     ASSERT_TRUE(snap.has_value());
+    EXPECT_EQ(snap->ticker, "ETH_USDT");
     ASSERT_EQ(snap->asks.size(), 1);
     EXPECT_DOUBLE_EQ(snap->asks[0].price, 2500.1);
     ASSERT_EQ(snap->bids.size(), 1);
     EXPECT_DOUBLE_EQ(snap->bids[0].price, 2499.9);
 }
-

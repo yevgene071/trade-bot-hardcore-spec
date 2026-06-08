@@ -114,7 +114,7 @@ trade_bot/
 │   ├── marketdata/                           # OrderBook, TradeStream, LeaderTracker
 │   ├── features/                             # FeatureFrame, FeatureExtractor
 │   ├── signals/                              # 7 детекторов + SignalBus + SignalLevelBridge
-│   ├── strategy/                             # StrategyEngine + 3 стратегии
+│   ├── strategy/                             # StrategyEngine + 4 стратегии (3 core + FlushReversal)
 │   ├── universe/                             # TickerUniverse + affinity-фильтры
 │   ├── risk/                                 # RiskManager, NewsCalendar, AccountState
 │   ├── executor/                             # LiveExecutor, PaperExecutor, StartupRecovery
@@ -192,7 +192,7 @@ trade_bot/
 | **BounceFromDensity** | LevelApproach + плотность у уровня | Limit |
 | **BreakoutEatThrough** | DensityEating + TapeBurst | Market / aggressive limit |
 | **LeaderLag** | LeaderMove + lag > threshold | Market |
-| **FlushReversal** | TapeFlush + liquidation | Фаза 5 |
+| **FlushReversal** | LevelBreak + повторный TapeFlush | Paper; live после T5 liquidation/open-interest gate |
 
 ---
 
@@ -219,5 +219,3 @@ trade_bot/
 - [API-контракт](docs/spec/METASCALP_API_CONTRACT.md) — документированный контракт MetaScalp
 - [Roadmap](docs/spec/ROADMAP.md) — план развития на 5 фаз
 - [Task Specs](docs/spec/TASK_SPECS.md) — технические спецификации задач
-
-

@@ -2,6 +2,7 @@
 #include "transport/MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
 #include "utils/UrlEncoder.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -18,7 +19,7 @@ OrderbookSettingsLoader::OrderbookSettingsLoader(IHttpClient& http,
 std::optional<OrderbookSettings> OrderbookSettingsLoader::fetch(const Ticker& ticker) {
     std::stringstream ss;
     ss << base_url_ << "/api/connections/" << connection_id_ << "/orderbook-settings"
-       << "?Ticker=" << url_encode(ticker);
+       << "?Ticker=" << url_encode(to_metascalp_symbol(ticker));
 
     try {
         auto resp = http_.get(ss.str());

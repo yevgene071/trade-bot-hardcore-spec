@@ -5,36 +5,22 @@
 #include "perf/TraceContext.hpp"
 #include "perf/TraceTimeBuffer.hpp"
 #include "perf/PerfRegistry.hpp"
+#include "utils/TickerSymbol.hpp"
 #include <algorithm>
 #include <chrono>
+#include <iterator>
 
 namespace trade_bot {
 
-// MetaScalp uses "BTC_USDT" format. Config uses the same format, so internal
-// and wire formats are identical. to_ms/from_ms are kept for safety (handles
-// both "BTCUSDT" and "BTC_USDT" input gracefully).
+// Internal keys use BASE_QUOTE. MetaScalp SDK v1.0.7 REST/WS examples use
+// exchange symbols without separators, e.g. BTCUSDT.
 static std::string to_ms(const std::string& t) {
-    if (t.find('_') != std::string::npos) return t;  // already BTC_USDT
-    for (const char* q : {"USDT", "USDC", "BTC", "ETH", "BNB", "BUSD"}) {
-        std::size_t qlen = std::strlen(q);
-        if (t.size() > qlen && t.substr(t.size() - qlen) == q)
-            return t.substr(0, t.size() - qlen) + "_" + q;
-    }
-    return t;
+    return to_metascalp_symbol(t);
 }
 
 static std::string from_ms(const std::string& t) {
     if (t.empty()) return "";
-    // Internal format is "BTC_USDT" (same as MetaScalp wire format).
-    // If the incoming ticker already has an underscore, it's already canonical.
-    if (t.find('_') != std::string::npos) return t;
-    // Otherwise normalise BTCUSDT → BTC_USDT (handles legacy no-underscore input).
-    for (const char* q : {"USDT", "USDC", "BTC", "ETH", "BNB", "BUSD"}) {
-        std::size_t qlen = std::strlen(q);
-        if (t.size() > qlen && t.substr(t.size() - qlen) == q)
-            return t.substr(0, t.size() - qlen) + "_" + q;
-    }
-    return t;
+    return to_internal_ticker(t);
 }
 
 MarketDataFeed::MarketDataFeed(std::shared_ptr<IWsClient> ws_client, int connection_id)
@@ -76,7 +62,7 @@ void MarketDataFeed::add_listener(IMarketDataListener* listener) {
 
 void MarketDataFeed::add_listener(const Ticker& ticker, IMarketDataListener* listener) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_ticker_listeners[ticker].push_back(listener);
+    m_ticker_listeners[from_ms(ticker)].push_back(listener);
     rebuild_listener_snapshot_();
 }
 
@@ -96,13 +82,19 @@ void MarketDataFeed::remove_listener(IMarketDataListener* listener) {
 
 void MarketDataFeed::remove_listener(const Ticker& ticker, IMarketDataListener* listener) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (auto it = m_ticker_listeners.find(ticker); it != m_ticker_listeners.end()) {
+    const Ticker key = from_ms(ticker);
+    if (auto it = m_ticker_listeners.find(key); it != m_ticker_listeners.end()) {
         it->second.erase(std::remove(it->second.begin(), it->second.end(), listener), it->second.end());
         if (it->second.empty()) {
             m_ticker_listeners.erase(it);
         }
     }
     rebuild_listener_snapshot_();
+}
+
+void MarketDataFeed::set_orderbook_snapshot_fetcher(OrderBookSnapshotFetcher fetcher) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_snapshot_fetcher = std::move(fetcher);
 }
 
 // Writer side only — caller MUST hold m_mutex. Rebuilds the full merged
@@ -135,15 +127,21 @@ void MarketDataFeed::rebuild_listener_snapshot_() {
 }
 
 void MarketDataFeed::subscribe_ticker(const Ticker& ticker) {
+    const Ticker key = from_ms(ticker);
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_subscribed_tickers.insert(ticker);
+        m_subscribed_tickers.insert(key);
     }
 
-    const std::string ms_ticker = to_ms(ticker);
-    LOG_INFO("Subscribing to {}", ticker);
+    const std::string ms_ticker = to_ms(key);
+    LOG_INFO("Subscribing to {}", key);
     const int64_t depth_levels = Config::get_or<int64_t>("feed.depth_levels", 50);
     const double depth_percent = Config::get_or<double>("feed.depth_percent", 0.5);
+    const bool fetch_snapshot_on_subscribe =
+        Config::get_or<bool>("feed.fetch_snapshot_on_subscribe", true);
+    const bool use_rest_seed =
+        !fetch_snapshot_on_subscribe &&
+        try_rest_orderbook_snapshot_(key, 0, static_cast<int>(depth_levels), depth_percent);
     
     auto send_sub = [&](const char* type) {
         m_ws_client->send(nlohmann::json{
@@ -151,35 +149,30 @@ void MarketDataFeed::subscribe_ticker(const Ticker& ticker) {
             {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}}}
         }.dump());
     };
-    auto send_ob_sub = [&]() {
-        m_ws_client->send(nlohmann::json{
-            {"Type", "orderbook_subscribe"},
-            {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}, {"DepthLevels", depth_levels}, {"DepthPercent", depth_percent}}}
-        }.dump());
-    };
     send_sub("trade_subscribe");
-    send_ob_sub();
+    send_orderbook_subscribe_(key, use_rest_seed);
     send_sub("funding_subscribe");
     send_sub("mark_price_subscribe");
 }
 
 void MarketDataFeed::force_resync_orderbook(const Ticker& ticker) {
-    const std::string ms_ticker = to_ms(ticker);
     const int64_t depth_levels = Config::get_or<int64_t>("feed.depth_levels", 50);
     const double depth_percent = Config::get_or<double>("feed.depth_percent", 0.5);
-    m_ws_client->send(nlohmann::json{
-        {"Type", "orderbook_subscribe"},
-        {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}, {"DepthLevels", depth_levels}, {"DepthPercent", depth_percent}}}
-    }.dump());
+    const Ticker key = from_ms(ticker);
+    if (try_rest_orderbook_snapshot_(key, 0, static_cast<int>(depth_levels), depth_percent)) {
+        return;
+    }
+    send_orderbook_subscribe_(key, false);
 }
 
 void MarketDataFeed::unsubscribe_ticker(const Ticker& ticker) {
+    const Ticker key = from_ms(ticker);
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_subscribed_tickers.erase(ticker);
+        m_subscribed_tickers.erase(key);
     }
 
-    const std::string ms_ticker = to_ms(ticker);
+    const std::string ms_ticker = to_ms(key);
     auto send_unsub = [&](const char* type) {
         m_ws_client->send(nlohmann::json{
             {"Type", type},
@@ -194,14 +187,14 @@ void MarketDataFeed::unsubscribe_ticker(const Ticker& ticker) {
 
 std::optional<FundingData> MarketDataFeed::get_funding(const Ticker& ticker) const {
     auto snap = m_funding_snapshot.load(std::memory_order_acquire);
-    auto it = snap->find(ticker);
+    auto it = snap->find(from_ms(ticker));
     if (it == snap->end()) return std::nullopt;
     return it->second;
 }
 
 double MarketDataFeed::get_mark_price(const Ticker& ticker) const {
     auto snap = m_mark_price_snapshot.load(std::memory_order_acquire);
-    auto it = snap->find(ticker);
+    auto it = snap->find(from_ms(ticker));
     return it != snap->end() ? it->second : 0.0;
 }
 
@@ -234,29 +227,90 @@ void MarketDataFeed::resubscribe_all() {
     };
     m_ws_client->send(conn_sub.dump());
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<Ticker> tickers;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        tickers.reserve(m_subscribed_tickers.size());
+        std::copy(m_subscribed_tickers.begin(), m_subscribed_tickers.end(), std::back_inserter(tickers));
+    }
+
     const int64_t depth_levels = Config::get_or<int64_t>("feed.depth_levels", 50);
     const double depth_percent = Config::get_or<double>("feed.depth_percent", 0.5);
+    const bool fetch_snapshot_on_subscribe =
+        Config::get_or<bool>("feed.fetch_snapshot_on_subscribe", true);
 
-    for (const auto& ticker : m_subscribed_tickers) {
+    for (const auto& ticker : tickers) {
         const std::string ms_ticker = to_ms(ticker);
+        const bool use_rest_seed =
+            !fetch_snapshot_on_subscribe &&
+            try_rest_orderbook_snapshot_(ticker, 0, static_cast<int>(depth_levels), depth_percent);
         auto send_sub = [&](const char* type) {
             m_ws_client->send(nlohmann::json{
                 {"Type", type},
                 {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}}}
             }.dump());
         };
-        auto send_ob_sub = [&]() {
-            m_ws_client->send(nlohmann::json{
-                {"Type", "orderbook_subscribe"},
-                {"Data", {{"ConnectionId", m_connection_id}, {"Ticker", ms_ticker}, {"ZoomIndex", 0}, {"DepthLevels", depth_levels}, {"DepthPercent", depth_percent}}}
-            }.dump());
-        };
         send_sub("trade_subscribe");
-        send_ob_sub();
+        send_orderbook_subscribe_(ticker, use_rest_seed);
         send_sub("funding_subscribe");
         send_sub("mark_price_subscribe");
     }
+}
+
+bool MarketDataFeed::try_rest_orderbook_snapshot_(const Ticker& ticker,
+                                                  int zoom_index,
+                                                  std::optional<int> depth_levels,
+                                                  std::optional<double> depth_percent) {
+    const Ticker key = from_ms(ticker);
+    OrderBookSnapshotFetcher fetcher;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_ws_snapshot_only.contains(key)) return false;
+        fetcher = m_snapshot_fetcher;
+    }
+    if (!fetcher) return false;
+
+    try {
+        auto snapshot = fetcher(key, zoom_index, depth_levels, depth_percent);
+        snapshot.ticker = from_ms(snapshot.ticker.empty() ? key : snapshot.ticker);
+        dispatch_orderbook_snapshot_(snapshot);
+        return true;
+    } catch (const std::exception& e) {
+        const std::string msg = e.what();
+        if (msg.find("501") != std::string::npos) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_ws_snapshot_only.insert(key);
+            LOG_WARN("REST orderbook snapshot unsupported for {}; falling back to WS snapshots", key);
+        } else {
+            LOG_WARN("REST orderbook snapshot failed for {}: {}; falling back to WS snapshot", key, msg);
+        }
+        return false;
+    }
+}
+
+void MarketDataFeed::send_orderbook_subscribe_(const Ticker& ticker, bool fetch_snapshot_false) {
+    const Ticker key = from_ms(ticker);
+    const int64_t depth_levels = Config::get_or<int64_t>("feed.depth_levels", 50);
+    const double depth_percent = Config::get_or<double>("feed.depth_percent", 0.5);
+    nlohmann::json data = {
+        {"ConnectionId", m_connection_id},
+        {"Ticker", to_ms(key)},
+        {"ZoomIndex", 0},
+        {"DepthLevels", depth_levels},
+        {"DepthPercent", depth_percent}
+    };
+    if (fetch_snapshot_false) {
+        data["FetchSnapshot"] = false;
+    }
+    m_ws_client->send(nlohmann::json{{"Type", "orderbook_subscribe"}, {"Data", std::move(data)}}.dump());
+}
+
+void MarketDataFeed::dispatch_orderbook_snapshot_(const OrderBookSnapshot& snapshot) {
+    const Ticker ticker = from_ms(snapshot.ticker);
+    auto normalized = snapshot;
+    normalized.ticker = ticker;
+    auto targets = get_target_listeners(ticker);
+    for (auto* l : *targets) l->on_orderbook_snapshot(normalized);
 }
 
 std::shared_ptr<const MarketDataFeed::ListenerList> MarketDataFeed::get_target_listeners(const Ticker& ticker) {
@@ -323,8 +377,7 @@ void MarketDataFeed::handle_message(const nlohmann::json& j) {
             if (!snap) { LOG_WARN("parse_orderbook_snapshot failed: {}", snap.error()); return; }
             record_delta_us(codec_hist, recv_ns);
             LOG_DEBUG("OB snapshot {}: bids={} asks={}", ticker, snap->bids.size(), snap->asks.size());
-            auto targets = get_target_listeners(ticker);
-            for (auto* l : *targets) l->on_orderbook_snapshot(*snap);
+            dispatch_orderbook_snapshot_(*snap);
         } else if (type == "orderbook_update") {
             Ticker ticker = from_ms(MetaScalpCodec::get_val<std::string>(data, api::fields::kTicker, ""));
             static std::once_flag upd_dbg;

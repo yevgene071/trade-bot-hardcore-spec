@@ -11,6 +11,16 @@
 (BTC/ETH/SOL-USDT на Binance/Bybit). Под каждый тикер настройки нужно калибровать
 по историческим данным (см. `ROADMAP.md § Фаза 5`).
 
+Ручные торговые основания для детекторов сведены в
+`STRATEGY_SOURCE_DIGEST.md`. Если новый detector не связан с ручным паттерном
+или с явно описанным MetaScalp/API-событием, он не входит в production scope.
+
+**MetaScalp caveat:** `trade_update` в SDK v1.0.7 может быть агрегирован
+сервером через setting `AddingTicksForAPeriod` (default около 200 ms). Детекторы
+ленты, которым нужен raw tape, должны либо требовать `AddingTicksForAPeriod=0`
+через orderbook settings/operator setup, либо явно работать с aggregated prints
+и иметь отдельную калибровку.
+
 ---
 
 ## 1. DensityDetector — обнаружение плотности
@@ -117,6 +127,31 @@ on_trade(t):
 
 Если плотность полностью съедена (размер уровня в книге < 20% изначального) —
 DensityEating больше не эмитится, вместо этого DensityRemoved (с `fake=false`).
+
+### 1.2. DensityStack — завал плотностей
+
+Ручная стратегия отдельно выделяет "завал плотностей": несколько крупных
+заявок в узком диапазоне, где вход делается от первой плотности, а стоп
+ставится за последней.
+
+```
+on_density_detected(d):
+    cluster = find densities on same side within stack_max_width_bps
+    if cluster.count >= stack_min_levels
+       AND width(cluster) <= stop_anchor_max_bps
+       AND sum(cluster.size_usd) >= stack_min_size_usd:
+        emit DensityStack(first_price, last_price, total_size_usd, side)
+```
+
+| Параметр | Default | Описание |
+|----------|---------|----------|
+| `stack_min_levels` | **2** | минимум плотностей в завале |
+| `stack_max_width_bps` | **20** | диапазон завала не шире нормального стопа |
+| `stack_min_size_usd` | **$100,000** | суммарный размер |
+
+`BounceFromDensity` использует `first_price` как зону входа и `last_price`
+как stop-anchor. `BreakoutEatThrough` использует завал как серию преград:
+после разъедания первой плотности ожидается переход к следующей.
 
 ### DensityDetector: implementation notes (algorithm-grade)
 
@@ -293,8 +328,6 @@ if price_range_bps <= distribution_max_range_bps (=20)
 ### TapeAnalyzer: implementation notes (algorithm-grade)
 
 - **TapeBurst через Hawkes process intensity** (см. ARCH § 2.3 TradeStream):
-    *   **Критическое замечание:** Точность оценки `prints_per_sec` и интенсивности процесса Хоукса критически зависит от точности временных меток в `trade_update`. Если MetaScalp агрегирует события или предоставляет неточное время, это может существенно исказить результаты и привести к ложным сигналам или задержкам в обнаружении всплесков активности.
-
     *   **Критическое замечание:** Точность оценки `prints_per_sec` и интенсивности процесса Хоукса критически зависит от точности временных меток в `trade_update`. Если MetaScalp агрегирует события или предоставляет неточное время, это может существенно исказить результаты и привести к ложным сигналам или задержкам в обнаружении всплесков активности.
   не «считаем объёмы в окне 5 сек», а ведём `λ(t) = μ + Σ α·exp(-β(t-tᵢ))` —
   exponentially-decaying intensity. `μ` — фоновая интенсивность из 30s
@@ -547,7 +580,7 @@ on_frame:
 ### LeaderSignal: payload
 ```json
 {
-  "leader_ticker": "BTCUSDT",
+  "leader_ticker": "BTC_USDT",
   "leader_change_5s_pct": 0.42,
   "our_change_5s_pct": 0.08,
   "correlation_60s": 0.78,
@@ -659,9 +692,11 @@ on_tape_flush(F):
         emit FlushNoLiq(F.price)
 ```
 
-Использование: FlushReversal стратегия (STRATEGIES § 4) входит только
-при `LiquidationFlush`, не при `FlushNoLiq` — это отличает капитуляционные
-флэши от шумовых одиночных принтов. Детали — в T5-FLUSH.
+Использование в T5/live-grade режиме: FlushReversal стратегия (STRATEGIES § 4)
+входит только при `LiquidationFlush`, не при `FlushNoLiq` — это отличает
+капитуляционные флэши от шумовых одиночных принтов. Текущий кодовый
+FlushReversal — paper prototype без liquidation hard gate; детали доводки — в
+T5-FLUSH.
 
 ---
 
@@ -678,3 +713,61 @@ on_tape_flush(F):
 - отсутствие `LeaderMove` в сторону пробоя
 
 Подробнее — `STRATEGIES.md § BounceFromDensity`.
+
+---
+
+## 11. Planned detectors from manual strategy digest
+
+Эти детекторы нужны для полной формализации ручных стратегий, но не должны
+использоваться в live до появления тестов и replay fixtures.
+
+### 11.1. LargeParticipantMove
+
+Покрывает ручные паттерны "переставление плотности" и "реализация объёма".
+
+Сигнал появляется, когда одна крупная заявка:
+
+- сохраняет близкий размер (`rel_size_epsilon`);
+- 3-5 раз переставляется ближе к spread;
+- живёт достаточно долго на каждой цене;
+- не является мгновенной fake-density;
+- после снятия либо появляется снова в течение 30 сек, либо паттерн
+  инвалидируется.
+
+Выходной signal должен содержать `move_count`, `first_price`, `last_price`,
+`size_usd`, `direction`, `age_sec`, `last_seen_ts`.
+
+### 11.2. SpotFuturesDislocation
+
+Покрывает ручную раскорреляцию спот/фьюч. Детектор запрещён без явного mapping
+тикеров. Строковые эвристики вида "убрать PERP из имени" запрещены в live.
+
+Вход:
+
+- spot price stream;
+- futures price stream;
+- rolling basis / correlation;
+- stale-state обоих источников.
+
+Сигнал:
+
+```
+basis_bps = (futures_mid - spot_mid) / spot_mid * 10000
+if abs(basis_bps - rolling_basis_mean) >= dislocation_min_bps
+   AND corr_60s >= min_corr
+   AND blocking_density_exists:
+    emit SpotFuturesDislocation(expected_direction, basis_bps)
+```
+
+### 11.3. ContinuationSetup
+
+Покрывает ручную сделку "продолжение движения", когда первичный пробой уже
+пропущен. Это не самостоятельный entry без стакана: detector должен требовать
+новый stop-anchor в направлении движения.
+
+Условия:
+
+- recent `LevelBreak` или сильный `LeaderMove`;
+- новое `DensityDetected`/`DensityStack` в поддержку;
+- цена не ушла дальше `max_missed_move_bps`;
+- до следующего уровня остаётся минимум `min_rr_ratio`.

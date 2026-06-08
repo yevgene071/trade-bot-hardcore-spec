@@ -267,7 +267,7 @@ TEST_F(OrderBookTest, IsConsistentDetectsMissingUpdates) {
     EXPECT_TRUE(ob.is_consistent(corrupted_snap, 5));
 }
 
-TEST_F(OrderBookTest, ApplyUpdateBatchParallelCrossed) {
+TEST_F(OrderBookTest, ApplyUpdateBatchCrossed) {
     auto ob = make();
     OrderBookSnapshot snap{};
     snap.ticker = "BTCUSDT";
@@ -294,4 +294,3 @@ TEST_F(OrderBookTest, ApplyUpdateBatchParallelCrossed) {
     EXPECT_DOUBLE_EQ(*bb, 101.50);
     EXPECT_FALSE(ba.has_value()); // Старый аск 101.00 удален, книга пуста с этой стороны
 }
-

@@ -16,6 +16,7 @@
 #include "transport/FinresHandler.hpp"
 #include "transport/MarketDataFeed.hpp"
 #include "universe/TickerUniverse.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include <spdlog/fmt/ranges.h>
 
@@ -98,9 +99,7 @@ void BotApp::dashboard_tick() {
 
 
 std::string BotApp::normalize_ticker_(const std::string& name) {
-    if (name.find('_') == std::string::npos && name.size() > 4)
-        return name.substr(0, name.size() - 4) + "_" + name.substr(name.size() - 4);
-    return name;
+    return to_internal_ticker(name);
 }
 
 void BotApp::update_account_from_exchange_() {
@@ -412,6 +411,9 @@ void BotApp::tick() {
     // Handles funding spikes and spread widenings that disqualify tickers mid-session.
     if (now - last_affinity_refresh_ >= std::chrono::seconds(60)) {
         universe_.refresh_affinity();
+        if (cluster_mgr_) {
+            cluster_mgr_->refresh(universe_.active());
+        }
         last_affinity_refresh_ = now;
     }
 
@@ -616,4 +618,3 @@ void BotApp::dump_perf_report_() {
 }
 
 } // namespace trade_bot
-

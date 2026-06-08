@@ -2,13 +2,13 @@
 
 Дорожная карта разработки торгового бота для MetaScalp.
 
-**Язык:** C++17/20, CMake, Linux/Windows
+**Язык:** C++23, CMake, Linux
 **Runtime:** headless-демон, подключается к MetaScalp по localhost (REST + WebSocket)
 **Целевой рынок:** крипто-фьючерсы (BTC/ETH и альткоины), таймфрейм — скальпинг (секунды–минуты)
 
-> API MetaScalp нестабилен (регулярно обновляется). До фазы 3 SDK не пишем —
-> работаем напрямую с HTTP/WS через тонкий абстрактный слой, который легко
-> перегенерировать под новую версию API. См. `ARCHITECTURE.md § 2.1`.
+> API MetaScalp нестабилен (регулярно обновляется). Источник истины для wire
+> contract — `metascalp-sdk/docs/MetaScalp-Api.md` v1.0.7 и
+> `METASCALP_API_CONTRACT.md`. Код не отправляет незадокументированные поля.
 
 ---
 
@@ -42,6 +42,7 @@
 - **M1.5** — сериализация FeatureFrame в parquet/CSV для оффлайн-анализа
 - **M1.6** — `TickerUniverse` (`T1-UNIVERSE`, см. `ARCHITECTURE.md § 2.11`): pool + per-strategy affinity
 - **M1.7** — `cluster-snapshot` polling (`T1-CLUSTER`): footprint M5/M15/H1 как второй источник уровней
+- **M1.7b** — REST `orderbook-snapshot` + WS `FetchSnapshot=false` (`T1-BOOK-SEED`): массовые подписки без лишних exchange REST snapshot на каждый тикер; fallback на WS snapshot при `501`
 - **M1.8** — `notification_subscribe` (`T1-NOTIF`): screener (`ScreenerNewCoin` → новые кандидаты) + boost priority по `BigTick` / `BigOrderBookAmount`
 - **M1.9** — auto-калибровка `density.min_size_usd` по `LargeAmountUsd` из orderbook-settings (`T1-CALIB`)
 - **M1.10** — integration gate (`T1-GATE`) + unit-тесты на детерминированные сценарии (заранее подготовленные dump-файлы)
@@ -67,7 +68,8 @@
 ---
 
 ### Фаза 3. Strategy Engine (4 недели)
-Цель: три рабочие стратегии из `STRATEGIES.md` в режиме paper-trading.
+Цель: три core-стратегии из `STRATEGIES.md` в режиме paper-trading плюс
+paper-прототип `FlushReversal` без live-допуска до T5.
 
 - **M3.1** — `TradePlan` + `StrategyContext` + `StrategyEngine` — инфраструктура стратегий (см. TASK_SPECS `T3-PLAN`)
 - **M3.2** — стратегия `BounceFromDensity` (`T3-BOUNCE`)
@@ -77,7 +79,7 @@
 - **M3.6** — `TradeJournal` (`T3-JOURNAL`): JSONL с полной трассировкой каждой сделки
 - **M3.7** — **T3-SIGLEVEL**: серверные signal-levels от MetaScalp (`POST /api/connections/{id}/signal-levels` + `signal_level_subscribe`) — event-driven замена polling уровней
 
-**Критерий готовности:** `T3-GATE` — минимум 48 часов paper-trading без крешей, все сделки логируются с полной трассировкой (какие сигналы, какие пороги, почему вошли), T3-SIGLEVEL эмитит `LevelTriggered` от сервера.
+**Критерий готовности:** `T3-GATE` — минимум 48 часов paper-trading без крешей, все сделки логируются с полной трассировкой (какие сигналы, какие пороги, почему вошли), T3-SIGLEVEL эмитит `LevelBreak` с `payload.source="server"` от `signal_level_triggered`.
 
 ---
 
@@ -85,12 +87,12 @@
 Цель: живое исполнение с жёсткими лимитами.
 
 - **M4.0** — **T4-EXTERNAL** + **T4-FUNDING**: ExternalFeedRegistry + Binance funding rate client (для R13)
-- **M4.1** — `RiskManager` — проверки перед каждой сделкой (R1..R13 из `RISK_MANAGEMENT.md`), persistent state через T4-RISK
+- **M4.1** — `RiskManager` — pre-trade проверки R1..R13 и R15 из `RISK_MANAGEMENT.md`, R14 runtime hard-kill в executor/position monitor, persistent state через T4-RISK
 - **M4.2** — дневной лимит убытка (daily stop-out, R2 «морж»), идемпотентный UTC-ресет
 - **M4.3** — размер позиции через формулу fixed-risk (% от депозита / дистанция до стопа)
 - **M4.4** — **T4-FINRES**: финрезультаты от биржи как источник истины для realized_pnl
 - **M4.5** — **T4-RECOVERY**: startup recovery — при рестарте поднимает открытые позиции/ордера, сверяет с persisted state, выставляет emergency-stop при необходимости
-- **M4.6** — `LiveExecutor` (T4-EXECUTOR) — реальные ордера через REST `placeOrder` с ambiguous-submit handling без blind retry (см. README OQ-1), state-machine для race'ов, demo contract test для server-side stop/TP (OQ-2), aggregate balance reservation (OQ-4)
+- **M4.6** — `LiveExecutor` (T4-EXECUTOR) — реальные ордера через REST `POST /api/connections/{id}/orders` строго по SDK v1.0.7, ambiguous-submit handling без blind retry (см. README OQ-1), state-machine для race'ов, demo contract test для server-side stop/TP (`Price` как trigger price), aggregate balance reservation (OQ-4)
 - **M4.7** — обработка отказов биржи (retries, circuit breaker после N ошибок подряд)
 - **M4.8** — kill-switch с **каноническим sequence** (RISK § 4): `orders/cancel-all` по каждому ticker → `GET /api/connections/{id}/positions` → market-close → poll → persist → exit 42
 - **M4.9** — WS-loss recovery sub-procedure (RISK § 4): REST-heartbeat, мониторинг PnL, принудительный market-close при ws_loss_soft_stop_bps

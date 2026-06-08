@@ -17,6 +17,7 @@ protected:
         f.ticker = std::move(t);
         f.mid = mid;
         f.timestamp = ts;
+        f.valid = true;
         return f;
     }
 };

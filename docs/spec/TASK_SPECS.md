@@ -559,7 +559,7 @@ Out of scope:
   - `max_pool_size = 3` — выбирает топ-3 по volume
 - `test/unit/ticker_universe_affinity_test.cpp`:
   - BounceFromDensity: при `min_density_events_per_hour = 4` и подсчитанных 5 — strategy enabled; при 2 — disabled
-  - LeaderLag с `require_leader=BTCUSDT` и `min_correlation_60s=0.6`: альт с corr=0.7 — enabled; corr=0.4 — disabled; сам BTCUSDT при `exclude_self_for_leader=true` — disabled
+  - LeaderLag с `require_leader=BTC_USDT` и `min_correlation_60s=0.6`: альт с corr=0.7 — enabled; corr=0.4 — disabled; сам BTC_USDT при `exclude_self_for_leader=true` — disabled
   - переключение состояния при boost-событии не происходит до пересчёта affinity
 - `test/unit/connection_selector_test.cpp`: `ViewMode==true` отбрасывается; `State!=Connected` отбрасывается
 - `test/integration/universe_smoke_test.cpp` (`--with-metascalp`): pool собирается за ≤ `warmup_sec + 5`, ≥ 1 тикер с affinity ≥ threshold хотя бы для одной стратегии
@@ -567,6 +567,7 @@ Out of scope:
 **Out of scope:**
 - screener-уведомления (T1-NOTIF)
 - cluster-snapshot polling (T1-CLUSTER)
+- REST orderbook snapshot seed / `FetchSnapshot=false` (T1-BOOK-SEED)
 - auto-калибровка density.min_size_usd по orderbook-settings (T1-CALIB)
 
 ---
@@ -586,6 +587,44 @@ Out of scope:
 - `test/integration/cluster_snapshot_smoke_test.cpp` (`--with-metascalp`): для BTCUSDT за 30 сек получено ≥ 1 снапшот M5 и ≥ 1 снапшот H1
 
 **Out of scope:** запись cluster-снапшотов в replay-дампы (опционально в Фазе 5).
+
+---
+
+### T1-BOOK-SEED: REST orderbook-snapshot + FetchSnapshot=false
+
+**Depends on:** T0-GATEWAY, T0-FEED, T1-UNIVERSE
+
+MetaScalp SDK v1.0.7 добавил two-step модель для массовых подписок:
+`orderbook_subscribe` можно отправить с `FetchSnapshot=false`, а начальное
+состояние стакана при необходимости получать отдельным REST
+`GET /api/connections/{id}/orderbook-snapshot?Ticker=...`.
+
+**Deliverables:**
+- `src/transport/OrderBookSnapshotClient.{hpp,cpp}` или метод в существующем
+  gateway: REST `GET /api/connections/{id}/orderbook-snapshot?Ticker&ZoomIndex&DepthLevels&DepthPercent`
+- codec-парсер response: shape как `orderbook_snapshot` + `UpdateId`
+- `MarketDataFeed` режим `[feed].fetch_snapshot_on_subscribe=false`:
+  - WS subscribe отправляет `FetchSnapshot=false`
+  - seed делается REST snapshot с rate-limit/concurrency guard
+  - при REST `501` ticker/exchange помечается как `ws_snapshot_only`, и
+    `FetchSnapshot=false` для него больше не используется
+- resync path: `force_resync_orderbook()` сначала пытается REST snapshot,
+  затем WS resubscribe fallback
+
+**Acceptance criteria:**
+- `test/unit/orderbook_snapshot_client_test.cpp`: URL содержит
+  `Ticker`, `ZoomIndex`, `DepthLevels`, `DepthPercent`, ответ с `UpdateId`
+  парсится в `OrderBookSnapshot`
+- `test/unit/feed_test.cpp`: subscribe body содержит `FetchSnapshot=false`
+  только при `[feed].fetch_snapshot_on_subscribe=false` и успешном REST seed;
+  при `501` следующий subscribe идёт без `FetchSnapshot=false`
+- `test/integration/orderbook_snapshot_smoke_test.cpp` (`--with-metascalp`):
+  REST snapshot для поддерживаемой биржи применим к локальному `OrderBook`
+- `test/integration/mass_subscribe_smoke_test.cpp` (`--with-metascalp`):
+  ≥ 50 тикеров подписываются без REST snapshot storm; dropped events = 0
+
+**Out of scope:** изменение торговых правил. Этот тикет только про корректный
+и щадящий bootstrap стаканов через MetaScalp API.
 
 ---
 
@@ -890,13 +929,13 @@ Out of scope:
 - `src/transport/SignalLevelGateway.{hpp,cpp}` — REST: `GET /api/connections/{id}/signal-levels?Ticker=...`, `POST /api/connections/{id}/signal-levels` с body `{Ticker, Price}`, `DELETE /api/connections/{id}/signal-levels/{id}`, `DELETE /api/connections/{id}/signal-levels?Ticker=...`, `DELETE /api/signal-levels/triggered` (periodic cleanup)
 - `src/signals/SignalLevelBridge.{hpp,cpp}`:
   - перед create убеждается, что `orderbook_subscribe` для тикера активен: API требует market data, иначе `POST /api/connections/{id}/signal-levels` вернёт `No market data...`
-  - подписывается на WS `signal_level_subscribe` и парсит `signal_levels_snapshot`, `signal_level_placed`, `signal_level_triggered`, `signal_level_removed`, `signal_levels_removed_all`, `signal_levels_removed_triggered`
+  - через `NotificationFeed` подписывается на WS `signal_level_subscribe` и парсит `signal_levels_snapshot`, `signal_level_placed`, `signal_level_triggered`, `signal_level_removed`, `signal_levels_removed_all`, `signal_levels_removed_triggered`
   - подписывается на `LevelFormed` от `LevelDetector`
   - для каждого уровня вызывает `SignalLevelGateway::create(ticker, price)` — MetaScalp сам определяет `TriggerRule` от текущего best ask
-  - при `signal_level_triggered` от WS `signal_level_subscribe` — немедленно эмитит `LevelTriggered` в SignalBus (без polling)
-  - при `LevelRemoved` от `LevelDetector` — удаляет через `SignalLevelGateway::delete`
+  - при `signal_level_triggered` от WS `signal_level_subscribe` — немедленно эмитит `LevelBreak` в SignalBus с `payload.source="server"` (без polling)
+  - при `signal_level_removed` / `signal_levels_removed_all` / `signal_levels_removed_triggered` синхронизирует локальную карту уровней bridge без REST polling
   - periodic cleanup: раз в час `DELETE /api/signal-levels/triggered` чтобы не накапливать мусор
-- конфиг `[signals.level_bridge]`: `enabled=true`, `cleanup_interval_min=60`, `max_server_levels=50`
+- конфиг `[signals.level_bridge]`: `enabled=true`, `signal_level_subscribe=true`, `cleanup_interval_min=60`, `max_server_levels=50`
 - **LRU-eviction:** при достижении `max_server_levels` удалять самые
   старые и самые далёкие от текущей цены signal-levels перед
   созданием новых (приоритет удаления: triggered > дальние > старые)
@@ -904,8 +943,10 @@ Out of scope:
 **Acceptance criteria:**
 - `test/unit/signal_level_bridge_test.cpp` с mock-gateway:
   - `LevelFormed` → вызов `create` с правильными параметрами
-  - `signal_level_triggered` event с matching id → эмит `LevelTriggered` в SignalBus
-  - `LevelRemoved` → вызов `delete`
+  - `signal_level_triggered` event с matching id → эмит `LevelBreak` в SignalBus
+- `test/unit/notification_routing_test.cpp`:
+  - при наличии `SignalLevelBridge` отправляется `signal_level_subscribe`
+  - direct SDK event `signal_level_triggered` → `LevelBreak` в `SignalBus`
 - `test/integration/signal_level_smoke_test.cpp` (`--with-metascalp`): создали уровень, выставили цену, триггер пришёл за <100 мс
 
 **Зачем:** устраняет client-side polling уровней в `LevelApproach` (оценка
@@ -946,7 +987,8 @@ backup при `enabled=false`, параллельно с server-side не зап
 
 48 часов paper-trading на живом MetaScalp без крешей, все сделки в журнале
 с полной трассировкой. Отдельный отчёт: число сделок, win rate, avg R.
-T3-SIGLEVEL включён и работает (есть события `LevelTriggered` от сервера).
+T3-SIGLEVEL включён и работает (есть события `LevelBreak` с
+`payload.source="server"` от `signal_level_triggered`).
 
 ---
 
@@ -957,14 +999,15 @@ T3-SIGLEVEL включён и работает (есть события `LevelTr
 **Depends on:** T3-PLAN, T0-NEWS, T4-FUNDING, T4-FINRES, T1-UNIVERSE
 
 **Deliverables:**
-- `src/risk/RiskManager.{hpp,cpp}` — все правила **R1..R13** из `RISK_MANAGEMENT.md § 2` (R13 = funding blackout)
+- `src/risk/RiskManager.{hpp,cpp}` — pre-trade правила **R1..R13** и **R15** из `RISK_MANAGEMENT.md § 2`; **R14** выполняется runtime в executor/position monitor как hard market-close
 - `src/risk/AccountState.{hpp,cpp}` — обновляется по balance_update/position_update/**finres_update** (realized_pnl — из finres, не self-tracking)
 - `src/risk/TradingDay.{hpp,cpp}` — UTC-ресет через cron-коллбек, **идемпотентный при рестарте** (см. RISK § 5): читает `journal/account_state.json`, проверяет `last_reset_day_utc`
 - `src/risk/AccountStatePersister.{hpp,cpp}` — state-persist thread (см. ARCH § 3), атомарная запись через tmp+rename, интервал `state_persist.interval_sec`
 
 **Acceptance criteria:**
-- `test/unit/risk_manager_test.cpp`: по одному позитивному и негативному тесту на каждое правило R1..R13
+- `test/unit/risk_manager_test.cpp`: по одному позитивному и негативному тесту на pre-trade правила R1..R13 и R15
 - `test/unit/r13_funding_test.cpp`: в пределах blackout-окна (±30 сек от funding) — reject; вне окна — pass; при stale funding-feed — WARN + pass (fail-open); при kill-stale — reject (fail-closed)
+- `test/unit/r14_single_position_loss_test.cpp`: runtime monitor закрывает позицию market-ордером при превышении `max_single_position_loss_pct`
 - `test/unit/trading_day_reset_idempotent_test.cpp`: рестарт после UTC 00:00 — ресет не повторяется; рестарт до 00:00 — ресет происходит при наступлении часа X
 - `test/integration/risk_flow_test.cpp`: симуляция дня с серией убытков, проверка моржа и block'а новых планов
 - `test/integration/state_persistence_test.cpp`: крэш симулируется kill -9, после рестарта все active_trades восстановлены, AccountState консистентен
@@ -983,7 +1026,8 @@ T3-SIGLEVEL включён и работает (есть события `LevelTr
   - **state-machine** (см. ARCH § 2.8): `PendingEntry → Open → Exiting → Closed`, с явными `Cancelling` и `SubmitUnknown` для разрешения race cancel ↔ order_update и ambiguous POST
   - **истина — подтверждённые `order_update` / `position_update` + REST reconciliation**, локальный cancel-оптимизм НЕ источник истины; не использовать несуществующий `position_update.ServerTime`
   - при filling — размещает Stop и TakeProfit отдельными ордерами на бирже
-  - **server stop contract test (см. README OQ-2)**: до live проверить на demo, что документированные `Type=Stop/StopLoss/TakeProfit` безопасно ставятся через `POST /api/connections/{id}/orders` без request-поля `TriggerPrice`; если не подтверждено — live блокируется, soft-stop разрешён только в paper/test
+  - **server stop contract test (см. README OQ-2)**: до live проверить на demo, что документированные `Type=Stop/StopLoss/TakeProfit` безопасно ставятся через `POST /api/connections/{id}/orders` с `Price` как trigger price и без request-поля `TriggerPrice`; если не подтверждено — live блокируется, soft-stop разрешён только в paper/test
+  - JSON body для `POST /orders` содержит только поля SDK v1.0.7: `Ticker`, `Side`, `Price`, `Size`, `Type`, `ReduceOnly`. `ClientId`, `ClientOrderId` и другие idempotency fields не отправляются.
   - при срабатывании TP1 — частичное закрытие + перевод стопа в БУ по `AvgPriceFix` (не по текущей цене)
   - **локальный aggregate `balance_reservation`** (см. README OQ-4): резервирует маржу сразу после отправки order; API не даёт `OrderId`/reservation id в `balance_update`, поэтому резерв снимается/пересчитывается при reject/cancel, подтверждённом `order_update`, следующем `balance_update` по connection или `reservation_timeout_ms=1000`
   - retries с backoff на сетевые ошибки (3 попытки), circuit breaker после `exchange_error_streak` ошибок подряд

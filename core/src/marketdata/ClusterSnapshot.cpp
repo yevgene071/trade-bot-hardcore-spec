@@ -1,7 +1,10 @@
 #include "ClusterSnapshot.hpp"
 #include "logger/Logger.hpp"
 #include "transport/external/ExternalIoContext.hpp"
+#include "utils/TickerSymbol.hpp"
 
+#include <algorithm>
+#include <iterator>
 #include <random>
 
 namespace net = boost::asio;
@@ -23,7 +26,9 @@ ClusterSnapshotManager::~ClusterSnapshotManager() {
 void ClusterSnapshotManager::start() {
     bool expected = false;
     if (running_.compare_exchange_strong(expected, true)) {
+        ExternalIoContext::instance().start();
         timer_ = std::make_unique<boost::asio::steady_timer>(ExternalIoContext::instance().context());
+        poll_();
         schedule_poll_();
     }
 }
@@ -42,14 +47,22 @@ void ClusterSnapshotManager::set_on_snapshot(OnSnapshot cb) {
 }
 
 void ClusterSnapshotManager::refresh(const std::vector<Ticker>& active_tickers) {
-    std::lock_guard<std::mutex> lk(active_tickers_mtx_);
-    active_tickers_ = active_tickers;
+    {
+        std::lock_guard<std::mutex> lk(active_tickers_mtx_);
+        active_tickers_.clear();
+        active_tickers_.reserve(active_tickers.size());
+        std::transform(active_tickers.begin(), active_tickers.end(), std::back_inserter(active_tickers_),
+                       [](const auto& t) { return to_internal_ticker(t); });
+    }
+    if (running_) {
+        poll_();
+    }
 }
 
 std::optional<ClusterSnapshot> ClusterSnapshotManager::get(const Ticker& ticker,
                                                          const std::string& timeframe) const {
     std::lock_guard<std::mutex> lk(cache_mtx_);
-    auto it = cache_.find(ticker);
+    auto it = cache_.find(to_internal_ticker(ticker));
     if (it == cache_.end()) return std::nullopt;
     auto tit = it->second.find(timeframe);
     if (tit == it->second.end()) return std::nullopt;
@@ -105,6 +118,7 @@ void ClusterSnapshotManager::poll_() {
 }
 
 void ClusterSnapshotManager::refresh_ticker_(const Ticker& ticker) {
+    const Ticker key = to_internal_ticker(ticker);
     for (const auto& tf : cfg_.poll_timeframes) {
         if (!running_) break;
         
@@ -114,11 +128,11 @@ void ClusterSnapshotManager::refresh_ticker_(const Ticker& ticker) {
         // one of the threads. A better fix would be making ClusterSnapshotClient async.
         // For now, this is already better as it's interruptible and managed by asio.
         
-        auto snap = client_.fetch(ticker, tf);
+        auto snap = client_.fetch(key, tf);
         if (snap) {
             {
                 std::lock_guard<std::mutex> lk(cache_mtx_);
-                cache_[ticker][tf] = *snap;
+                cache_[key][tf] = *snap;
             }
             if (on_snapshot_) {
                 on_snapshot_(*snap);

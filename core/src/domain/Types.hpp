@@ -262,10 +262,10 @@ struct PlaceOrderRequest {
     double size;
     OrderType type;
     bool reduce_only = false;
-    // Idempotency key sent to the exchange. On network timeout the bot can
-    // determine whether the order was accepted by querying open orders and
-    // matching on this key. Also used in on_order_update for deterministic
-    // first-sight matching instead of heuristic side+type+size.
+    // Local correlation key. MetaScalp SDK v1.0.7 does not document a
+    // caller-supplied client id request field, so OrderGateway must not send
+    // this value on the wire. Server-returned ClientId is parsed separately
+    // in PlaceOrderResult/RestOrder.
     std::string client_order_id;
 
     bool operator==(const PlaceOrderRequest&) const = default;

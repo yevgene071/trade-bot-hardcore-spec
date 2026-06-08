@@ -51,6 +51,13 @@ public:
     virtual void unsubscribe_ticker(const Ticker& ticker);
     virtual void force_resync_orderbook(const Ticker& ticker);
 
+    using OrderBookSnapshotFetcher =
+        std::function<OrderBookSnapshot(const Ticker& ticker,
+                                        int zoom_index,
+                                        std::optional<int> depth_levels,
+                                        std::optional<double> depth_percent)>;
+    void set_orderbook_snapshot_fetcher(OrderBookSnapshotFetcher fetcher);
+
     virtual void start();
     virtual void stop();
 
@@ -78,6 +85,12 @@ public:
 private:
     void handle_message(const nlohmann::json& j);
     void resubscribe_all();
+    bool try_rest_orderbook_snapshot_(const Ticker& ticker,
+                                      int zoom_index,
+                                      std::optional<int> depth_levels,
+                                      std::optional<double> depth_percent);
+    void send_orderbook_subscribe_(const Ticker& ticker, bool fetch_snapshot_false);
+    void dispatch_orderbook_snapshot_(const OrderBookSnapshot& snapshot);
     
     using ListenerList = std::vector<IMarketDataListener*>;
     std::shared_ptr<const ListenerList> get_target_listeners(const Ticker& ticker);
@@ -90,8 +103,10 @@ private:
 
     // P0-DETERMINISM: btree_set for stable iteration order in resubscribe_all()
     absl::btree_set<Ticker> m_subscribed_tickers;
+    absl::btree_set<Ticker> m_ws_snapshot_only;
     std::vector<IMarketDataListener*> m_listeners;
     absl::btree_map<Ticker, std::vector<IMarketDataListener*>> m_ticker_listeners;
+    OrderBookSnapshotFetcher m_snapshot_fetcher;
 
     // CoW (copy-on-write) listener snapshots. Writers (add/remove_listener)
     // rebuild the whole map under m_mutex and publish via atomic store-release.

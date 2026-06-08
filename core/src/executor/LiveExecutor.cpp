@@ -12,8 +12,9 @@
 namespace trade_bot {
 
 namespace {
-// Monotonic idempotency key: tb-<nanoseconds>-<sequence>.
-// Unique per process lifetime; survives reconnects and retries.
+// Monotonic local correlation key: tb-<nanoseconds>-<sequence>.
+// MetaScalp SDK v1.0.7 does not document caller-supplied ClientId, so this
+// value is kept local and must not be serialized by OrderGateway.
 std::string generate_client_order_id() {
     static std::atomic<uint64_t> seq{0};
     auto ns = static_cast<unsigned long long>(
@@ -257,9 +258,9 @@ void LiveExecutor::on_order_update(const OrderUpdate& upd) {
         const bool match_by_tp1   = upd.order_id != 0 && upd.order_id == trade.tp1_order_id;
         const bool match_by_tp2   = upd.order_id != 0 && upd.order_id == trade.tp2_order_id;
 
-        // ---- Phase 1.5: client_order_id matching — deterministic first-sight
-        // claim when the exchange echoes our idempotency key in the WS stream.
-        // Preferred over heuristic side+type+size when available.
+        // ---- Phase 1.5: client_order_id matching — retained only for future
+        // API compatibility. SDK v1.0.7 does not document caller-supplied
+        // ClientId in POST /orders, so this path is normally inactive.
         const bool match_by_client_id =
             !upd.client_order_id.empty() &&
             !trade.entry_client_order_id.empty() &&

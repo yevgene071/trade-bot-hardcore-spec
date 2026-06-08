@@ -6,13 +6,15 @@ using namespace trade_bot;
 TEST(R13FundingTest, RejectsInsideBlackoutWindow) {
     TickerUniverse universe;
     NewsCalendar news;
-    RiskManager risk(universe, news);
+    RiskManager::Config cfg;
+    cfg.whitelist_tickers = {"BTCUSDT"};
+    RiskManager risk(universe, news, cfg);
     
     auto now = std::chrono::system_clock::now();
     risk.update_funding_time("BTCUSDT", now + std::chrono::seconds(10));
     
     TradePlan plan;
-    plan.ticker = "BTCUSDT";
+    plan.ticker = "BTC_USDT";
     plan.side = Side::Buy;
     plan.entry_price = 50000.0;
     plan.stop_price = 49950.0; // 10 bps
@@ -31,13 +33,15 @@ TEST(R13FundingTest, RejectsInsideBlackoutWindow) {
 TEST(R13FundingTest, PassesOutsideBlackoutWindow) {
     TickerUniverse universe;
     NewsCalendar news;
-    RiskManager risk(universe, news);
+    RiskManager::Config cfg;
+    cfg.whitelist_tickers = {"BTCUSDT"};
+    RiskManager risk(universe, news, cfg);
     
     auto now = std::chrono::system_clock::now();
     risk.update_funding_time("BTCUSDT", now + std::chrono::seconds(61)); // > 30s
     
     TradePlan plan;
-    plan.ticker = "BTCUSDT";
+    plan.ticker = "BTC_USDT";
     plan.side = Side::Buy;
     plan.entry_price = 50000.0;
     plan.stop_price = 49950.0; // 10 bps

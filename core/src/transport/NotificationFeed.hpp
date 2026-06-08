@@ -19,6 +19,7 @@ class NotificationFeed {
 public:
     struct Config {
         bool subscribe{true};
+        bool signal_levels_subscribe{true};
         int  exchange_id{0};
         int  market_type{0};
     };

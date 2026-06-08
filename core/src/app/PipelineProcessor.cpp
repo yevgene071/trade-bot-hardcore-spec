@@ -15,6 +15,7 @@
 #include "signals/SignalBus.hpp"
 #include "strategy/StrategyEngine.hpp"
 #include "transport/MetaScalpCodec.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include <simdjson.h>
 #include "config/Config.hpp"
@@ -34,25 +35,9 @@ constexpr const char* kStageStrategyToRisk = "strategy_to_risk_us";
 constexpr const char* kStageRiskToSubmit = "risk_to_submit_us";
 constexpr const char* kStageEndToEnd = "end_to_end_book_to_submit_us";
 
-// Normalize wire ticker to internal "BASE_QUOTE" format.
-// MetaScalp may send either "BTC_USDT" or "BTCUSDT"; internal keys always
-// use underscore form.  Must stay in sync with from_ms() in MarketDataFeed.cpp.
+// Normalize wire ticker to internal BASE_QUOTE format.
 static Ticker normalize_ticker(std::string_view raw) {
-    // Already has underscore → canonical form
-    if (raw.find('_') != std::string_view::npos) return Ticker(raw);
-    // Insert underscore before known quote suffix
-    for (const char* q : {"USDT", "USDC", "BTC", "ETH", "BNB", "BUSD"}) {
-        const std::size_t qlen = std::strlen(q);
-        if (raw.size() > qlen && raw.substr(raw.size() - qlen) == q) {
-            std::string result;
-            result.reserve(raw.size() + 1);
-            result.append(raw.data(), raw.size() - qlen);
-            result.push_back('_');
-            result.append(q, qlen);
-            return Ticker(std::move(result));
-        }
-    }
-    return Ticker(raw);
+    return to_internal_ticker(raw);
 }
 }
 

@@ -6,7 +6,7 @@
 #include "numeric/Dema.hpp"
 #include "universe/TickerUniverse.hpp"
 
-#include <absl/container/flat_hash_map.h>
+#include <absl/container/btree_map.h>
 #include <chrono>
 #include <vector>
 
@@ -75,7 +75,7 @@ private:
     Dema<double>    avg_level_size_;
     
     // Tracking levels by price tick
-    absl::flat_hash_map<PriceTick, LevelMeta> tracked_;
+    absl::btree_map<PriceTick, LevelMeta> tracked_;
 };
 
 } // namespace trade_bot

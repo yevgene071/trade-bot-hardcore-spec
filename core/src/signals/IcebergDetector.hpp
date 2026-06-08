@@ -6,7 +6,7 @@
 #include "universe/TickerUniverse.hpp"
 #include "utils/CircularBuffer.hpp"
 
-#include <absl/container/flat_hash_map.h>
+#include <absl/container/btree_map.h>
 #include <chrono>
 #include <optional>
 
@@ -74,10 +74,10 @@ private:
     Config          cfg_;
 
     // To track "before" state. Map price -> size.
-    absl::flat_hash_map<PriceTick, double> last_sizes_;
+    absl::btree_map<PriceTick, double> last_sizes_;
     
     // Per-level evidence
-    absl::flat_hash_map<PriceTick, LevelStats> levels_;
+    absl::btree_map<PriceTick, LevelStats> levels_;
     
     // For trade-book synchronization: buffer recent book updates
     // Actually, a simpler way: since trades and updates are sequential in one thread (usually),
@@ -105,8 +105,8 @@ private:
     std::chrono::system_clock::time_point last_prune_;
 
     // T4-PERF: Persistent maps for temporary volume calculation to avoid allocations (#159)
-    absl::flat_hash_map<PriceTick, double> buy_vol_by_tick_;
-    absl::flat_hash_map<PriceTick, double> sell_vol_by_tick_;
+    absl::btree_map<PriceTick, double> buy_vol_by_tick_;
+    absl::btree_map<PriceTick, double> sell_vol_by_tick_;
 };
 
 } // namespace trade_bot

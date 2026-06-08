@@ -18,9 +18,8 @@ TEST_F(TradeStreamTest, WelfordStatsAreCorrect) {
     
     auto stats = ts.get_stats();
     EXPECT_NEAR(stats.avg_size, 3.0, 1e-7);
-    // Population variance of {1,2,3,4,5} is 2.0, not 2.5 (sample).
-    // implementation uses m2_ / n_
-    EXPECT_NEAR(stats.stdev_size, std::sqrt(2.0), 1e-7);
+    // WelfordAccumulator uses unbiased sample variance: 10 / (5 - 1).
+    EXPECT_NEAR(stats.stdev_size, std::sqrt(2.5), 1e-7);
 }
 
 TEST_F(TradeStreamTest, HawkesIntensityDecays) {

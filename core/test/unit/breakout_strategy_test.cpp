@@ -32,16 +32,14 @@ TEST_F(BreakoutStrategyTest, GeneratesLongPlanFromAskEating) {
     frame.leader_correlation = 0.7;
     strategy.on_frame(frame);
 
-    // Signals for breakout: Support behind -> Eating -> Burst
+    // Signals for breakout: support + burst context, then DensityEating triggers entry.
     Signal s_support{SignalKind::DensityDetected, now - std::chrono::seconds(10), "BTCUSDT", 49980.0, 1.0, {.side = "Bid"}};
     Signal s_eating{SignalKind::DensityEating, now, "BTCUSDT", price, 1.0, {.side = "Ask", .size = 400.0, .original_size = 1000.0}};
     Signal s_burst{SignalKind::TapeBurst, now, "BTCUSDT", price, 1.0, {.side = "Buy", .ratio = 2.0}};
 
     strategy.on_signal(s_support, now);
-    strategy.on_signal(s_eating, now);
     strategy.on_signal(s_burst, now);
-
-    auto plan = strategy.tick(now);
+    auto plan = strategy.on_signal(s_eating, now);
 
     ASSERT_TRUE(plan.has_value());
     EXPECT_EQ(plan->side, Side::Buy);
@@ -57,9 +55,8 @@ TEST_F(BreakoutStrategyTest, NoPlanWithoutSupport) {
     auto now = std::chrono::system_clock::now();
     double price = 50000.0;
     
-    strategy.on_signal({SignalKind::DensityEating, now, "BTCUSDT", price, 1.0, {.side = "Ask"}}, now);
     strategy.on_signal({SignalKind::TapeBurst, now, "BTCUSDT", price, 1.0, {.side = "Buy"}}, now);
     
-    auto plan = strategy.tick(now);
+    auto plan = strategy.on_signal({SignalKind::DensityEating, now, "BTCUSDT", price, 1.0, {.side = "Ask"}}, now);
     EXPECT_FALSE(plan.has_value());
 }

@@ -40,6 +40,11 @@ public:
     /// timestamp is the event time from the server notification.
     void on_server_trigger(int64_t level_id, const Ticker& ticker, double price,
                           std::chrono::system_clock::time_point timestamp);
+    void on_server_snapshot(const std::vector<SignalLevel>& levels);
+    void on_server_level_placed(const SignalLevel& level);
+    void on_server_removed(int64_t level_id);
+    void on_server_removed_all(const Ticker& ticker = {});
+    void on_server_removed_triggered();
 
 private:
     SignalLevelGateway& gateway_;

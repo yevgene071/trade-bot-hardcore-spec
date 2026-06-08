@@ -1,9 +1,11 @@
 #include "TickerUniverse.hpp"
 
 #include "logger/Logger.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include <absl/container/flat_hash_set.h>
 #include <algorithm>
+#include <iterator>
 
 namespace trade_bot {
 
@@ -63,9 +65,14 @@ bool TickerUniverse::passes_filter_locked(const Ticker& ticker, double& out_volu
 }
 
 void TickerUniverse::refresh_pool(const std::vector<Ticker>& available, std::chrono::system_clock::time_point now) {
+    std::vector<Ticker> normalized_available;
+    normalized_available.reserve(available.size());
+    std::transform(available.begin(), available.end(), std::back_inserter(normalized_available),
+                   [](const auto& t) { return to_internal_ticker(t); });
+
     absl::flat_hash_map<Ticker, TickerStats> temp_stats;
     if (stats_lookup_) {
-        for (const auto& t : available) {
+        for (const auto& t : normalized_available) {
             if (auto s = stats_lookup_(t)) {
                 temp_stats[t] = *s;
             }
@@ -85,7 +92,7 @@ void TickerUniverse::refresh_pool(const std::vector<Ticker>& available, std::chr
     }
 
     std::unique_lock lock(rw_mtx_);
-    refresh_pool_locked(available, now, temp_stats);
+    refresh_pool_locked(normalized_available, now, temp_stats);
 }
 
 void TickerUniverse::refresh_pool_locked(const std::vector<Ticker>& available, std::chrono::system_clock::time_point now,
@@ -94,9 +101,10 @@ void TickerUniverse::refresh_pool_locked(const std::vector<Ticker>& available, s
     survivors.reserve(available.size());
 
     for (const auto& t : available) {
+        const Ticker key = to_internal_ticker(t);
         double vol = 0.0;
-        if (passes_filter_locked(t, vol, temp_stats)) {
-            survivors.emplace_back(t, vol);
+        if (passes_filter_locked(key, vol, temp_stats)) {
+            survivors.emplace_back(key, vol);
         }
     }
     std::sort(survivors.begin(), survivors.end(),
@@ -175,16 +183,17 @@ void TickerUniverse::fire_affinity_changes_(PendingChanges& changes) {
 
 void TickerUniverse::override_affinity(const Ticker& ticker,
                                         const std::string& strategy, bool enabled) {
+    const Ticker key = to_internal_ticker(ticker);
     bool changed = false;
     {
         std::unique_lock lock(rw_mtx_);
-        auto& tickerMap = affinity_[ticker];
+        auto& tickerMap = affinity_[key];
         const bool prev = tickerMap[strategy];
         tickerMap[strategy] = enabled;
         changed = (prev != enabled);
     }
     if (changed && on_change_) {
-        on_change_(ticker, strategy, enabled);
+        on_change_(key, strategy, enabled);
     }
 }
 
@@ -199,13 +208,13 @@ std::size_t TickerUniverse::pool_size() const noexcept {
 
 bool TickerUniverse::is_in_pool(const Ticker& ticker) const {
     std::shared_lock lock(rw_mtx_);
-    return affinity_.contains(ticker);
+    return affinity_.contains(to_internal_ticker(ticker));
 }
 
 bool TickerUniverse::is_strategy_enabled(const Ticker& ticker,
                                          const std::string& strategy) const {
     std::shared_lock lock(rw_mtx_);
-    auto it = affinity_.find(ticker);
+    auto it = affinity_.find(to_internal_ticker(ticker));
     if (it == affinity_.end()) return false;
     auto sit = it->second.find(strategy);
     return sit != it->second.end() && sit->second;
@@ -214,7 +223,7 @@ bool TickerUniverse::is_strategy_enabled(const Ticker& ticker,
 std::vector<std::string> TickerUniverse::enabled_strategies(const Ticker& ticker) const {
     std::shared_lock lock(rw_mtx_);
     std::vector<std::string> out;
-    auto it = affinity_.find(ticker);
+    auto it = affinity_.find(to_internal_ticker(ticker));
     if (it == affinity_.end()) return out;
     for (const auto& [name, on] : it->second) {
         if (on) out.push_back(name);
@@ -224,10 +233,11 @@ std::vector<std::string> TickerUniverse::enabled_strategies(const Ticker& ticker
 
 void TickerUniverse::on_big_tick(const Ticker& ticker, double /*size_usd*/,
                                  std::chrono::system_clock::time_point now) {
+    const Ticker key = to_internal_ticker(ticker);
     PendingChanges changes;
     {
         std::unique_lock lock(rw_mtx_);
-        on_big_event_locked(ticker, now);
+        on_big_event_locked(key, now);
         changes = collect_affinity_changes_();
     }
     fire_affinity_changes_(changes);
@@ -235,10 +245,11 @@ void TickerUniverse::on_big_tick(const Ticker& ticker, double /*size_usd*/,
 
 void TickerUniverse::on_big_amount(const Ticker& ticker, double /*size_usd*/,
                                    std::chrono::system_clock::time_point now) {
+    const Ticker key = to_internal_ticker(ticker);
     PendingChanges changes;
     {
         std::unique_lock lock(rw_mtx_);
-        on_big_event_locked(ticker, now);
+        on_big_event_locked(key, now);
         changes = collect_affinity_changes_();
     }
     fire_affinity_changes_(changes);
@@ -246,10 +257,14 @@ void TickerUniverse::on_big_amount(const Ticker& ticker, double /*size_usd*/,
 
 void TickerUniverse::seed_candidates(const std::vector<Ticker>& candidates) {
     std::unique_lock lock(rw_mtx_);
-    all_candidates_ = candidates;
+    all_candidates_.clear();
+    all_candidates_.reserve(candidates.size());
+    std::transform(candidates.begin(), candidates.end(), std::back_inserter(all_candidates_),
+                   [](const auto& t) { return to_internal_ticker(t); });
 }
 
 void TickerUniverse::on_screener_new_coin(const Ticker& ticker, std::chrono::system_clock::time_point now) {
+    const Ticker key = to_internal_ticker(ticker);
     PendingChanges changes;
     absl::flat_hash_map<Ticker, TickerStats> temp_stats;
     std::vector<Ticker> pool_candidates;
@@ -257,13 +272,13 @@ void TickerUniverse::on_screener_new_coin(const Ticker& ticker, std::chrono::sys
 
     {
         std::shared_lock lock(rw_mtx_);
-        if (!filters_.accepts(ticker)) return;
-        if (screener_approved_.count(ticker) == 0) {
+        if (!filters_.accepts(key)) return;
+        if (screener_approved_.count(key) == 0) {
             should_rebuild = true;
             pool_candidates.reserve(all_candidates_.size());
             absl::flat_hash_set<Ticker> added;
             for (const auto& t : all_candidates_) {
-                if (screener_approved_.count(t) || t == ticker) {
+                if (screener_approved_.count(t) || t == key) {
                     pool_candidates.push_back(t);
                     added.insert(t);
                 }
@@ -273,8 +288,8 @@ void TickerUniverse::on_screener_new_coin(const Ticker& ticker, std::chrono::sys
                     pool_candidates.push_back(t);
                 }
             }
-            if (!added.contains(ticker)) {
-                pool_candidates.push_back(ticker);
+            if (!added.contains(key)) {
+                pool_candidates.push_back(key);
             }
         }
     }
@@ -301,9 +316,9 @@ void TickerUniverse::on_screener_new_coin(const Ticker& ticker, std::chrono::sys
         }
 
         std::unique_lock lock(rw_mtx_);
-        if (screener_approved_.insert(ticker).second) {
+        if (screener_approved_.insert(key).second) {
             LOG_INFO("[Universe] Screener: {} approved, rebuilding pool ({} screener coins)",
-                     ticker, screener_approved_.size());
+                     key, screener_approved_.size());
             refresh_pool_locked(pool_candidates, now, temp_stats);
             changes = collect_affinity_changes_();
         }
@@ -313,10 +328,11 @@ void TickerUniverse::on_screener_new_coin(const Ticker& ticker, std::chrono::sys
 
 void TickerUniverse::on_big_event(const Ticker& ticker,
                                   std::chrono::system_clock::time_point now) {
+    const Ticker key = to_internal_ticker(ticker);
     PendingChanges changes;
     {
         std::unique_lock lock(rw_mtx_);
-        on_big_event_locked(ticker, now);
+        on_big_event_locked(key, now);
         changes = collect_affinity_changes_();
     }
     fire_affinity_changes_(changes);
@@ -334,15 +350,16 @@ void TickerUniverse::on_big_event_locked(const Ticker& ticker,
 
 void TickerUniverse::update_orderbook_settings(const OrderbookSettings& settings) {
     std::unique_lock lock(rw_mtx_);
-    large_amounts_[settings.ticker] = settings.large_amount_usd;
+    large_amounts_[to_internal_ticker(settings.ticker)] = settings.large_amount_usd;
 }
 
 double TickerUniverse::density_min_size_usd(const Ticker& ticker,
                                             double config_default) const {
     std::shared_lock lock(rw_mtx_);
+    const Ticker key = to_internal_ticker(ticker);
     // Base calibrated value (volume scale factor + exchange multiplier + floor).
-    double base = calibrated_min_size_usd_locked(ticker, config_default);
-    auto it = large_amounts_.find(ticker);
+    double base = calibrated_min_size_usd_locked(key, config_default);
+    auto it = large_amounts_.find(key);
     if (it != large_amounts_.end()) {
         // MetaScalp per-ticker large_amount_usd also gets exchange scaling.
         double calibrated_large = it->second * cfg_.exchange_volume_multiplier;
@@ -354,26 +371,26 @@ double TickerUniverse::density_min_size_usd(const Ticker& ticker,
 bool TickerUniverse::is_boosted(const Ticker& ticker,
                                 std::chrono::system_clock::time_point now) const {
     std::shared_lock lock(rw_mtx_);
-    auto it = boosts_.find(ticker);
+    auto it = boosts_.find(to_internal_ticker(ticker));
     if (it == boosts_.end()) return false;
     return (now - it->second) <= cfg_.boost_ttl;
 }
 
 void TickerUniverse::cache_meta(const Ticker& ticker, const TickerMeta& meta) {
     std::unique_lock lock(rw_mtx_);
-    meta_cache_[ticker] = meta;
+    meta_cache_[to_internal_ticker(ticker)] = meta;
 }
 
 std::optional<TickerMeta> TickerUniverse::meta(const Ticker& ticker) const {
     std::shared_lock lock(rw_mtx_);
-    auto it = meta_cache_.find(ticker);
+    auto it = meta_cache_.find(to_internal_ticker(ticker));
     if (it == meta_cache_.end()) return std::nullopt;
     return it->second;
 }
 
 double TickerUniverse::volume_scale_factor(const Ticker& ticker) const {
     std::shared_lock lock(rw_mtx_);
-    return volume_scale_factor_locked(ticker);
+    return volume_scale_factor_locked(to_internal_ticker(ticker));
 }
 
 double TickerUniverse::volume_scale_factor_locked(const Ticker& ticker,
@@ -413,7 +430,7 @@ double TickerUniverse::volume_scale_factor_locked(const Ticker& ticker,
 double TickerUniverse::calibrated_min_size_usd(const Ticker& ticker,
                                                 double config_default) const {
     std::shared_lock lock(rw_mtx_);
-    return calibrated_min_size_usd_locked(ticker, config_default);
+    return calibrated_min_size_usd_locked(to_internal_ticker(ticker), config_default);
 }
 
 double TickerUniverse::calibrated_min_size_usd_locked(const Ticker& ticker,
@@ -450,7 +467,7 @@ void TickerUniverse::refresh_scale_factors_locked(const absl::flat_hash_map<Tick
 
 int TickerUniverse::get_tier(const Ticker& ticker) const {
     std::shared_lock lock(rw_mtx_);
-    return get_tier_locked(ticker);
+    return get_tier_locked(to_internal_ticker(ticker));
 }
 
 int TickerUniverse::get_tier_locked(const Ticker& ticker) const {
@@ -483,10 +500,9 @@ double TickerUniverse::get_tiered_threshold(const Ticker& ticker,
         return tier_values.empty() ? 0.0 : tier_values[0];
     }
 
-    const int tier = get_tier_locked(ticker);
+    const int tier = get_tier_locked(to_internal_ticker(ticker));
     const std::size_t idx = std::min(static_cast<std::size_t>(tier), tier_values.size() - 1);
     return tier_values[idx];
 }
 
 }  // namespace trade_bot
-

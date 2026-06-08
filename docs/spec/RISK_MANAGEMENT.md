@@ -83,7 +83,7 @@ daily_pnl_pct = (realized_pnl_today_usd + unrealized_pnl_usd) / starting_equity_
 
 **Fallback:** если `TickerUniverse` не инициализирован (например, в
 интеграционных тестах), используется статический `whitelist_tickers` из
-`[risk]`. Default: `["BTCUSDT", "ETHUSDT", "SOLUSDT"]`.
+`[risk]`. Default: `["BTC_USDT", "ETH_USDT", "SOL_USDT"]`.
 
 ### R6. Валидация стопа
 
@@ -398,7 +398,7 @@ Kill-switch срабатывает при любом из:
 | `finres_staleness_kill_sec` | 300 | Нет finres_update дольше + `finres_kill_on_staleness=true` → kill |
 | `finres_kill_on_staleness` | false | Включает kill при полной потере finres |
 | `allow_hedge` | false | Нельзя одновременно long+short |
-| `whitelist_tickers` | `["BTCUSDT","ETHUSDT","SOLUSDT"]` | Fallback для R5 |
+| `whitelist_tickers` | `["BTC_USDT","ETH_USDT","SOL_USDT"]` | Fallback для R5 |
 | `exchange_error_streak` | 5 | Порог kill-switch по ошибкам |
 | `max_clock_drift_ms` | 500 | Порог kill-switch по дрифту |
 | `ws_reconnect_timeout_sec` | 15 | Порог kill-switch по WS |

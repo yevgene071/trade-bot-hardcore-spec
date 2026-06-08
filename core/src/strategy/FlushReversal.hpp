@@ -33,7 +33,7 @@ public:
         std::chrono::seconds tape_flush_max_age{8};   // TapeFlush must be this fresh
         double min_flush_dist_bps{3.0};               // break must penetrate this far past level
         int    min_level_touches{2};                  // level strength gate
-        int    min_flush_count{1};                    // §4.3 Phase 5: set to 2 for ≥2 TapeFlush requirement
+        int    min_flush_count{2};                    // Manual rule: trade repeated flushes, not a single print.
         std::chrono::seconds flush_count_window{120}; // window for min_flush_count search
 
         double max_vol_fade_ratio{0.5};               // vol_1s / avg_vol_1s must be below this

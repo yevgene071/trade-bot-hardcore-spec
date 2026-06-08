@@ -19,6 +19,7 @@ protected:
         f.ticker = std::move(t);
         f.timestamp = ts;
         f.mid = 50000.0;
+        f.valid = true;
         return f;
     }
 };
@@ -154,6 +155,7 @@ TEST_F(TapeAnalyzerTest, DetectsTapeFlush) {
     
     auto now = std::chrono::system_clock::now();
     book.apply_snapshot({"BTCUSDT", {{50010.0, 1.0, Side::Sell}}, {{50000.0, 1.0, Side::Buy}}, now});
+    analyzer.on_frame(make_frame("BTCUSDT", now));
     
     // Normal trades to populate T-Digest
     for (int i = 0; i < 100; ++i) {

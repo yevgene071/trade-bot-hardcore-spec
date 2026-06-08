@@ -540,6 +540,7 @@ std::string DashboardServer::serialize_state_locked_() const {
         for (const auto& pt : s.chart_history) {
             j["chart_history"].push_back({
                 {"ts_unix_ms",          pt.ts_unix_ms},
+                {"ts",                  pt.ts_unix_ms},
                 {"mid",                 pt.mid},
                 {"best_bid",            pt.best_bid},
                 {"best_ask",            pt.best_ask},

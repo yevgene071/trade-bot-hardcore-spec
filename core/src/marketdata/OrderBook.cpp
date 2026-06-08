@@ -2,9 +2,7 @@
 
 #include "perf/SimdOps.hpp"
 
-#include <array>
 #include <cmath>
-#include <execution>
 #include <algorithm>
 #include <mutex>
 #include <shared_mutex>
@@ -136,11 +134,8 @@ void OrderBook::apply_update_batch(const std::vector<PriceLevel>& changes) {
         };
 
         top_dirty_ = true;
-        std::array<std::function<void()>, 2> tasks = {
-            [&]() { update_map(bids_, buy_work); },
-            [&]() { update_map(asks_, sell_work); }
-        };
-        std::for_each(std::execution::par, tasks.begin(), tasks.end(), [](auto& f) { f(); });
+        update_map(bids_, buy_work);
+        update_map(asks_, sell_work);
 
         // Find maximum new bid and minimum new ask with size > 0 to resolve overlaps
         std::optional<PriceTick> max_new_bid;

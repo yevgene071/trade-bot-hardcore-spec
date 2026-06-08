@@ -109,6 +109,7 @@ private:
             const std::vector<std::string>& allow_pats,
             const std::vector<std::string>& deny_pats);
     void start_notification_feed_(int port);
+    void schedule_signal_level_cleanup_();
 
     // ── Tick / Runtime ────────────────────────────────────
     void schedule_tick();
@@ -140,6 +141,7 @@ private:
     boost::asio::steady_timer timer_;
     boost::asio::steady_timer dashboard_timer_;
     boost::asio::steady_timer pool_fallback_timer_;
+    boost::asio::steady_timer signal_level_cleanup_timer_;
 
     TickerUniverse universe_;
     NewsCalendar news_;

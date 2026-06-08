@@ -1,6 +1,7 @@
 #include "OrderReconciliator.hpp"
 
 #include "logger/Logger.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,13 +22,15 @@ bool OrderReconciliator::enter_submit_unknown(const OrderIntent& intent, std::ch
     if (pending_.contains(intent.local_order_id)) {
         return false;
     }
+    OrderIntent normalized = intent;
+    normalized.ticker = to_internal_ticker(intent.ticker);
     pending_.emplace(intent.local_order_id, PendingIntent{
-        /*intent=*/intent,
+        /*intent=*/normalized,
         /*started_at=*/now,
         /*next_poll_at=*/now,                    // first poll is immediate
         /*current_backoff=*/cfg_.initial_backoff,
     });
-    by_ticker_[intent.ticker].insert(intent.local_order_id);
+    by_ticker_[normalized.ticker].insert(intent.local_order_id);
     LOG_WARN("OrderReconciliator: SubmitUnknown registered ticker={} local_id={} side={} type={} price={} size={}",
              intent.ticker, intent.local_order_id,
              static_cast<int>(intent.side), static_cast<int>(intent.type),
@@ -58,8 +61,10 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(
     const Ticker& ticker, 
     std::chrono::system_clock::time_point now_time) 
 {
+    const Ticker key = to_internal_ticker(ticker);
     std::vector<ReconcileResult> out;
     std::vector<RestOrder> server_orders;
+    std::vector<int64_t> due_local_ids;
 
     {
         std::lock_guard<std::mutex> lk(mtx_);
@@ -68,8 +73,22 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(
             return {};
         }
         
-        auto bt = by_ticker_.find(ticker);
+        auto bt = by_ticker_.find(key);
         if (bt == by_ticker_.end() || bt->second.empty()) {
+            return out;
+        }
+
+        for (int64_t local_id : bt->second) {
+            auto it = pending_.find(local_id);
+            if (it == pending_.end()) continue;
+            if (now_time < it->second.next_poll_at &&
+                (now_time - it->second.started_at) < cfg_.total_timeout) {
+                out.push_back(ReconcileResult{ReconcileOutcome::Pending, local_id, std::nullopt, it->second.intent, std::nullopt});
+                continue;
+            }
+            due_local_ids.push_back(local_id);
+        }
+        if (due_local_ids.empty()) {
             return out;
         }
     }
@@ -81,18 +100,32 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(
     }
 
     try {
-        server_orders = fetcher(ticker);
+        server_orders = fetcher(key);
     } catch (const std::exception& ex) {
-        LOG_WARN("OrderReconciliator: fetch failed for ticker={}: {}", ticker, ex.what());
+        LOG_WARN("OrderReconciliator: fetch failed for ticker={}: {}", key, ex.what());
         std::lock_guard<std::mutex> lk(mtx_);
-        auto bt = by_ticker_.find(ticker);
+        auto bt = by_ticker_.find(key);
         if (bt == by_ticker_.end()) return out;
-        
-        for (auto local_id : bt->second) {
+
+        std::vector<int64_t> to_remove;
+        for (auto local_id : due_local_ids) {
             auto it = pending_.find(local_id);
             if (it == pending_.end()) continue;
-            
-            if (now_time < it->second.next_poll_at) continue;
+
+            const auto elapsed = now_time - it->second.started_at;
+            if (elapsed >= cfg_.total_timeout) {
+                out.push_back(ReconcileResult{
+                    /*outcome=*/ReconcileOutcome::NotFoundTimeout,
+                    /*local=*/local_id,
+                    /*server=*/std::nullopt,
+                    /*intent=*/it->second.intent,
+                    /*note=*/std::string{"deadline exceeded during open-order polling"},
+                });
+                to_remove.push_back(local_id);
+                LOG_ERROR("OrderReconciliator: timeout local_id={} ticker={} after fetch failures",
+                          local_id, key);
+                continue;
+            }
 
             it->second.current_backoff = std::min(
                 cfg_.max_backoff,
@@ -105,27 +138,31 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(
                 std::nullopt, it->second.intent, std::nullopt,
             });
         }
+        for (int64_t id : to_remove) {
+            auto it_pending = pending_.find(id);
+            if (it_pending == pending_.end()) continue;
+            const Ticker tkr = it_pending->second.intent.ticker;
+            pending_.erase(it_pending);
+            if (auto it_tkr = by_ticker_.find(tkr); it_tkr != by_ticker_.end()) {
+                it_tkr->second.erase(id);
+                if (it_tkr->second.empty()) by_ticker_.erase(it_tkr);
+            }
+        }
         return out;
     }
 
     std::lock_guard<std::mutex> lk(mtx_);
-    auto bt = by_ticker_.find(ticker);
+    auto bt = by_ticker_.find(key);
     if (bt == by_ticker_.end() || bt->second.empty()) {
         return out;
     }
 
     std::vector<int64_t> to_remove;
-    std::vector<int64_t> local_ids(bt->second.begin(), bt->second.end());
 
-    for (int64_t local_id : local_ids) {
+    for (int64_t local_id : due_local_ids) {
         auto it = pending_.find(local_id);
         if (it == pending_.end()) {
             continue;  // resolved by a parallel call
-        }
-
-        if (now_time < it->second.next_poll_at) {
-            out.push_back(ReconcileResult{ReconcileOutcome::Pending, local_id, std::nullopt, it->second.intent, std::nullopt});
-            continue;
         }
 
         auto sit = std::find_if(server_orders.begin(), server_orders.end(), [&](const auto& server) {
@@ -156,7 +193,7 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(
                 });
                 to_remove.push_back(local_id);
                 LOG_ERROR("OrderReconciliator: timeout local_id={} ticker={} -> manual ack required",
-                          local_id, ticker);
+                          local_id, key);
             } else {
                 it->second.current_backoff = std::min(
                     cfg_.max_backoff,
@@ -195,7 +232,7 @@ std::vector<ReconcileResult> OrderReconciliator::poll_open_orders(
 
 bool OrderReconciliator::has_pending(const Ticker& ticker) const {
     std::lock_guard<std::mutex> lk(mtx_);
-    auto it = by_ticker_.find(ticker);
+    auto it = by_ticker_.find(to_internal_ticker(ticker));
     return it != by_ticker_.end() && !it->second.empty();
 }
 
@@ -206,7 +243,7 @@ size_t OrderReconciliator::pending_count() const {
 
 bool OrderReconciliator::matches_intent_(const OrderIntent& intent,
                                         const RestOrder& server) const {
-    if (server.ticker != intent.ticker) return false;
+    if (to_internal_ticker(server.ticker) != to_internal_ticker(intent.ticker)) return false;
     if (server.side != intent.side) return false;
     if (server.type != intent.type) return false;
 

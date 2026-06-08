@@ -1,0 +1,3 @@
+[submodule "metascalp-sdk"]
+	path = metascalp-sdk
+	url = https://github.com/MetaScalp/metascalp-sdk.git

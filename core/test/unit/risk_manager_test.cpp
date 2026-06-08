@@ -69,9 +69,12 @@ TEST_F(RiskManagerTest, RejectsOnTooManyPositions) {
 TEST_F(RiskManagerTest, RejectsOnTightStop) {
     TickerUniverse universe;
     NewsCalendar news;
-    RiskManager risk(universe, news);
+    RiskManager::Config cfg;
+    cfg.whitelist_tickers = {"BTCUSDT"};
+    RiskManager risk(universe, news, cfg);
     
     auto plan = make_plan();
+    plan.ticker = "BTC_USDT";
     plan.stop_price = 49995.0; // 1 bps (min 3 bps)
     
     auto decision = risk.evaluate(plan, make_state());
@@ -84,6 +87,7 @@ TEST_F(RiskManagerTest, CalculatesSizeCorrect_05PctRisk) {
     NewsCalendar news;
     RiskManager::Config cfg;
     cfg.max_position_value_pct = 500.0;
+    cfg.whitelist_tickers = {"BTCUSDT"};
     RiskManager risk(universe, news, cfg);
     
     auto state = make_state();
@@ -92,6 +96,7 @@ TEST_F(RiskManagerTest, CalculatesSizeCorrect_05PctRisk) {
     state.free_balance_usd = 200000.0; // plenty of margin
     
     auto plan = make_plan();   // 10 bps stop at 50000
+    plan.ticker = "BTC_USDT";
     
     // 0.5% risk of 100000 = 500 USD
     // 10 bps stop at 50000 is 50 USD/coin

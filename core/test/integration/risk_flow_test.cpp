@@ -11,6 +11,7 @@ TEST(RiskFlowTest, DaySimulationWithLossStreak) {
     RiskManager::Config cfg;
     cfg.max_consecutive_losses = 2;
     cfg.loss_streak_cooloff_min = 10;
+    cfg.whitelist_tickers = {"BTCUSDT"};
     RiskManager risk(universe, news, cfg);
     
     AccountState state;
@@ -19,7 +20,7 @@ TEST(RiskFlowTest, DaySimulationWithLossStreak) {
     state.free_balance_usd = 10000.0;
     
     TradePlan plan;
-    plan.ticker = "BTCUSDT";
+    plan.ticker = "BTC_USDT";
     plan.side = Side::Buy;
     plan.entry_price = 50000.0;
     plan.stop_price = 49900.0;

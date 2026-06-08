@@ -34,7 +34,7 @@ TEST_F(TickerUniverseAffinityTest, BounceFromDensityEnabledAtThreshold) {
     auto u = make_pool({"BTCUSDT", "ETHUSDT", "DOGEUSDT"});
     constexpr int min_events_per_hour = 4;
     std::unordered_map<Ticker, int> events_per_hour = {
-        {"BTCUSDT", 5}, {"ETHUSDT", 4}, {"DOGEUSDT", 2}};
+        {"BTC_USDT", 5}, {"ETH_USDT", 4}, {"DOGE_USDT", 2}};
 
     u->register_strategy("BounceFromDensity", [&](const Ticker& t) {
         auto it = events_per_hour.find(t);
@@ -49,12 +49,12 @@ TEST_F(TickerUniverseAffinityTest, BounceFromDensityEnabledAtThreshold) {
 
 TEST_F(TickerUniverseAffinityTest, LeaderLagRespectsCorrelationAndSelfExclude) {
     auto u = make_pool({"BTCUSDT", "ETHUSDT", "SOLUSDT"});
-    const Ticker leader = "BTCUSDT";
+    const Ticker leader = "BTC_USDT";
     constexpr double min_corr = 0.6;
     const bool exclude_self_for_leader = true;
 
     std::unordered_map<Ticker, double> corr_60s = {
-        {"BTCUSDT", 1.0}, {"ETHUSDT", 0.7}, {"SOLUSDT", 0.4}};
+        {"BTC_USDT", 1.0}, {"ETH_USDT", 0.7}, {"SOL_USDT", 0.4}};
 
     u->register_strategy("LeaderLag", [&](const Ticker& t) {
         if (exclude_self_for_leader && t == leader) return false;

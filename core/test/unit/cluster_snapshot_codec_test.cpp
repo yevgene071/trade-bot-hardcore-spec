@@ -18,7 +18,7 @@ TEST(ClusterSnapshotCodecTest, ParsesValidSnapshot) {
     auto j = nlohmann::json::parse(json_str);
     auto snap = MetaScalpCodec::parse_cluster_snapshot(j);
     
-    EXPECT_EQ(snap.ticker, "BTCUSDT");
+    EXPECT_EQ(snap.ticker, "BTC_USDT");
     EXPECT_EQ(snap.timeframe, "M5");
     EXPECT_EQ(snap.zoom_index, 0);
     ASSERT_EQ(snap.items.size(), 2);

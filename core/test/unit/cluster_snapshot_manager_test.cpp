@@ -46,14 +46,14 @@ TEST_F(ClusterSnapshotManagerTest, PollerUpdatesCache) {
     manager.refresh({"BTCUSDT"});
     
     ClusterSnapshot mock_snap {
-        .ticker = "BTCUSDT",
+        .ticker = "BTC_USDT",
         .timeframe = "M5",
         .zoom_index = 0,
         .items = {{100.0, 1.0, 1.0}},
         .ts = std::chrono::system_clock::now()
     };
     
-    EXPECT_CALL(client, fetch("BTCUSDT", "M5", 0))
+    EXPECT_CALL(client, fetch("BTC_USDT", "M5", 0))
         .WillRepeatedly(testing::Return(mock_snap));
         
     manager.start();
@@ -61,7 +61,7 @@ TEST_F(ClusterSnapshotManagerTest, PollerUpdatesCache) {
     
     auto snap = manager.get("BTCUSDT", "M5");
     ASSERT_TRUE(snap.has_value());
-    EXPECT_EQ(snap->ticker, "BTCUSDT");
+    EXPECT_EQ(snap->ticker, "BTC_USDT");
     EXPECT_EQ(snap->items.size(), 1);
     
     manager.stop();

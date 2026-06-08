@@ -1,5 +1,6 @@
 #include "RiskManager.hpp"
 #include "logger/Logger.hpp"
+#include "utils/TickerSymbol.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -24,6 +25,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     RiskDecision d;
     // P0-DETERMINISM: Use injected clock for replay determinism
     auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
+    const Ticker plan_ticker = to_internal_ticker(plan.ticker);
 
     // ---- Input sanity (#125): reject malformed inputs explicitly so we
     //      never divide by zero further down. Each guard short-circuits
@@ -78,7 +80,9 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     }
 
     // R4. Unique ticker / Hedge
-    bool already_has_ticker = std::find(state.active_tickers.begin(), state.active_tickers.end(), plan.ticker) != state.active_tickers.end();
+    bool already_has_ticker = std::any_of(state.active_tickers.begin(), state.active_tickers.end(), [&](const auto& t) {
+        return to_internal_ticker(t) == plan_ticker;
+    });
     if (already_has_ticker && !cfg_.allow_hedge) {
         d.reason = RejectReason::DuplicatePosition;
         d.details = "Already has position in " + plan.ticker;
@@ -86,7 +90,9 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     }
 
     // R4b: Per-ticker position limit
-    int ticker_count = static_cast<int>(std::count(state.active_tickers.begin(), state.active_tickers.end(), plan.ticker));
+    int ticker_count = static_cast<int>(std::count_if(state.active_tickers.begin(), state.active_tickers.end(), [&](const auto& t) {
+        return to_internal_ticker(t) == plan_ticker;
+    }));
     if (ticker_count >= cfg_.max_positions_per_ticker) {
         d.reason = RejectReason::DuplicatePosition;
         d.details = "Per-ticker limit reached for " + plan.ticker + ": " + std::to_string(ticker_count) + "/" + std::to_string(cfg_.max_positions_per_ticker);
@@ -96,11 +102,12 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     // R5. Universe — accept if ticker is in the active pool, boosted, or explicitly whitelisted.
     // Additionally check strategy-specific affinity (ARCHITECTURE.md § 2.11).
     {
-        const bool in_pool = universe_.is_in_pool(plan.ticker);
-        const bool boosted  = universe_.is_boosted(plan.ticker, now);
+        const bool in_pool = universe_.is_in_pool(plan_ticker);
+        const bool boosted  = universe_.is_boosted(plan_ticker, now);
         const bool listed   = !cfg_.whitelist_tickers.empty() &&
-            std::find(cfg_.whitelist_tickers.begin(), cfg_.whitelist_tickers.end(), plan.ticker)
-                != cfg_.whitelist_tickers.end();
+            std::any_of(cfg_.whitelist_tickers.begin(), cfg_.whitelist_tickers.end(), [&](const auto& t) {
+                return to_internal_ticker(t) == plan_ticker;
+            });
         if (!in_pool && !boosted && !listed) {
             d.reason  = RejectReason::NotInUniverse;
             d.details = "Ticker not in tradable universe or whitelist: " + plan.ticker;
@@ -109,7 +116,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
 
         // Strategy-specific affinity: ticker must be enabled for this strategy.
         // Per ARCHITECTURE.md § 2.11 — TickerUniverse::is_tradable_by().
-        if (!boosted && !listed && !universe_.is_strategy_enabled(plan.ticker, std::string(plan.strategy_name))) {
+        if (!boosted && !listed && !universe_.is_strategy_enabled(plan_ticker, std::string(plan.strategy_name))) {
             d.reason  = RejectReason::NotInUniverse;
             d.details = "Ticker " + plan.ticker + " not enabled for strategy " + std::string(plan.strategy_name);
             return d;
@@ -140,7 +147,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
 
     // Per-ticker stop bounds: small alts have lower volume → wider stops are expected.
     // inv_sqrt ∈ [0.45, 2.58]; bounds scale proportionally up for small alts.
-    const double sf_stop    = universe_.volume_scale_factor(plan.ticker);
+    const double sf_stop    = universe_.volume_scale_factor(plan_ticker);
     const double inv_sqrt_s = 1.0 / std::sqrt(sf_stop);
     const double max_stop   = std::min(cfg_.max_stop_bps  * inv_sqrt_s, 100.0);
     const double warn_stop  = std::min(cfg_.warn_stop_bps * inv_sqrt_s, 80.0);
@@ -201,7 +208,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
 
     // T4-RISK: Price and Size Normalization (#131) — moved position value cap AFTER normalization
     // Round size down first, then compute risk_usd from the REAL size.
-    auto meta = universe_.meta(plan.ticker).value_or(TickerMeta{0.01, 1e-6, 0.0, 0.0});
+    auto meta = universe_.meta(plan_ticker).value_or(TickerMeta{0.01, 1e-6, 0.0, 0.0});
     if (meta.price_increment > 0.0 && meta.size_increment > 0.0) {
         int64_t size_ticks = static_cast<int64_t>(std::floor(size_coin / meta.size_increment + 1e-9));
         d.adjusted_size_coin = static_cast<double>(size_ticks) * meta.size_increment;
@@ -269,7 +276,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     }
 
     // R12. News blackout
-    auto mins = news_.minutes_to_next_news(now, plan.ticker);
+    auto mins = news_.minutes_to_next_news(now, plan_ticker);
     if (mins && std::abs(*mins) <= cfg_.news_blackout_min) {
         d.reason = RejectReason::NewsBlackout;
         d.details = "News blackout active";
@@ -304,7 +311,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     }
 
     // R13. Funding blackout — pre-window (before next funding)
-    auto fit = funding_times_.find(plan.ticker);
+    auto fit = funding_times_.find(plan_ticker);
     if (fit != funding_times_.end()) {
         const auto next_funding = fit->second;
         const auto secs_to_next =
@@ -319,7 +326,7 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
     // timestamp (#204). Previously in_post used funding_times_ (the NEXT event),
     // which gets overwritten immediately after funding by the WS update,
     // making the post-window effectively non-existent.
-    auto pit = prev_funding_times_.find(plan.ticker);
+    auto pit = prev_funding_times_.find(plan_ticker);
     if (pit != prev_funding_times_.end()) {
         const auto secs_since =
             std::chrono::duration_cast<std::chrono::seconds>(now - pit->second).count();
@@ -349,17 +356,18 @@ RiskDecision RiskManager::evaluate(const TradePlan& plan, const AccountState& st
 void RiskManager::update_funding_time(const Ticker& ticker,
                                       std::chrono::system_clock::time_point ts) {
     std::lock_guard lock(mtx_);
+    const Ticker key = to_internal_ticker(ticker);
     // B3-FIX: Always save previous timestamp when updating, and handle first update
-    auto it = funding_times_.find(ticker);
+    auto it = funding_times_.find(key);
     if (it != funding_times_.end()) {
-        prev_funding_times_[ticker] = it->second;
+        prev_funding_times_[key] = it->second;
     } else {
         auto now = clock_ ? clock_->now() : std::chrono::system_clock::now();
         if (ts < now) {
-            prev_funding_times_[ticker] = ts;
+            prev_funding_times_[key] = ts;
         }
     }
-    funding_times_[ticker] = ts;
+    funding_times_[key] = ts;
 }
 
 void RiskManager::record_trade_end(bool is_loss,

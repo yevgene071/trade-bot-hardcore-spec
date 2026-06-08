@@ -49,6 +49,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sstream>
+#include <string_view>
 #include <thread>
 #include <spdlog/fmt/ranges.h>
 
@@ -63,6 +64,7 @@ BotApp::BotApp(boost::asio::io_context& ioc)
     , timer_(ioc)
     , dashboard_timer_(ioc)
     , pool_fallback_timer_(ioc)
+    , signal_level_cleanup_timer_(ioc)
     , last_reset_day_(TradingDay::current_date_utc())
     , last_persist_(std::chrono::system_clock::now())
     , last_dash_update_(std::chrono::system_clock::now())
@@ -176,12 +178,20 @@ void BotApp::register_strategy_affinities_(std::shared_ptr<double> exchange_mult
             return true;
     });
 
-    double flush_min_vol     = Config::get_or<double>("universe.affinity.flushreversal.min_volume_24h_usd",   50000000.0);
-    double flush_max_spread  = Config::get_or<double>("universe.affinity.flushreversal.max_avg_spread_bps",   4.0);
-    double flush_max_funding = Config::get_or<double>("universe.affinity.flushreversal.max_funding_rate_bps", 4.0);
+    auto get_flush_affinity = [](std::string_view key, double def) {
+        const std::string modern = "universe.affinity.flushreversal." + std::string(key);
+        const std::string legacy = "universe.affinity.flush." + std::string(key);
+        return Config::has(modern) ? Config::get_or<double>(modern, def)
+                                   : Config::get_or<double>(legacy, def);
+    };
+    double flush_min_vol     = get_flush_affinity("min_volume_24h_usd",   50000000.0);
+    double flush_max_spread  = get_flush_affinity("max_avg_spread_bps",   4.0);
+    double flush_max_funding = get_flush_affinity("max_funding_rate_bps", 4.0);
+    const bool flush_live_enabled = Config::get_or<bool>("strategies.flushreversal.allow_live", false);
     universe_.register_strategy("flushreversal",
-        [this, flush_min_vol, flush_max_spread, flush_max_funding, exchange_mult]
+        [this, flush_min_vol, flush_max_spread, flush_max_funding, flush_live_enabled, exchange_mult]
         (const Ticker& t) {
+            if (live_executor_ && !flush_live_enabled) return false;
             auto stats = universe_.get_stats(t);
             if (!stats) return true;
             if (stats->volume_24h_usd > 0.0 &&
@@ -473,17 +483,41 @@ BotApp::StrategyConfigs BotApp::load_strategy_configs_() {
         Config::get_or<int64_t>("strategies.leaderlag.swing_lookback_ticks", 30));
     c.leaderlag.no_progress_timeout_sec   = Config::get_or<double>("strategies.leaderlag.no_progress_timeout_sec", 15.0);
 
-    c.flushreversal.entry_offset_bps        = Config::get_or<double>("strategies.flushreversal.entry_offset_bps",        2.0);
-    c.flushreversal.stop_buffer_bps         = Config::get_or<double>("strategies.flushreversal.stop_buffer_bps",         8.0);
-    c.flushreversal.tp1_r                   = Config::get_or<double>("strategies.flushreversal.tp1_r",                   2.0);
-    c.flushreversal.tp1_size_ratio          = Config::get_or<double>("strategies.flushreversal.tp1_size_ratio",          0.6);
-    c.flushreversal.max_spread_bps          = Config::get_or<double>("strategies.flushreversal.max_spread_bps",          4.0);
-    c.flushreversal.min_flush_dist_bps      = Config::get_or<double>("strategies.flushreversal.min_flush_dist_bps",      3.0);
-    c.flushreversal.max_vol_fade_ratio      = Config::get_or<double>("strategies.flushreversal.max_vol_fade_ratio",      0.5);
-    c.flushreversal.min_price_reversal_bps  = Config::get_or<double>("strategies.flushreversal.min_price_reversal_bps",  1.5);
-    c.flushreversal.no_progress_timeout_sec = Config::get_or<double>("strategies.flushreversal.no_progress_timeout_sec", 30.0);
+    auto flush_key = [](std::string_view key) {
+        return "strategies.flushreversal." + std::string(key);
+    };
+    auto legacy_flush_key = [](std::string_view key) {
+        return "strategies.flush." + std::string(key);
+    };
+    auto get_flush_double = [&](std::string_view key, double def) {
+        const auto modern = flush_key(key);
+        const auto legacy = legacy_flush_key(key);
+        return Config::has(modern) ? Config::get_or<double>(modern, def)
+                                   : Config::get_or<double>(legacy, def);
+    };
+    auto get_flush_i64 = [&](std::string_view key, int64_t def) {
+        const auto modern = flush_key(key);
+        const auto legacy = legacy_flush_key(key);
+        return Config::has(modern) ? Config::get_or<int64_t>(modern, def)
+                                   : Config::get_or<int64_t>(legacy, def);
+    };
+    c.flushreversal.entry_offset_bps        = get_flush_double("entry_offset_bps",        2.0);
+    c.flushreversal.stop_buffer_bps         = get_flush_double("stop_buffer_bps",         8.0);
+    c.flushreversal.tp1_r                   = get_flush_double("tp1_r",                   2.0);
+    c.flushreversal.tp1_size_ratio          = get_flush_double("tp1_size_ratio",          0.6);
+    c.flushreversal.max_spread_bps          = get_flush_double("max_spread_bps",          4.0);
+    c.flushreversal.min_flush_dist_bps      = get_flush_double("min_flush_dist_bps",      3.0);
+    c.flushreversal.max_vol_fade_ratio      = get_flush_double("max_vol_fade_ratio",      0.5);
+    c.flushreversal.min_price_reversal_bps  = get_flush_double("min_price_reversal_bps",  1.5);
+    c.flushreversal.no_progress_timeout_sec = get_flush_double("no_progress_timeout_sec", 30.0);
+    c.flushreversal.min_flush_count = static_cast<int>(
+        get_flush_i64("min_flush_count", 2));
+    c.flushreversal.flush_count_window = std::chrono::seconds(
+        get_flush_i64("flush_window_sec", 120));
+    c.flushreversal.entry_timeout = std::chrono::seconds(
+        get_flush_i64("entry_timeout_sec", 8));
     c.flushreversal.min_level_touches = static_cast<int>(
-        Config::get_or<int64_t>("strategies.flushreversal.min_level_touches", 2));
+        get_flush_i64("min_level_touches", 2));
     return c;
 }
 
@@ -496,6 +530,14 @@ void BotApp::init_feed_and_executor_(std::shared_ptr<BeastWsClient> ws, int port
                                       std::shared_ptr<OrderGateway> gateway) {
     finres_handler_ = std::make_unique<FinresHandler>(system_clock_);
     feed_ = std::make_unique<MarketDataFeed>(ws, connection_id);
+    feed_->set_orderbook_snapshot_fetcher(
+        [gateway, connection_id](const Ticker& ticker,
+                                 int zoom_index,
+                                 std::optional<int> depth_levels,
+                                 std::optional<double> depth_percent) {
+            return gateway->get_orderbook_snapshot(
+                connection_id, ticker, zoom_index, depth_levels, depth_percent);
+        });
     feed_->add_listener(finres_handler_.get());
     m_connection_id_for_tick = connection_id;
     feed_->set_record_tap([this](const nlohmann::json& msg, int64_t ts_ns) {
@@ -756,15 +798,50 @@ void BotApp::start_notification_feed_(int port) {
     // Callback fires on first ScreenerNewCoin to start processor after initial pool populated
     auto on_first_coin = [this]() {
         LOG_INFO("[Universe] First coin received from screener — starting processor");
+        if (cluster_mgr_) {
+            cluster_mgr_->refresh(universe_.active());
+        }
         start_processor();
     };
+
+    NotificationFeed::Config notif_cfg;
+    notif_cfg.subscribe = Config::get_or<bool>("notifications.subscribe", true);
+    notif_cfg.signal_levels_subscribe =
+        Config::get_or<bool>("signals.level_bridge.signal_level_subscribe", true);
+    notif_cfg.exchange_id = static_cast<int>(
+        Config::get_or<int64_t>("notifications.exchange_id", 0));
+    notif_cfg.market_type = static_cast<int>(
+        Config::get_or<int64_t>("notifications.market_type", 0));
     
     notif_feed_ = std::make_unique<NotificationFeed>(
-        notif_ws, universe_, NotificationFeed::Config{}, std::move(on_first_coin),
+        notif_ws, universe_, notif_cfg, std::move(on_first_coin),
         signal_level_bridge_.get()); // AD3: wire bridge to route SignalLevel notifications
-    notif_ws->connect("ws://127.0.0.1:" + std::to_string(port) + "/notifications");
+    notif_ws->connect("ws://127.0.0.1:" + std::to_string(port) + "/");
     notif_feed_->start();
-    LOG_INFO("[Universe] NotificationFeed started — screener will populate pool");
+    LOG_INFO("[Universe] NotificationFeed started (notifications={}, signal_levels={})",
+             notif_cfg.subscribe, notif_cfg.signal_levels_subscribe && signal_level_bridge_ != nullptr);
+}
+
+void BotApp::schedule_signal_level_cleanup_() {
+    if (!signal_level_gateway_) return;
+
+    const auto interval_min = Config::get_or<int64_t>(
+        "signals.level_bridge.cleanup_interval_min", 60);
+    if (interval_min <= 0) return;
+
+    signal_level_cleanup_timer_.expires_after(std::chrono::minutes(interval_min));
+    signal_level_cleanup_timer_.async_wait([this](const boost::system::error_code& ec) {
+        if (ec || shutdown_initiated_.load(std::memory_order_relaxed)) return;
+        if (signal_level_gateway_) {
+            try {
+                signal_level_gateway_->cleanup_triggered();
+                LOG_DEBUG("SignalLevelBridge: triggered server levels cleanup completed");
+            } catch (const std::exception& e) {
+                LOG_WARN("SignalLevelBridge: triggered server levels cleanup failed: {}", e.what());
+            }
+        }
+        schedule_signal_level_cleanup_();
+    });
 }
 
 // ═��═════════════════════════════════════════════════════════════
@@ -786,8 +863,8 @@ void BotApp::init_components() {
         .sources            = Config::get_or<std::vector<std::string>>("clock.sources", {"pool.ntp.org", "time.google.com"}),
         .check_interval     = std::chrono::seconds(Config::get_or<int64_t>("clock.check_interval_sec", 30)),
         .query_timeout      = std::chrono::milliseconds(Config::get_or<int64_t>("clock.query_timeout_ms", 1500)),
-        .warn_drift_ms      = Config::get_or<int64_t>("clock.warn_drift_ms",      1000),
-        .max_clock_drift_ms = Config::get_or<int64_t>("clock.max_clock_drift_ms", 5000),
+        .warn_drift_ms      = Config::get_or<int64_t>("clock.warn_drift_ms",      200),
+        .max_clock_drift_ms = Config::get_or<int64_t>("clock.max_clock_drift_ms", 500),
     });
     clock_monitor_->start();
 
@@ -826,11 +903,20 @@ void BotApp::init_components() {
     init_feed_and_executor_(ws, *port, conn_info.id, gateway);
 
     // SignalLevelBridge — синхронизация уровней с MetaScalp API
-    signal_level_gateway_ = std::make_unique<SignalLevelGateway>(
-        *http_client_, "http://localhost:" + std::to_string(*port), conn_info.id);
-    signal_level_bridge_ = std::make_unique<SignalLevelBridge>(
-        *signal_level_gateway_, *signal_bus_);
-    LOG_INFO("SignalLevelBridge started — syncing levels to MetaScalp at :{}", *port);
+    if (Config::get_or<bool>("signals.level_bridge.enabled", true)) {
+        signal_level_gateway_ = std::make_unique<SignalLevelGateway>(
+            *http_client_, "http://localhost:" + std::to_string(*port), conn_info.id);
+        SignalLevelBridge::Config bridge_cfg;
+        bridge_cfg.enabled = true;
+        bridge_cfg.max_server_levels = static_cast<int>(
+            Config::get_or<int64_t>("signals.level_bridge.max_server_levels", 50));
+        signal_level_bridge_ = std::make_unique<SignalLevelBridge>(
+            *signal_level_gateway_, *signal_bus_, bridge_cfg);
+        schedule_signal_level_cleanup_();
+        LOG_INFO("SignalLevelBridge started — syncing levels to MetaScalp at :{}", *port);
+    } else {
+        LOG_INFO("SignalLevelBridge disabled by config");
+    }
 
     setup_strategy_engine_callbacks_();
 
@@ -878,6 +964,9 @@ void BotApp::init_components() {
                  "activating {} candidates as fallback pool", pending_candidates_.size());
         universe_.refresh_pool(pending_candidates_, system_clock_->now());
         universe_.refresh_affinity();
+        if (cluster_mgr_) {
+            cluster_mgr_->refresh(universe_.active());
+        }
         
         // Start processor after initial pool is populated
         start_processor();

@@ -15,6 +15,7 @@ protected:
         FeatureFrame f;
         f.ticker = std::move(t);
         f.timestamp = ts;
+        f.valid = true;
         return f;
     }
     

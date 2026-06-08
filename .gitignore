@@ -65,9 +65,11 @@ cmake/__pycache__/
 
 # Lock files
 /recovery-ack
+*.lock
 
 # Catch-all: ignore any untracked dotfiles/directories in root (e.g. .env, .cursor/, etc.)
 # Negation patterns keep .github/ (CI) and .gitignore visible for new files.
 /.*
 !/.github/
+!/.gitmodules
 !/.gitignore

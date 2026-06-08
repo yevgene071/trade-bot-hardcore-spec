@@ -15,7 +15,8 @@ namespace trade_bot {
 
 /**
  * T4-RISK: Final gatekeeper for all TradePlans.
- * Enforces rules R1-R13.
+ * Enforces pre-trade rules R1-R13 and R15. R14 is a runtime hard-kill check
+ * handled by executor/position monitoring because it requires live PnL.
  */
 class RiskManager {
 public:
@@ -46,7 +47,7 @@ public:
         int    loss_streak_cooloff_min{10};
         size_t max_loss_history{10000};
         
-        double max_entry_slippage_bps{10.0};
+        double max_entry_slippage_bps{5.0};
 
         int    news_blackout_min{5};
         int    news_calendar_check_min{60};
@@ -66,7 +67,7 @@ public:
                          const NewsCalendar& news,
                          std::shared_ptr<IClock> clock = nullptr);
 
-    /// Evaluate a TradePlan against R1..R13. Thread-safe — multiple
+    /// Evaluate a TradePlan against pre-trade risk rules. Thread-safe — multiple
     /// threads (strategy engine + executor reconciliation) may call this
     /// concurrently. Mutates anti-tilt state (trade_history_).
     RiskDecision evaluate(const TradePlan& plan, const AccountState& state);

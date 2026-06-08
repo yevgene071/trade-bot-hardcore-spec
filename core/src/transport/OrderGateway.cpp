@@ -2,6 +2,7 @@
 #include "MetaScalpCodec.hpp"
 #include "logger/Logger.hpp"
 #include "utils/UrlEncoder.hpp"
+#include "utils/TickerSymbol.hpp"
 #include <nlohmann/json.hpp>
 #include <cctype>
 
@@ -78,9 +79,41 @@ std::vector<TickerInfo> OrderGateway::get_tickers(int connection_id, bool refres
     return result;
 }
 
+OrderBookSnapshot OrderGateway::get_orderbook_snapshot(int connection_id,
+                                                       const Ticker& ticker,
+                                                       int zoom_index,
+                                                       std::optional<int> depth_levels,
+                                                       std::optional<double> depth_percent) {
+    const std::string wire_ticker = to_metascalp_symbol(ticker);
+    std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) +
+                      "/api/connections/" + std::to_string(connection_id) +
+                      "/orderbook-snapshot?Ticker=" + url_encode(wire_ticker);
+    if (zoom_index > 0) {
+        url += "&ZoomIndex=" + std::to_string(zoom_index);
+    }
+    if (depth_levels) {
+        url += "&DepthLevels=" + std::to_string(*depth_levels);
+    }
+    if (depth_percent) {
+        url += "&DepthPercent=" + std::to_string(*depth_percent);
+    }
+
+    auto response = m_http_client->get(url);
+    if (response.status != 200) {
+        throw CodecError("Failed to get orderbook snapshot: status " + std::to_string(response.status));
+    }
+
+    auto j = nlohmann::json::parse(response.body);
+    Ticker response_ticker = MetaScalpCodec::normalize_ticker(
+        MetaScalpCodec::get_val<std::string>(j, api::fields::kTicker, ticker));
+    auto snap = MetaScalpCodec::parse_orderbook_snapshot(j, response_ticker.empty() ? ticker : response_ticker);
+    if (!snap) throw CodecError(snap.error());
+    return *snap;
+}
+
 std::vector<RestOrder> OrderGateway::get_open_orders(int connection_id, const Ticker& ticker) {
     std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
-                      std::to_string(connection_id) + "/orders?Ticker=" + url_encode(ticker);
+                      std::to_string(connection_id) + "/orders?Ticker=" + url_encode(to_metascalp_symbol(ticker));
     auto response = m_http_client->get(url);
     if (response.status != 200) {
         throw CodecError("Failed to get orders: status " + std::to_string(response.status));
@@ -139,14 +172,12 @@ PlaceOrderResult OrderGateway::place_order(int connection_id, const PlaceOrderRe
                       std::to_string(connection_id) + "/orders";
     
     nlohmann::json body;
-    body["Ticker"] = request.ticker;
+    body["Ticker"] = to_metascalp_symbol(request.ticker);
     body["Side"] = (request.side == Side::Buy ? 1 : 2);
     body["Price"] = request.price;
     body["Size"] = request.size;
     body["Type"] = static_cast<int>(request.type);
     body["ReduceOnly"] = request.reduce_only;
-    if (!request.client_order_id.empty())
-        body["ClientOrderId"] = request.client_order_id;
 
     auto response = m_http_client->post(url, body.dump());
     if (response.status != 200) {
@@ -159,7 +190,7 @@ void OrderGateway::cancel_order(int connection_id, int64_t order_id, const Ticke
     std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/orders/cancel";
     nlohmann::json body;
-    body["Ticker"] = ticker;
+    body["Ticker"] = to_metascalp_symbol(ticker);
     body["OrderId"] = order_id;
     body["Type"] = 0;  // 0 = cancel regardless of order type
     
@@ -173,7 +204,7 @@ void OrderGateway::cancel_all_orders(int connection_id, const Ticker& ticker) {
     std::string url = get_base_url() + ":" + std::to_string(m_port.load(std::memory_order_relaxed)) + "/api/connections/" + 
                       std::to_string(connection_id) + "/orders/cancel-all";
     nlohmann::json body;
-    body["Ticker"] = ticker;
+    body["Ticker"] = to_metascalp_symbol(ticker);
     
     auto response = m_http_client->post(url, body.dump());
     if (response.status != 200) {

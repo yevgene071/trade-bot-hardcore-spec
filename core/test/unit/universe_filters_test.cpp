@@ -64,3 +64,14 @@ TEST_F(UniverseFiltersTest, ManualAllowDenyOverride) {
     EXPECT_FALSE(f.accepts("BANNED"));     // manual deny is absolute
     EXPECT_FALSE(f.accepts("ETHUSDT"));    // ban-all default
 }
+
+TEST_F(UniverseFiltersTest, AcceptsWireAndInternalTickerFormats) {
+    UniverseFilters::Config cfg{};
+    cfg.allow_patterns = {"*USDT"};
+    cfg.manual_deny = {"ETHUSDT"};
+    UniverseFilters f{cfg};
+
+    EXPECT_TRUE(f.accepts("BTCUSDT"));
+    EXPECT_TRUE(f.accepts("BTC_USDT"));
+    EXPECT_FALSE(f.accepts("ETH_USDT"));
+}
