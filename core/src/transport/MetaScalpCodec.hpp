@@ -108,8 +108,9 @@ public:
     static ConnectionInfo parse_connection_info(const nlohmann::json& j);
     static TickerInfo parse_ticker_info(const nlohmann::json& j);
 
-    /// Normalize ticker to underscore format (e.g. "BTCUSDT" → "BTC_USDT").
-    /// Ensures consistency between REST API ticker names and WebSocket notification tickers.
+    /// Compatibility normalization for simple ticker strings. Full instrument
+    /// identity is connection/market/ticker, so spot/perp must be mapped
+    /// explicitly before relying on this alias.
     static Ticker normalize_ticker(const Ticker& raw);
 
     static Side parse_side(const nlohmann::json& v);

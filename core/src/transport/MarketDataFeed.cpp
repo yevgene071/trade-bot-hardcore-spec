@@ -12,8 +12,8 @@
 
 namespace trade_bot {
 
-// Internal keys use BASE_QUOTE. MetaScalp SDK v1.0.7 REST/WS examples use
-// exchange symbols without separators, e.g. BTCUSDT.
+// Compatibility conversion for simple MetaScalp ticker names. This intentionally
+// does not model spot/perp identity; that requires connection/market namespace.
 static std::string to_ms(const std::string& t) {
     return to_metascalp_symbol(t);
 }

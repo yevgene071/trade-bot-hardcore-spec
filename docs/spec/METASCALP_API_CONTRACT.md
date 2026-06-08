@@ -14,9 +14,14 @@
 - Discovery: `GET /ping` возвращает `{ "App": "MetaScalp", "Version": "..." }`.
 - Все HTTP body/query поля и WS поля в документации написаны в PascalCase:
   `ConnectionId`, `Ticker`, `OrderId`, `AvgPriceFix`.
-- Внутри бота тикеры хранятся как `BASE_QUOTE` (`BTC_USDT`). На границе
-  `transport/` они конвертируются в MetaScalp wire-формат `BASEQUOTE`
-  (`BTCUSDT`) и обратно.
+- `Ticker` в MetaScalp API — строка из каталога конкретного `ConnectionId`.
+  Простые алиасы вида `BTC_USDT`/`BTCUSDT` допустимы только как compatibility
+  normalization для одиночного рынка. Они не являются полной идентичностью
+  инструмента.
+- Для стратегий, где одновременно нужны spot и futures/perp, идентичность
+  инструмента должна сохранять namespace: `ConnectionId`, exchange/account
+  context, market type и точное имя тикера из MetaScalp catalog. Нельзя
+  схлопывать spot и futures в один ключ `BTC_USDT`.
 
 ---
 

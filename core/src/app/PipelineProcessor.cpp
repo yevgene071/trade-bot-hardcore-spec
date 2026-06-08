@@ -35,7 +35,8 @@ constexpr const char* kStageStrategyToRisk = "strategy_to_risk_us";
 constexpr const char* kStageRiskToSubmit = "risk_to_submit_us";
 constexpr const char* kStageEndToEnd = "end_to_end_book_to_submit_us";
 
-// Normalize wire ticker to internal BASE_QUOTE format.
+// Compatibility normalization for simple symbols. Spot/futures identity must be
+// resolved by explicit connection/market mapping before entering the pipeline.
 static Ticker normalize_ticker(std::string_view raw) {
     return to_internal_ticker(raw);
 }

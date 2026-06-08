@@ -8,6 +8,9 @@
 
 namespace trade_bot {
 
+// Compatibility helper for simple MetaScalp symbols. This is not a complete
+// instrument identity model: spot/futures/perp disambiguation must be carried by
+// explicit connection/market mapping before using these string aliases in live.
 inline std::string to_metascalp_symbol(std::string_view ticker) {
     std::string out;
     out.reserve(ticker.size());
@@ -18,6 +21,8 @@ inline std::string to_metascalp_symbol(std::string_view ticker) {
     return out;
 }
 
+// Legacy/simple-symbol normalization used by current maps and tests. Do not use
+// it to infer that two instruments from different markets are the same thing.
 inline Ticker to_internal_ticker(std::string_view raw) {
     std::string normalized = to_metascalp_symbol(raw);
     for (const char* quote : {"USDT", "USDC", "BTC", "ETH", "BNB", "BUSD"}) {

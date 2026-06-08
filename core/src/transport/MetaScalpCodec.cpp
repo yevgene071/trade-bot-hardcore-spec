@@ -487,7 +487,7 @@ Notification MetaScalpCodec::parse_notification(const nlohmann::json& j) {
     }
 
     std::string ticker_raw = get_val<std::string>(j, fields::kTicker, "");
-    // Normalize ticker (e.g. BTCUSDT -> BTC_USDT) for consistency with internal universe
+    // Compatibility alias only; full identity includes connection/market.
     Ticker ticker = normalize_ticker(ticker_raw);
 
     return Notification {

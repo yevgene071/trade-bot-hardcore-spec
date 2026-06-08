@@ -19,8 +19,10 @@ ws_max_reconnect_delay_ms = 30000
 metascalp_max_rps = 20
 
 [trading]
-# Bot config uses internal BASE_QUOTE symbols. Transport converts them to
-# MetaScalp wire symbols (BTCUSDT) at the API boundary.
+# Current simple-symbol examples use underscore aliases that transport converts
+# to MetaScalp ticker names at the API boundary. Do not use this as a spot/perp
+# identity model: when both spot and futures are used, configure explicit
+# connection/market/ticker mapping from the MetaScalp ticker catalog.
 symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
 max_concurrent_orders = 5
 

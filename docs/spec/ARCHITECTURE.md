@@ -87,7 +87,10 @@
 
 Чистые структуры данных без зависимостей.
 
-- `Ticker`, `Side`, `OrderType`, `OrderStatus` — enum и value-types
+- `Ticker`, `Side`, `OrderType`, `OrderStatus` — enum и value-types.
+  Текущий `Ticker` остаётся строковым compatibility alias для простых символов;
+  production-идентичность инструмента для spot/futures должна включать
+  `ConnectionId`, market type и точное имя из MetaScalp ticker catalog.
 - `PriceLevel { price, size, side }`
 - `Trade { price, size, side, timestamp }`
 - `OrderBookSnapshot`, `OrderBookUpdate`
@@ -148,7 +151,10 @@
   - эвент-колбэки `on_trade(Trade)` для TapeAnalyzer
 
 - `LeaderTracker` — потоковый анализ корреляции и лага:
-  - список поводырей (например: основной инструмент — `BTCUSDT`, поводырь — тоже `BTCUSDT` спот, либо для альта — `BTCUSDT` фьючерс)
+  - список поводырей из явного mapping: например alt perp -> BTC perp,
+    либо futures instrument -> соответствующий spot instrument; если оба
+    называются `BTCUSDT` в разных подключениях/рынках, различение идёт через
+    connection/market namespace, а не через строковую нормализацию
   - для каждого: собственный `OrderBook` + `TradeStream`
   - **Online Pearson correlation** через Welford-расширение (Schubert &
     Gertz 2018, "Numerically Stable Parallel Computation of (Co-)Variance"):
