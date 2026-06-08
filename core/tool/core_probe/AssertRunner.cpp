@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+#ifndef GIT_SHA
+#define GIT_SHA "unknown"
+#endif
+
 namespace trade_bot::probe {
 
 namespace {
@@ -130,6 +134,7 @@ int AssertRunner::run(const CliOptions& opts) {
     // Initialize trace logger
     auto& logger = TraceLogger::instance();
     logger.init(silent_opts);
+    logger.log_meta("1.0", GIT_SHA, opts.config_path);
 
     // Build pipeline and run replay
     ProbePipeline pipeline(silent_opts);
@@ -145,11 +150,16 @@ int AssertRunner::run(const CliOptions& opts) {
         feed.add_listener(&pipeline.paper_executor());
     }
 
+    if (opts.limit_messages > 0) {
+        pipeline.set_limit_callback([&feed]() {
+            feed.stop();
+        });
+    }
+
     auto stats = feed.run();
 
-    for (size_t i = 0; i < stats.messages_dispatched; ++i) {
-        pipeline.summary().record_message();
-    }
+    // Messages are already counted by BookTraceListener::check_limit() —
+    // do NOT double-count via a manual loop over stats.messages_dispatched.
     for (size_t i = 0; i < stats.parse_errors; ++i) {
         pipeline.summary().record_parse_error();
     }

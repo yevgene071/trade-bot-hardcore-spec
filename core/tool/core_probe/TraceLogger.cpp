@@ -12,6 +12,9 @@ TraceLogger::~TraceLogger() {
 
 void TraceLogger::init(const CliOptions& opts) {
     opts_ = opts;
+
+    // Forward include_payload flag to TraceFormatter
+    TraceFormatter::set_include_payload(opts_.include_payload);
     
     // Configure stage filters
     for (const auto& s : opts_.stages) {

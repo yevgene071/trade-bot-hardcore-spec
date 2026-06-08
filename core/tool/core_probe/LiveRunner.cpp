@@ -28,8 +28,11 @@ namespace {
 struct LiveContext {
     net::io_context ioc;
     std::shared_ptr<BeastWsClient> ws;
-    std::unique_ptr<MarketDataFeed> feed;
+    // pipeline MUST be declared before feed: MarketDataFeed holds raw pointers
+    // to pipeline-owned listeners (added via add_listener). C++ destroys struct
+    // members in reverse declaration order, so pipeline outlives feed.
     std::unique_ptr<ProbePipeline> pipeline;
+    std::unique_ptr<MarketDataFeed> feed;
     std::unique_ptr<net::steady_timer> timer;
     std::unique_ptr<net::signal_set> signals;
     CliOptions opts;
@@ -140,20 +143,8 @@ int LiveRunner::run(const CliOptions& opts) {
         return 4;
     }
 
-    // Emit summary JSONL event
-    auto summary_json = ctx.pipeline->summary().to_json();
-    {
-        TraceEvent ev;
-        ev.ts_ns = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count());
-        ev.stage = "summary";
-        ev.severity = "info";
-        ev.payload = summary_json;
-        ev.message = "Live run complete";
-        logger.enqueue(std::move(ev));
-    }
-
+    // ProbePipeline::finalize() already emits a summary trace event — no need
+    // to emit a second one here.  The human-readable summary is printed below.
     if (!opts.machine && !opts.no_stdout) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         std::cout << "\n" << ctx.pipeline->summary().to_human_string() << "\n";

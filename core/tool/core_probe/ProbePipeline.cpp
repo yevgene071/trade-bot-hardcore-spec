@@ -49,6 +49,18 @@ RiskManager::Config load_risk_config() {
     rm.max_stop_bps              = Config::get_or<double> ("risk.max_stop_bps",             20.0);
     rm.min_rr_ratio              = Config::get_or<double> ("risk.min_rr_ratio",              1.0);
     rm.max_positions_per_ticker  = static_cast<int>(Config::get_or<int64_t>("risk.max_positions_per_ticker",  1));
+    rm.allow_hedge               = Config::get_or<bool>("risk.allow_hedge", false);
+    rm.warn_stop_bps             = Config::get_or<double>("risk.warn_stop_bps", 15.0);
+    rm.min_tp2_rr                = Config::get_or<double>("risk.min_tp2_rr", 2.0);
+    rm.margin_safety_ratio       = Config::get_or<double>("risk.margin_safety_ratio", 0.8);
+    rm.trades_window_min         = static_cast<int>(Config::get_or<int64_t>("risk.trades_window_min",          5));
+    rm.max_trades_per_window     = static_cast<int>(Config::get_or<int64_t>("risk.max_trades_per_window",      6));
+    rm.max_trade_history         = static_cast<size_t>(Config::get_or<int64_t>("risk.max_trade_history",    10000));
+    rm.loss_streak_window_min    = static_cast<int>(Config::get_or<int64_t>("risk.loss_streak_window_min",    15));
+    rm.max_consecutive_losses    = static_cast<int>(Config::get_or<int64_t>("risk.max_consecutive_losses",     3));
+    rm.loss_streak_cooloff_min   = static_cast<int>(Config::get_or<int64_t>("risk.loss_streak_cooloff_min",   10));
+    rm.max_loss_history          = static_cast<size_t>(Config::get_or<int64_t>("risk.max_loss_history",     10000));
+    rm.max_entry_slippage_bps    = Config::get_or<double>("risk.max_entry_slippage_bps", 10.0);
     rm.whitelist_tickers.push_back("SYNTH"); // Always whitelist synthetic ticker in probe runs
     rm.whitelist_tickers.push_back("BTC_USDT");
     rm.whitelist_tickers.push_back("ZEC_USDT");
@@ -122,7 +134,10 @@ public:
     void on_position_update(const PositionUpdate& u) override { target_->on_position_update(u); }
     void on_balance_update(const BalanceUpdate& u) override { target_->on_balance_update(u); }
     void on_finres_update(const FinresUpdate& u) override { target_->on_finres_update(u); }
-    void on_error(const std::string& m) override { target_->on_error(m); }
+    void on_error(const std::string& m) override {
+        summary_->record_parse_error();
+        target_->on_error(m);
+    }
 
 private:
     void check_limit() {
@@ -142,6 +157,13 @@ private:
         double spread = b->spread().value_or(0.0);
         double spread_bps = mid > 0.0 ? (spread / mid) * 10000.0 : 0.0;
 
+        // Compute book imbalance: ratio of bid depth to total depth at top 10 levels.
+        // 0.5 = balanced, >0.5 = bid-heavy, <0.5 = ask-heavy.
+        double bid_d = b->bid_depth(10);
+        double ask_d = b->ask_depth(10);
+        double total_d = bid_d + ask_d;
+        double imbalance = total_d > 0.0 ? bid_d / total_d : 0.5;
+
         uint64_t trace_id = current_trace_context().trace_id;
 
         inv_->check_book(trace_id, target_->book->ticker(), bid, ask, mid, spread_bps);
@@ -151,12 +173,15 @@ private:
         ev.trace_id = trace_id;
         ev.ticker = target_->book->ticker();
         ev.stage = "book";
-        ev.message = "mid=" + std::to_string(mid) + " spread_bps=" + std::to_string(spread_bps) + " bid=" + std::to_string(bid) + " ask=" + std::to_string(ask);
+        ev.message = "mid=" + std::to_string(mid) + " spread_bps=" + std::to_string(spread_bps)
+                   + " bid=" + std::to_string(bid) + " ask=" + std::to_string(ask)
+                   + " imb=" + std::to_string(imbalance);
         ev.payload = {
             {"mid", mid},
             {"spread_bps", spread_bps},
             {"best_bid", bid},
             {"best_ask", ask},
+            {"imbalance", imbalance},
             {"delta_levels", delta_levels}
         };
         TraceLogger::instance().enqueue(std::move(ev));
@@ -245,6 +270,7 @@ ProbePipeline::ProbePipeline(const CliOptions& opts)
         bounce_cfg.stop_buffer_bps  = Config::get_or<double>("strategies.bounce.stop_buffer_bps",  5.0);
         bounce_cfg.max_spread_bps   = Config::get_or<double>("strategies.bounce.max_spread_bps",   3.0);
         bounce_cfg.tp1_size_ratio   = Config::get_or<double>("strategies.bounce.tp1_size_ratio",   0.5);
+        bounce_cfg.min_approach_speed_bps_1s = Config::get_or<double>("strategies.bounce.min_approach_speed_bps_1s", 5.0);
         bounce_cfg.burst_contra_exit_sec = std::chrono::seconds(
             Config::get_or<int64_t>("strategies.bounce.burst_contra_exit_sec", 5));
         bounce_cfg.min_density_age_ms = std::chrono::milliseconds(
@@ -357,6 +383,20 @@ void ProbePipeline::setup_hooks() {
     // ── 1. Signal bus subscription ───────────────────────────────────────────
     bus_.subscribe([this](const Signal& sig) {
         auto kind_name = signal_kind_name(sig.kind);
+
+        // Filter by --detectors if specified (case-insensitive substring match)
+        if (!opts_.detectors.empty()) {
+            std::string lower_kind = kind_name;
+            std::transform(lower_kind.begin(), lower_kind.end(), lower_kind.begin(), ::tolower);
+            bool matched = false;
+            for (const auto& d : opts_.detectors) {
+                if (lower_kind.find(d) != std::string::npos) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) return;
+        }
         summary_.record_signal(kind_name);
         inv_checker_.check_signal(sig.trigger_trace_id, sig);
 
@@ -422,6 +462,7 @@ void ProbePipeline::setup_hooks() {
                 eev.stage    = "executor";
                 eev.message  = "submit (risk bypassed)";
                 eev.payload  = {
+                    {"action", "submit"},
                     {"strategy",    strat_name},
                     {"entry_price", plan.entry_price},
                     {"size_coin",   plan.size_coin},
@@ -478,6 +519,7 @@ void ProbePipeline::setup_hooks() {
                              + std::string(opts_.risk_observe && !decision.accepted
                                            ? " (risk_observe override)" : "");
                 eev.payload = {
+                    {"action", "submit"},
                     {"strategy",           strat_name},
                     {"entry_price",        adjusted_plan.entry_price},
                     {"size_coin",          adjusted_plan.size_coin},
@@ -491,6 +533,10 @@ void ProbePipeline::setup_hooks() {
     // ── 3. Strategy close callback (invalidation-driven exits) ───────────────
     engine_.set_close_callback([this](const Ticker& ticker, const FixedString<32>& reason) {
         if (opts_.no_executor) return;
+
+        std::string ticker_str(ticker.c_str());
+        inv_checker_.check_executor_close(0, ticker_str, closed_tickers_);
+        closed_tickers_.insert(ticker_str);
 
         paper_exec_->close_trade(ticker, reason);
 
@@ -584,6 +630,8 @@ void ProbePipeline::drive_tick(const Ticker& ticker, system_clock::time_point ts
             account_.equity_usd              = account_.starting_equity_usd + account_.realized_pnl_today_usd;
             account_.free_balance_usd        = account_.equity_usd;
 
+            inv_checker_.check_account(ct.plan.trace_id, account_.equity_usd);
+
             TraceEvent tev;
             tev.ts_ns    = ts_to_ns(ts);
             tev.trace_id = ct.plan.trace_id;
@@ -638,6 +686,8 @@ std::vector<IMarketDataListener*> ProbePipeline::get_listeners() {
 // ── finalize ─────────────────────────────────────────────────────────────────
 
 void ProbePipeline::finalize() {
+    if (finalized_) return;
+    finalized_ = true;
     // Final tick on executor to flush any pending fills at virtual clock's now()
     if (!opts_.no_executor) {
         auto now = clock_->now();
@@ -661,7 +711,11 @@ void ProbePipeline::finalize() {
         summary_.set_market_duration_sec(duration_sec);
     }
 
-    // Emit summary trace event using virtual clock time
+    // Populate open positions and unrealized PnL from PaperExecutor
+    if (!opts_.no_executor) {
+        summary_.set_open_at_end(paper_exec_->positions().size());
+        summary_.set_unrealized_pnl(paper_exec_->unrealized_pnl());
+    }
     TraceEvent sev;
     sev.ts_ns  = ts_to_ns(clock_->now());
     sev.stage  = "summary";

@@ -102,6 +102,7 @@ private:
 
     // Guard against double-close on the same ticker within one session
     std::set<std::string> closed_tickers_;
+    bool finalized_{false};
 
     std::chrono::system_clock::time_point start_time_;
     std::chrono::system_clock::time_point end_time_;

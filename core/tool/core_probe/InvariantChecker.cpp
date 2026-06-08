@@ -22,6 +22,10 @@ void InvariantChecker::emit(uint64_t trace_id,
                             const std::string& msg,
                             const nlohmann::json& details,
                             const std::string& hint) {
+    // violation_count_ is atomic for thread-safe reads from any thread.
+    // summary_->record_invariant() is called without explicit synchronization;
+    // in the current design all checks run on the single pipeline thread,
+    // so this is safe. If concurrent checking is ever introduced, add a mutex.
     violation_count_.fetch_add(1, std::memory_order_relaxed);
 
     if (summary_) {
@@ -75,24 +79,6 @@ void InvariantChecker::check_book(uint64_t trace_id,
 }
 
 // ── Feature checks ───────────────────────────────────────────────────────────
-
-namespace {
-
-/// Helper: check a single double field for NaN/Inf and emit if found.
-[[maybe_unused]] bool check_field(InvariantChecker& self,
-                 uint64_t trace_id,
-                 const std::string& ticker,
-                 const char* field_name,
-                 double value) {
-    // We only need to detect; emit is called externally via a lambda trick.
-    return std::isnan(value) || std::isinf(value);
-    (void)self;
-    (void)trace_id;
-    (void)ticker;
-    (void)field_name;
-}
-
-} // namespace
 
 void InvariantChecker::check_features(uint64_t trace_id,
                                       const std::string& ticker,

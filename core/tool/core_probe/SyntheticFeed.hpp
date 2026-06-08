@@ -39,6 +39,10 @@ public:
     void add_listener(Listener* l) { listeners_.push_back(l); }
     void set_tick_callback(TickCallback cb) { tick_cb_ = std::move(cb); }
 
+    /// Request stop of the feed. Dispatch methods check this flag and bail
+    /// early when set — used by --limit-messages to terminate mid-scenario.
+    void stop() { stop_requested_ = true; }
+
     struct RunStats {
         uint64_t messages_dispatched{0};
         uint64_t snapshots{0};
@@ -65,6 +69,7 @@ private:
     Ticker      ticker_;
     std::vector<Listener*> listeners_;
     TickCallback tick_cb_;
+    bool        stop_requested_{false};
 };
 
 } // namespace trade_bot::probe

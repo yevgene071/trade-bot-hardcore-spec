@@ -4,6 +4,7 @@
 - density_appears
 - density_eaten_then_breakout
 - leader_moves_alt_lags
+- risk_limit_rejection
 
 ## Exit Code Registry
 | Code | Meaning |
@@ -18,10 +19,11 @@
 | Component | Wired in probe | Invariants | Scenarios |
 |-----------|---------------|------------|-----------|
 | OrderBook | ✅ | ✅ | book_cross |
-| FeatureExtractor | ✅ | partial | — |
-| StrategyEngine | ✅ | — | density_*, tape_burst |
-| RiskManager | ✅ | ✅ | risk_limit_rejection |
-| PaperExecutor | ✅ | — | — |
+| FeatureExtractor | ✅ | ✅ (7 NaN/Inf fields) | — |
+| StrategyEngine | ✅ | ✅ (plan prices, stop/TP sides, trace) | density_*, tape_burst |
+| RiskManager | ✅ | ✅ (decision consistency) | risk_limit_rejection |
+| PaperExecutor | ✅ | ✅ (double-close guard) | — |
+| AccountState | ✅ | ✅ (negative equity check) | — |
 
 ## Session History
 

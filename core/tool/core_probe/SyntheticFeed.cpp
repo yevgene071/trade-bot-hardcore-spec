@@ -63,18 +63,21 @@ SyntheticFeed::RunStats SyntheticFeed::run(ProbePipeline* pipeline) {
 // ── Dispatch helpers ─────────────────────────────────────────────────────────
 
 void SyntheticFeed::dispatch_snapshot(const OrderBookSnapshot& s) {
+    if (stop_requested_) return;
     uint64_t ts_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(s.ts.time_since_epoch()).count());
     TraceContextScope scope(ts_ns, ts_ns);
     for (auto* l : listeners_) l->on_orderbook_snapshot(s);
 }
 
 void SyntheticFeed::dispatch_update(const OrderBookUpdate& u) {
+    if (stop_requested_) return;
     uint64_t ts_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(u.ts.time_since_epoch()).count());
     TraceContextScope scope(ts_ns, ts_ns);
     for (auto* l : listeners_) l->on_orderbook_update(u);
 }
 
 void SyntheticFeed::dispatch_trade(const Trade& t) {
+    if (stop_requested_) return;
     uint64_t ts_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(t.timestamp.time_since_epoch()).count());
     TraceContextScope scope(ts_ns, ts_ns);
     for (auto* l : listeners_) l->on_trade(ticker_, t);
@@ -105,7 +108,6 @@ void SyntheticFeed::run_density_appears(RunStats& stats) {
     }
     dispatch_snapshot(snap);
     ++stats.snapshots; ++stats.messages_dispatched;
-    notify_tick(snap.ts);
 
     // 2. A few harmless updates to warm up the detectors.
     for (int step = 1; step <= 20; ++step) {
@@ -116,7 +118,6 @@ void SyntheticFeed::run_density_appears(RunStats& stats) {
         u.changes.push_back(lvl(100.00, 5.0, Side::Buy));
         dispatch_update(u);
         ++stats.updates; ++stats.messages_dispatched;
-        notify_tick(u.ts);
     }
 
     // 3. Density appears: huge bid (300 lots) at best bid.
@@ -126,7 +127,6 @@ void SyntheticFeed::run_density_appears(RunStats& stats) {
     big.changes.push_back(lvl(100.00, 300.0, Side::Buy));
     dispatch_update(big);
     ++stats.updates; ++stats.messages_dispatched;
-    notify_tick(big.ts);
 
     // 4. Quiet ticks so the detector / strategy pipeline gets driven.
     for (int step = 22; step <= 40; ++step) {
@@ -151,7 +151,6 @@ void SyntheticFeed::run_density_eaten_then_breakout(RunStats& stats) {
     }
     dispatch_snapshot(snap);
     ++stats.snapshots; ++stats.messages_dispatched;
-    notify_tick(snap.ts);
 
     // 2. Density placed on ask (250 lots @ 100.01).
     OrderBookUpdate place;
@@ -160,7 +159,6 @@ void SyntheticFeed::run_density_eaten_then_breakout(RunStats& stats) {
     place.changes.push_back(lvl(100.01, 250.0, Side::Sell));
     dispatch_update(place);
     ++stats.updates; ++stats.messages_dispatched;
-    notify_tick(place.ts);
 
     // 3. Aggressive buy trades eating the density (5 lots at a time).
     int64_t t0 = 1'000'000'000LL;
@@ -181,7 +179,6 @@ void SyntheticFeed::run_density_eaten_then_breakout(RunStats& stats) {
         u.changes.push_back(lvl(100.01, remaining, Side::Sell));
         dispatch_update(u);
         ++stats.updates; ++stats.messages_dispatched;
-        notify_tick(u.ts);
     }
 
     // 4. Density gone — replaced with thin ask at 100.02 and a breakout trade.
@@ -192,7 +189,6 @@ void SyntheticFeed::run_density_eaten_then_breakout(RunStats& stats) {
     erase.changes.push_back(lvl(100.02, 5.0, Side::Sell));
     dispatch_update(erase);
     ++stats.updates; ++stats.messages_dispatched;
-    notify_tick(erase.ts);
 
     Trade breakout;
     breakout.price = 100.02;
@@ -201,7 +197,6 @@ void SyntheticFeed::run_density_eaten_then_breakout(RunStats& stats) {
     breakout.timestamp = ns_offset(t0 + 31 * 50'000'000LL);
     dispatch_trade(breakout);
     ++stats.trades; ++stats.messages_dispatched;
-    notify_tick(breakout.timestamp);
 
     // 5. Cooldown ticks.
     for (int step = 0; step < 20; ++step) {
@@ -226,7 +221,6 @@ void SyntheticFeed::run_leader_moves_alt_lags(RunStats& stats) {
     }
     dispatch_snapshot(snap);
     ++stats.snapshots; ++stats.messages_dispatched;
-    notify_tick(snap.ts);
 
     // Drift follower upward by small steps to simulate "lagging" behind a
     // leader that has already moved.  Each step: one update + one trade.
@@ -247,7 +241,6 @@ void SyntheticFeed::run_leader_moves_alt_lags(RunStats& stats) {
         t.timestamp = u.ts;
         dispatch_trade(t);
         ++stats.trades; ++stats.messages_dispatched;
-        notify_tick(u.ts);
     }
 }
 
@@ -265,7 +258,6 @@ void SyntheticFeed::run_risk_limit_rejection(RunStats& stats, ProbePipeline* pip
     }
     dispatch_snapshot(snap);
     ++stats.snapshots; ++stats.messages_dispatched;
-    notify_tick(snap.ts);
 
     // 2. Instantiate and register the mock strategy
     auto mock_strat = std::make_unique<MockRiskTestStrategy>(ticker_);
@@ -311,6 +303,7 @@ void SyntheticFeed::run_risk_limit_rejection(RunStats& stats, ProbePipeline* pip
         sig.price = 100.0;
         sig.trigger_trace_id = plan.trace_id;
         sig.timestamp = ns_offset(0);
+        sig.confidence = 1.0;
         sig.payload.touches = 1;
         sig.payload.speed_bps = 5.0;
         sig.payload.original_size = 10.0;

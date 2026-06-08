@@ -2,29 +2,31 @@
 #include <iomanip>
 #include <sstream>
 #include <chrono>
-#include <ctime>
 
 namespace trade_bot::probe {
+
+bool TraceFormatter::include_payload_ = true; // include by default
 
 std::string TraceFormatter::format_timestamp(uint64_t ts_ns) {
     if (ts_ns == 0) {
         return "00:00:00.000000";
     }
-    
-    std::chrono::nanoseconds dur(ts_ns);
-    std::chrono::time_point<std::chrono::system_clock> tp(
-        std::chrono::duration_cast<std::chrono::system_clock::duration>(dur)
-    );
-    
-    auto time = std::chrono::system_clock::to_time_t(tp);
-    std::tm tm_val;
-    localtime_r(&time, &tm_val);
 
+    // Use std::chrono arithmetic — avoid localtime_r, no C library dependency.
+    using namespace std::chrono;
+    auto dur = nanoseconds(ts_ns);
+
+    auto hh = duration_cast<hours>(dur) % 24;
+    auto mm = duration_cast<minutes>(dur) % 60;
+    auto ss = duration_cast<seconds>(dur) % 60;
     uint64_t micros = (ts_ns % 1'000'000'000) / 1000;
-    
+
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%06lu",
-                 tm_val.tm_hour, tm_val.tm_min, tm_val.tm_sec, micros);
+    std::snprintf(buf, sizeof(buf), "%02ld:%02ld:%02ld.%06lu",
+                  static_cast<long>(hh.count()),
+                  static_cast<long>(mm.count()),
+                  static_cast<long>(ss.count()),
+                  micros);
     return std::string(buf);
 }
 
@@ -72,18 +74,19 @@ std::string TraceFormatter::to_machine_string(const TraceEvent& ev) {
     j["trace_id"] = ev.trace_id;
     if (!ev.ticker.empty()) j["ticker"] = ev.ticker;
     if (ev.severity != "info") j["severity"] = ev.severity;
-    
-    // Merge payload
-    if (ev.payload.is_object()) {
+
+    // Include message (needed for stages that only have message, not payload)
+    if (!ev.message.empty() && !j.contains("message")) {
+        j["message"] = ev.message;
+    }
+
+    // Merge payload only if include_payload_ is enabled
+    if (include_payload_ && ev.payload.is_object()) {
         for (auto it = ev.payload.begin(); it != ev.payload.end(); ++it) {
             j[it.key()] = it.value();
         }
     }
-    
-    if (!ev.message.empty() && !j.contains("message")) {
-        j["message"] = ev.message;
-    }
-    
+
     return j.dump();
 }
 

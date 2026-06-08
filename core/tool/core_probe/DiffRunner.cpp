@@ -24,11 +24,12 @@ using EventKey = std::tuple<uint64_t, std::string, std::string>;
 const std::map<std::string, std::vector<std::string>>& whitelisted_fields() {
     static const std::map<std::string, std::vector<std::string>> fields = {
         {"book",     {"mid", "spread_bps", "imbalance"}},
-        {"features", {"mid", "spread_bps", "imbalance", "volatility_1min_bps", "leader_correlation"}},
-        {"signal",   {"kind", "price", "confidence", "side"}},
+        {"trades",   {"price", "size", "side"}},
+        {"features", {"mid", "spread_bps", "imbalance", "volatility_bps", "leader_correlation"}},
+        {"signal",   {"kind", "price", "confidence", "side", "size_usd"}},
         {"strategy", {"strategy", "side", "entry_price", "stop_price", "tp1_price"}},
         {"risk",     {"accepted", "reason"}},
-        {"executor", {"entry_price", "exit_price", "size_filled", "pnl_usd"}},
+        {"executor", {"action", "entry_price", "exit_price", "size_filled", "pnl_usd"}},
         {"account",  {"equity_usd", "realized_pnl_usd"}},
     };
     return fields;
@@ -49,8 +50,8 @@ struct DiffEntry {
     std::string right_val;
 };
 
-std::map<EventKey, json> load_jsonl(const std::string& path, size_t& count) {
-    std::map<EventKey, json> index;
+std::map<EventKey, std::vector<json>> load_jsonl(const std::string& path, size_t& count) {
+    std::map<EventKey, std::vector<json>> index;
     std::ifstream file(path);
     if (!file.is_open()) return index;
 
@@ -66,7 +67,7 @@ std::map<EventKey, json> load_jsonl(const std::string& path, size_t& count) {
             uint64_t trace_id = j.value("trace_id", uint64_t(0));
             std::string ticker = j.value("ticker", "");
             EventKey key{trace_id, stage, ticker};
-            index[key] = std::move(j);
+            index[key].push_back(std::move(j));
             ++count;
         } catch (...) {
             // Skip malformed lines
@@ -109,24 +110,35 @@ int DiffRunner::run(const CliOptions& opts) {
         auto rit = right_index.find(key);
 
         if (lit == left_index.end()) {
-            ++extra_right;
+            extra_right += (rit != right_index.end() ? rit->second.size() : 0);
             continue;
         }
         if (rit == right_index.end()) {
-            ++extra_left;
+            extra_left += lit->second.size();
             continue;
         }
 
-        // Compare whitelisted fields
+        // Compare whitelisted fields — compare pairwise within the event vectors.
+        // If vector sizes differ, flag the size mismatch and compare up to min size.
         const auto& [trace_id, stage, ticker] = key;
         auto wit = whitelisted_fields().find(stage);
         if (wit == whitelisted_fields().end()) continue;
 
-        for (const auto& field : wit->second) {
-            auto lval = lit->second.value(field, json());
-            auto rval = rit->second.value(field, json());
-            if (!values_equal(lval, rval)) {
-                diffs.push_back({key, field, lval.dump(), rval.dump()});
+        const auto& left_vec = lit->second;
+        const auto& right_vec = rit->second;
+        size_t n = std::min(left_vec.size(), right_vec.size());
+
+        if (left_vec.size() != right_vec.size()) {
+            diffs.push_back({key, "_count", std::to_string(left_vec.size()), std::to_string(right_vec.size())});
+        }
+
+        for (size_t ei = 0; ei < n; ++ei) {
+            for (const auto& field : wit->second) {
+                auto lval = left_vec[ei].value(field, json());
+                auto rval = right_vec[ei].value(field, json());
+                if (!values_equal(lval, rval)) {
+                    diffs.push_back({key, field, lval.dump(), rval.dump()});
+                }
             }
         }
     }

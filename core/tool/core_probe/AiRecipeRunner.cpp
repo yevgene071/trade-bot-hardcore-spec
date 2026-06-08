@@ -6,6 +6,8 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <algorithm>
+#include <optional>
 
 namespace trade_bot::probe {
 
@@ -39,8 +41,122 @@ json top_n(const std::map<std::string, uint64_t>& m, size_t n) {
     return arr;
 }
 
+/// Case-insensitive substring match helper.
+static bool matches_filter(const std::string& value, const std::string& filter) {
+    if (filter.empty()) return true;
+    std::string lower_v = value;
+    std::string lower_f = filter;
+    std::transform(lower_v.begin(), lower_v.end(), lower_v.begin(), ::tolower);
+    std::transform(lower_f.begin(), lower_f.end(), lower_f.begin(), ::tolower);
+    return lower_v.find(lower_f) != std::string::npos;
+}
+
+/// Aggregated counters from a filtered second pass over JSONL.
+struct FilteredAggregates {
+    uint64_t plans_generated = 0;
+    uint64_t plans_accepted  = 0;
+    uint64_t plans_rejected  = 0;
+    std::map<std::string, uint64_t> rejections_by_reason;
+    /// Sample trace_ids per rejection reason (first N per reason).
+    std::map<std::string, std::vector<uint64_t>> sample_trace_ids;
+};
+
+/// Comprehensive second pass over JSONL with optional strategy/ticker filters.
+///
+/// Strategy filter: pre-scans strategy events for matching trace_ids, then
+/// filters risk events by those trace_ids (risk events lack a strategy field).
+/// Ticker filter: straightforward match on top-level "ticker" field.
+///
+/// When both filters are nullopt, returns empty aggregates (caller should use
+/// SummaryCollector for the fast path).
+FilteredAggregates filtered_second_pass(const std::string& jsonl_path,
+                                        const std::optional<std::string>& strategy_filter,
+                                        const std::optional<std::string>& ticker_filter,
+                                        size_t samples_per_reason) {
+    FilteredAggregates out;
+    if (jsonl_path.empty()) return out;
+    if (!strategy_filter && !ticker_filter) return out; // fast path: use SummaryCollector
+
+    // ── Pre-pass: collect trace_ids from strategy events matching strategy_filter ──
+    std::set<uint64_t> matched_trace_ids;
+    if (strategy_filter) {
+        std::ifstream pre_in(jsonl_path);
+        if (!pre_in) return out;
+        std::string line;
+        while (std::getline(pre_in, line)) {
+            if (line.empty()) continue;
+            try {
+                auto j = json::parse(line);
+                if (!j.is_object()) continue;
+                if (j.value("stage", "") != "strategy") continue;
+                if (ticker_filter && !matches_filter(j.value("ticker", ""), *ticker_filter)) continue;
+                // Payload fields are merged at top level by to_machine_string() —
+                // no nested "payload" key exists in JSONL.
+                std::string strat_name = j.value("strategy", "");
+                if (matches_filter(strat_name, *strategy_filter)) {
+                    matched_trace_ids.insert(j.value("trace_id", uint64_t{0}));
+                }
+            } catch (...) { /* skip malformed */ }
+        }
+        if (matched_trace_ids.empty()) return out; // no matches → all zeros
+    }
+
+    // ── Main pass: accumulate strategy + risk events ──
+    std::ifstream in(jsonl_path);
+    if (!in) return out;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        try {
+            auto j = json::parse(line);
+            if (!j.is_object()) continue;
+
+            std::string stage = j.value("stage", "");
+            if (stage != "strategy" && stage != "risk") continue;
+
+            // Ticker filter
+            if (ticker_filter && !matches_filter(j.value("ticker", ""), *ticker_filter)) continue;
+
+            // Strategy filter for risk events: cross-reference via trace_id
+            if (strategy_filter && stage == "risk") {
+                if (!matched_trace_ids.count(j.value("trace_id", uint64_t{0}))) continue;
+            }
+
+            if (stage == "strategy") {
+                // Also filter strategy events by strategy name when filter is active.
+                // (Risk events are filtered via matched_trace_ids above.)
+                if (strategy_filter) {
+                    // Payload fields merged at top level by to_machine_string().
+                    std::string strat_name = j.value("strategy", "");
+                    if (!matches_filter(strat_name, *strategy_filter)) continue;
+                }
+                ++out.plans_generated;
+            } else if (stage == "risk") {
+                bool accepted = j.value("accepted", false);
+                if (accepted) {
+                    ++out.plans_accepted;
+                } else {
+                    ++out.plans_rejected;
+                    std::string reason = j.value("reason", "");
+                    if (!reason.empty()) {
+                        ++out.rejections_by_reason[reason];
+                        auto& bucket = out.sample_trace_ids[reason];
+                        if (bucket.size() < samples_per_reason) {
+                            bucket.push_back(j.value("trace_id", uint64_t{0}));
+                        }
+                    }
+                }
+            }
+        } catch (...) {
+            // ignore malformed lines — non-fatal in second-pass analysis
+        }
+    }
+    return out;
+}
+
 /// Second-pass over the trace JSONL to collect sample trace_ids per
 /// rejection reason.  Deterministic: keeps the first N per reason.
+/// When strategy/ticker filters are provided, only matching events are included.
 std::map<std::string, std::vector<uint64_t>>
 sample_trace_ids_per_reason(const std::string& jsonl_path,
                             const std::set<std::string>& wanted_reasons,
@@ -78,52 +194,86 @@ json AiRecipeRunner::recipe_why_no_trade(const CliOptions& opts,
                                          const SummaryCollector& s) {
     json out;
     out["recipe"] = "why-no-trade";
+
+    // Extract filter args
+    std::optional<std::string> strategy_filter;
+    std::optional<std::string> ticker_filter;
     auto strat_it = opts.ai_recipe_args.find("strategy");
-    if (strat_it != opts.ai_recipe_args.end()) {
+    if (strat_it != opts.ai_recipe_args.end() && !strat_it->second.empty()) {
+        strategy_filter = strat_it->second;
         out["strategy_filter"] = strat_it->second;
     }
     auto tkr_it = opts.ai_recipe_args.find("ticker");
-    if (tkr_it != opts.ai_recipe_args.end()) {
+    if (tkr_it != opts.ai_recipe_args.end() && !tkr_it->second.empty()) {
+        ticker_filter = tkr_it->second;
         out["ticker_filter"] = tkr_it->second;
     }
 
-    out["plans_generated"] = s.total_plans();
-    out["plans_accepted"]  = s.plans_accepted();
-    out["plans_rejected"]  = s.plans_rejected();
-
-    // Top reject reasons + sample trace_ids from JSONL (best-effort)
-    out["top_reject_reasons"] = top_n(s.rejections_by_reason(), 5);
-
-    std::set<std::string> wanted;
-    for (const auto& [name, _] : s.rejections_by_reason()) wanted.insert(name);
-    auto samples = sample_trace_ids_per_reason(opts.jsonl_out, wanted, 3);
-    if (!samples.empty()) {
-        json sj = json::object();
-        for (const auto& [r, ids] : samples) sj[r] = ids;
-        out["sample_trace_ids"] = sj;
-    }
-
-    // Hint
-    std::string hint;
-    if (s.total_plans() == 0) {
-        hint = "No plans were generated. Check signals: ";
-        if (s.total_signals() == 0) {
-            hint += "no signals fired either — check detectors and input data.";
-        } else {
-            hint += "signals fire but no strategy reacts. Review --strategies "
-                    "filter and per-strategy preconditions.";
+    if (strategy_filter || ticker_filter) {
+        // ── Filtered path: second pass over JSONL ──
+        auto agg = filtered_second_pass(opts.jsonl_out, strategy_filter, ticker_filter, 3);
+        out["plans_generated"] = agg.plans_generated;
+        out["plans_accepted"]  = agg.plans_accepted;
+        out["plans_rejected"]  = agg.plans_rejected;
+        out["top_reject_reasons"] = top_n(agg.rejections_by_reason, 5);
+        if (!agg.sample_trace_ids.empty()) {
+            json sj = json::object();
+            for (const auto& [r, ids] : agg.sample_trace_ids) sj[r] = ids;
+            out["sample_trace_ids"] = sj;
         }
-    } else if (s.plans_accepted() == 0) {
-        hint = "Plans generated but all rejected by Risk. Top reason: ";
-        auto top = s.rejections_by_reason();
-        std::pair<std::string, uint64_t> best{"", 0};
-        for (const auto& [k, v] : top) if (v > best.second) best = {k, v};
-        hint += (best.first.empty() ? "(unknown)" : best.first) + ".";
+        // Hint
+        std::string hint;
+        if (agg.plans_generated == 0) {
+            hint = "No plans matched the filter(s). Check --ai-recipe-arg "
+                   "strategy/ticker values against actual trace data.";
+        } else if (agg.plans_accepted == 0 && agg.plans_rejected > 0) {
+            hint = "All filtered plans were rejected by Risk. Top reason: ";
+            std::pair<std::string, uint64_t> best{"", 0};
+            for (const auto& [k, v] : agg.rejections_by_reason) if (v > best.second) best = {k, v};
+            hint += (best.first.empty() ? "(unknown)" : best.first) + ".";
+        } else {
+            hint = "Some filtered plans accepted. If volume looks low, check --risk-observe.";
+        }
+        out["hint"] = hint;
     } else {
-        hint = "Some plans accepted. If volume looks low, check --risk-observe "
-               "to compare with-vs-without risk gating.";
+        // ── Fast path: use in-memory SummaryCollector ──
+        out["plans_generated"] = s.total_plans();
+        out["plans_accepted"]  = s.plans_accepted();
+        out["plans_rejected"]  = s.plans_rejected();
+
+        out["top_reject_reasons"] = top_n(s.rejections_by_reason(), 5);
+
+        std::set<std::string> wanted;
+        for (const auto& [name, _] : s.rejections_by_reason()) wanted.insert(name);
+        auto samples = sample_trace_ids_per_reason(opts.jsonl_out, wanted, 3);
+        if (!samples.empty()) {
+            json sj = json::object();
+            for (const auto& [r, ids] : samples) sj[r] = ids;
+            out["sample_trace_ids"] = sj;
+        }
+
+        // Hint
+        std::string hint;
+        if (s.total_plans() == 0) {
+            hint = "No plans were generated. Check signals: ";
+            if (s.total_signals() == 0) {
+                hint += "no signals fired either — check detectors and input data.";
+            } else {
+                hint += "signals fire but no strategy reacts. Review --strategies "
+                        "filter and per-strategy preconditions.";
+            }
+        } else if (s.plans_accepted() == 0) {
+            hint = "Plans generated but all rejected by Risk. Top reason: ";
+            auto top = s.rejections_by_reason();
+            std::pair<std::string, uint64_t> best{"", 0};
+            for (const auto& [k, v] : top) if (v > best.second) best = {k, v};
+            hint += (best.first.empty() ? "(unknown)" : best.first) + ".";
+        } else {
+            hint = "Some plans accepted. If volume looks low, check --risk-observe "
+                   "to compare with-vs-without risk gating.";
+        }
+        out["hint"] = hint;
     }
-    out["hint"] = hint;
     return out;
 }
 
@@ -131,17 +281,46 @@ json AiRecipeRunner::recipe_why_rejected(const CliOptions& opts,
                                          const SummaryCollector& s) {
     json out;
     out["recipe"] = "why-rejected";
-    out["plans_rejected"] = s.plans_rejected();
-    out["rejections_by_reason"] = s.rejections_by_reason();
-    out["top_reject_reasons"] = top_n(s.rejections_by_reason(), 10);
 
-    std::set<std::string> wanted;
-    for (const auto& [name, _] : s.rejections_by_reason()) wanted.insert(name);
-    auto samples = sample_trace_ids_per_reason(opts.jsonl_out, wanted, 5);
-    if (!samples.empty()) {
-        json sj = json::object();
-        for (const auto& [r, ids] : samples) sj[r] = ids;
-        out["sample_trace_ids"] = sj;
+    // Extract filter args
+    std::optional<std::string> strategy_filter;
+    std::optional<std::string> ticker_filter;
+    auto strat_it = opts.ai_recipe_args.find("strategy");
+    if (strat_it != opts.ai_recipe_args.end() && !strat_it->second.empty()) {
+        strategy_filter = strat_it->second;
+        out["strategy_filter"] = strat_it->second;
+    }
+    auto tkr_it = opts.ai_recipe_args.find("ticker");
+    if (tkr_it != opts.ai_recipe_args.end() && !tkr_it->second.empty()) {
+        ticker_filter = tkr_it->second;
+        out["ticker_filter"] = tkr_it->second;
+    }
+
+    if (strategy_filter || ticker_filter) {
+        // ── Filtered path: second pass over JSONL ──
+        auto agg = filtered_second_pass(opts.jsonl_out, strategy_filter, ticker_filter, 5);
+        out["plans_rejected"] = agg.plans_rejected;
+        out["rejections_by_reason"] = agg.rejections_by_reason;
+        out["top_reject_reasons"] = top_n(agg.rejections_by_reason, 10);
+        if (!agg.sample_trace_ids.empty()) {
+            json sj = json::object();
+            for (const auto& [r, ids] : agg.sample_trace_ids) sj[r] = ids;
+            out["sample_trace_ids"] = sj;
+        }
+    } else {
+        // ── Fast path: use in-memory SummaryCollector ──
+        out["plans_rejected"] = s.plans_rejected();
+        out["rejections_by_reason"] = s.rejections_by_reason();
+        out["top_reject_reasons"] = top_n(s.rejections_by_reason(), 10);
+
+        std::set<std::string> wanted;
+        for (const auto& [name, _] : s.rejections_by_reason()) wanted.insert(name);
+        auto samples = sample_trace_ids_per_reason(opts.jsonl_out, wanted, 5);
+        if (!samples.empty()) {
+            json sj = json::object();
+            for (const auto& [r, ids] : samples) sj[r] = ids;
+            out["sample_trace_ids"] = sj;
+        }
     }
     return out;
 }

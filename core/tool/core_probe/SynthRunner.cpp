@@ -59,6 +59,12 @@ int SynthRunner::run(const CliOptions& opts) {
         feed.add_listener(&pipeline.paper_executor());
     }
 
+    if (eff.limit_messages > 0) {
+        pipeline.set_limit_callback([&feed]() {
+            feed.stop();
+        });
+    }
+
     // Drive a pipeline tick after every dispatched event so detectors /
     // strategies see consistent state.
     feed.set_tick_callback([&pipeline](const Ticker& tkr,
@@ -73,34 +79,20 @@ int SynthRunner::run(const CliOptions& opts) {
     }
 
     auto wall_start = std::chrono::steady_clock::now();
-    auto stats = feed.run(&pipeline);
+    [[maybe_unused]] auto stats = feed.run(&pipeline);
     auto wall_end = std::chrono::steady_clock::now();
 
     double wall_sec = std::chrono::duration<double>(wall_end - wall_start).count();
     pipeline.summary().set_wall_duration_sec(wall_sec);
-    for (uint64_t i = 0; i < stats.messages_dispatched; ++i) {
-        pipeline.summary().record_message();
-    }
+    // Messages are already counted by BookTraceListener::check_limit() —
+    // do NOT double-count via a manual loop over stats.messages_dispatched.
 
+    // Finalize pipeline (drain executor, compute final stats, emit summary event)
     pipeline.finalize();
 
     if (pipeline.invariants().is_strict() && pipeline.invariants().had_violation()) {
         logger.shutdown();
         return 4;
-    }
-
-    // Emit summary JSONL event
-    auto summary_json = pipeline.summary().to_json();
-    {
-        TraceEvent ev;
-        ev.ts_ns = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count());
-        ev.stage = "summary";
-        ev.severity = "info";
-        ev.payload = summary_json;
-        ev.message = "Synth run complete";
-        logger.enqueue(std::move(ev));
     }
 
     if (!eff.machine && !eff.no_stdout) {

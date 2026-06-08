@@ -112,7 +112,8 @@ std::string fmt_duration(double sec) {
     int s = total % 60;
     std::ostringstream ss;
     if (h > 0) {
-        ss << h << "h " << std::setfill('0') << std::setw(2) << m << "m";
+        ss << h << "h " << std::setfill('0') << std::setw(2) << m << "m "
+           << std::setfill('0') << std::setw(2) << s << "s";
     } else {
         ss << m << "m " << std::setfill('0') << std::setw(2) << s << "s";
     }
