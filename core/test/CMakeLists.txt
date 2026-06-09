@@ -412,6 +412,14 @@ target_link_libraries(flushreversal_strategy_test PRIVATE
     GTest::gtest GTest::gtest_main spdlog::spdlog nlohmann_json::nlohmann_json boost::boost absl::btree absl::flat_hash_map absl::hash)
 add_test(NAME flushreversal_strategy COMMAND flushreversal_strategy_test)
 
+# ── strategy_status_consistency ────────────────────────
+add_executable(strategy_status_consistency_test
+    unit/strategy_status_consistency_test.cpp
+)
+target_link_libraries(strategy_status_consistency_test PRIVATE
+    obj_config GTest::gtest GTest::gtest_main tomlplusplus::tomlplusplus)
+add_test(NAME strategy_status_consistency COMMAND strategy_status_consistency_test)
+
 # ── signal_level_bridge ────────────────────────────────
 add_executable(signal_level_bridge_test
     unit/signal_level_bridge_test.cpp

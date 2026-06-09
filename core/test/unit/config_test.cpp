@@ -26,6 +26,17 @@ class ConfigTest : public ::testing::Test {
           << "max_per_trade_risk_pct = 0.5\n"
           << "max_concurrent_positions = 3\n"
           << "max_leverage = 5.0\n"
+          << "[strategies.leaderlag]\n"
+          << "min_correlation = 0.6\n"
+          << "max_spread_bps = 3.0\n"
+          << "lag_max_age_ms = 3000\n"
+          << "max_our_change_2s_pct = 0.1\n"
+          << "density_on_path_search_bps = 25.0\n"
+          << "[strategies.flushreversal]\n"
+          << "allow_live = false\n"
+          << "live_gates_implemented = false\n"
+          << "require_liquidation_flush = true\n"
+          << "require_open_interest_confirmation = true\n"
           << "[section]\n"
           << "key = \"value\"\n"
           << "num = 42\n"
@@ -97,4 +108,19 @@ TEST_F(ConfigTest, GetDoubleVector) {
     EXPECT_DOUBLE_EQ(values[0], 0.35);
     EXPECT_DOUBLE_EQ(values[1], 0.20);
     EXPECT_DOUBLE_EQ(values[2], 0.12);
+}
+
+TEST_F(ConfigTest, StrategyStatusGateDefaults) {
+    Config::load("test_config.toml");
+
+    EXPECT_DOUBLE_EQ(Config::get<double>("strategies.leaderlag.min_correlation"), 0.6);
+    EXPECT_DOUBLE_EQ(Config::get<double>("strategies.leaderlag.max_spread_bps"), 3.0);
+    EXPECT_EQ(Config::get<int64_t>("strategies.leaderlag.lag_max_age_ms"), 3000);
+    EXPECT_DOUBLE_EQ(Config::get<double>("strategies.leaderlag.max_our_change_2s_pct"), 0.1);
+    EXPECT_DOUBLE_EQ(Config::get<double>("strategies.leaderlag.density_on_path_search_bps"), 25.0);
+
+    EXPECT_FALSE(Config::get<bool>("strategies.flushreversal.allow_live"));
+    EXPECT_FALSE(Config::get<bool>("strategies.flushreversal.live_gates_implemented"));
+    EXPECT_TRUE(Config::get<bool>("strategies.flushreversal.require_liquidation_flush"));
+    EXPECT_TRUE(Config::get<bool>("strategies.flushreversal.require_open_interest_confirmation"));
 }

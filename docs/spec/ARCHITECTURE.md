@@ -532,7 +532,7 @@ min_eating_events_per_hour = 1            # DensityEating (см. SIGNAL_DETECTIO
 min_volatility_1min_bps = 8               # без волатильности пробои не работают
 affinity_threshold = 0.55
 
-[universe.affinity.leaderlag]             # LeaderLag (STRATEGIES § 3)
+[universe.affinity.leaderlag]             # LeaderLag (STRATEGIES § 3), status=gated
 require_leader = "BTC_USDT"
 min_correlation_60s = 0.6                 # rolling корреляция с BTC
 min_leader_lag_events_per_hour = 2
@@ -541,14 +541,14 @@ min_volume_24h_usd = 50_000_000           # альты с меньшим обо�
 exclude_self_for_leader = true            # сам BTC_USDT не считается кандидатом для LeaderLag
 affinity_threshold = 0.5
 
-[universe.affinity.flushreversal]         # FlushReversal paper prototype; live после T5
+[universe.affinity.flushreversal]         # FlushReversal status=gated paper/offline; live phase-later
 min_flush_events_per_day = 3              # хотя бы 3 прострела/день в истории
 min_volume_24h_usd = 50_000_000
 max_avg_spread_bps = 6
 affinity_threshold = 0.4
 
 [strategies.flushreversal]
-allow_live = false                        # true только после T5 liquidation/open-interest gate
+allow_live = false                        # safe default; true alone is not live-grade without T5 liquidation/OI/history gates
 min_flush_count = 2
 flush_window_sec = 120
 ```

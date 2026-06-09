@@ -545,6 +545,29 @@ higher-timeframe visibility payload (`POT-03`), and missing shakeout/retest dete
 
 ## 3. LeaderLag — Вход по отставанию от поводыря
 
+### 3.0. Status / traceability block
+
+- **Status:** `gated`.
+- **Source basis:** `неэфективности.docx` описывает нормальную корреляцию
+  фьюч/спот и инструмент/поводырь, а также сделку на раскорреляции, когда
+  инструмент должен догнать справедливое движение после снятия препятствия.
+  См. также `STRATEGY_SOURCE_DIGEST.md § 4` и
+  `reports/FN-004-leaderlag-flushreversal-source-audit.md`.
+- **Non-source/project assumptions:** `LeaderMove`, online correlation,
+  Kalman/argmax lag, and `DensityDetected` path blocking are project
+  formalizations. They are allowed only as evidence proxies, not as actor
+  identity or undocumented MetaScalp fields.
+- **Required offline tests:** happy path, low-correlation rejection, stale
+  `LeaderMove` rejection, density-on-path rejection, direction/sign handling,
+  and post-entry correlation/leader reversal exits.
+- **Live-only gates:** fresh synchronized leader/follower feeds, explicit
+  instrument mapping, no stale source, news blackout, and no spot/futures string
+  aliasing. Spot/futures dislocation and density/robot-release variants are
+  `phase-later` until explicit `(ConnectionId, MarketType, exact Ticker)` mapping
+  and multi-instrument replay fixtures exist.
+- **Allowed execution modes:** `paper`, `offline replay`, and `live gated` only
+  when the same correlation/staleness/mapping gates pass.
+
 ### 3.1. Идея
 
 Поводырь (BTC для альта) сдвинулся существенно, а наш инструмент ещё не
@@ -613,7 +636,30 @@ higher-timeframe visibility payload (`POT-03`), and missing shakeout/retest dete
 
 ---
 
-## 4. FlushReversal — Прострел и возврат (paper prototype; live после T5)
+## 4. FlushReversal — Прострел и возврат (`gated` paper/offline; live `phase-later`)
+
+### 4.0. Status / traceability block
+
+- **Status:** `gated` for paper/offline replay; live-grade variant is
+  `phase-later`.
+- **Source basis:** `неэфективности.docx` requires repeated flushes, not the
+  first print, and separately describes liquidation flushes after 10–15% impulse
+  moves. See `LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md § 4.4` and
+  `reports/FN-004-leaderlag-flushreversal-source-audit.md`.
+- **Non-source/project assumptions:** `TapeFlush`, `LevelBreak`, volume fade,
+  and early price-return thresholds are project proxies for the paper/offline
+  prototype. Plain `TapeFlush` is not a liquidation confirmation.
+- **Required offline tests:** single `TapeFlush` rejection, repeated `TapeFlush`
+  plan generation in paper mode, continuation `TapeBurst`/`DensityEating`
+  rejection, and config/spec assertions that `allow_live=false` by default.
+- **Live-only gates:** `LiquidationFlush`, open-interest/history confirmation,
+  fresh external feed state, and automated tests proving plain `TapeFlush` cannot
+  satisfy live mode. `strategies.flushreversal.allow_live=true` alone is not a
+  live-grade approval; runtime rejects live `FlushReversal` plans unconditionally
+  until T5 liquidation/OI/history evidence checks exist.
+- **Allowed execution modes:** `paper` and `offline replay` for the current
+  prototype; `live gated` only after T5 liquidation/open-interest/history gates
+  are implemented and tested.
 
 ### 4.1. Идея
 
@@ -661,7 +707,9 @@ higher-timeframe visibility payload (`POT-03`), and missing shakeout/retest dete
 Для production/live требуется внешний фид ликвидаций Binance
 (ARCHITECTURE § 2.12), `LiquidationDetector`, open-interest/история
 прострелов и отдельный live gate. До этого стратегия допускается только в
-paper/backtest или при явном `allow_live=true` после ручного подтверждения.
+paper/backtest/offline replay. `allow_live=true` сам по себе не является
+подтверждением live-grade статуса: live допускается только после реализации и
+автотестов T5-гейтов `LiquidationFlush` + open-interest/history.
 
 ---
 
@@ -863,8 +911,8 @@ TradePlan с более высоким приоритетом прошедший
 | Отскок от уровня/плотности/завала | `BounceFromDensity` | Core | Улучшить детект завала плотностей и ложного пробоя |
 | Пробой через разъедание плотности | `BreakoutEatThrough` | Core | Выделить слабый/сильный пробой по факторам § 2.9 |
 | Продолжение движения после пропущенного пробоя | `ContinuationSupport` | Planned | Новый режим поверх `BreakoutEatThrough`: вход только от поддержки/робота/микропробоя, сниженный потенциал |
-| Поводырь и догон альта | `LeaderLag` | Core | Двунаправленный сигнал, явный шорт-сценарий |
-| Прострел и возврат | `FlushReversal` | Paper prototype / T5 live | Для live: история прострелов + liquidation feed + open interest |
+| Поводырь и догон альта | `LeaderLag` | `gated` | Fresh leader/follower feeds, correlation/staleness gates; spot/futures and density-release variants are `phase-later` |
+| Прострел и возврат | `FlushReversal` | `gated` paper/offline; live `phase-later` | Для live: история прострелов + liquidation feed + open interest; `allow_live=true` alone is insufficient |
 | Переставление плотности / реализация объёма | `LargeParticipantFollow` | Planned | Детектор перестановок 3-5 раз, timeout 30 сек после снятия |
 | Разжатая пружина | `SpringReleaseReversal` | Planned/Phase 5 | Переворот после завершения реализации объёма |
 | Раскорреляция спот/фьюч | `SpotFuturesDislocation` | Planned | Нужен spot feed или MetaScalp connection mapping spot↔futures |

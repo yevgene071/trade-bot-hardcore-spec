@@ -69,7 +69,9 @@
 
 ### Фаза 3. Strategy Engine (4 недели)
 Цель: три core-стратегии из `STRATEGIES.md` в режиме paper-trading плюс
-paper-прототип `FlushReversal` без live-допуска до T5.
+paper-прототип `FlushReversal` без live-допуска до T5. По FN-004 `LeaderLag`
+имеет статус `gated`, а `FlushReversal` — `gated` для paper/offline и
+`phase-later` для live.
 
 - **M3.1** — `TradePlan` + `StrategyContext` + `StrategyEngine` — инфраструктура стратегий (см. TASK_SPECS `T3-PLAN`)
 - **M3.2** — стратегия `BounceFromDensity` (`T3-BOUNCE`)
@@ -105,7 +107,7 @@ paper-прототип `FlushReversal` без live-допуска до T5.
 ### Фаза 5. Оптимизация и бэктест (continuous)
 - **M5.1** — бэктест-движок (`T5-BACKTEST`) на исторических дампах с той же логикой strategy engine
 - **M5.2** — параметризация стратегий (thresholds в конфиге) + grid search (`T5-GRID`) по историческим данным
-- **M5.3** — FlushReversal + LiquidationDetector (`T5-FLUSH`), метрики: win rate, profit factor, max DD, Sharpe, avg hold time
+- **M5.3** — FlushReversal + LiquidationDetector (`T5-FLUSH`): перевод live-варианта из `phase-later` в gated/production только после liquidation/open-interest/history gates и тестов; метрики: win rate, profit factor, max DD, Sharpe, avg hold time
 - **M5.4** — walk-forward validation (`T5-WALKFORWARD`)
 
 ---

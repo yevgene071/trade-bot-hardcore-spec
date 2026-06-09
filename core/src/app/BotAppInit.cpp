@@ -200,12 +200,13 @@ void BotApp::register_strategy_affinities_(std::shared_ptr<double> exchange_mult
     double flush_min_vol = get_flush_affinity("min_volume_24h_usd", 50000000.0);
     double flush_max_spread = get_flush_affinity("max_avg_spread_bps", 4.0);
     double flush_max_funding = get_flush_affinity("max_funding_rate_bps", 4.0);
-    const bool flush_live_enabled =
-        Config::get_or<bool>("strategies.flushreversal.allow_live", false);
     universe_.register_strategy("flushreversal", [this, flush_min_vol, flush_max_spread,
-                                                  flush_max_funding, flush_live_enabled,
+                                                  flush_max_funding,
                                                   exchange_mult](const Ticker& t) {
-        if (live_executor_ && !flush_live_enabled)
+        // FN-004: FlushReversal live remains phase-later. Do not admit it in
+        // live mode until real LiquidationFlush/OI/history evidence is wired;
+        // config flags are audit metadata and cannot unlock live trading today.
+        if (live_executor_)
             return false;
         auto stats = universe_.get_stats(t);
         if (!stats)
@@ -541,6 +542,15 @@ BotApp::StrategyConfigs BotApp::load_strategy_configs_() {
     c.breakout.min_follow_through_bps =
         Config::get_or<double>("strategies.breakout.min_follow_through_bps", 10.0);
 
+    c.leaderlag.min_correlation =
+        Config::get_or<double>("strategies.leaderlag.min_correlation", 0.6);
+    c.leaderlag.max_spread_bps = Config::get_or<double>("strategies.leaderlag.max_spread_bps", 3.0);
+    c.leaderlag.max_our_change_2s_pct =
+        Config::get_or<double>("strategies.leaderlag.max_our_change_2s_pct", 0.1);
+    c.leaderlag.density_on_path_search_bps =
+        Config::get_or<double>("strategies.leaderlag.density_on_path_search_bps", 25.0);
+    c.leaderlag.lag_max_age = std::chrono::milliseconds(
+        Config::get_or<int64_t>("strategies.leaderlag.lag_max_age_ms", 3000));
     c.leaderlag.stop_distance_bps =
         Config::get_or<double>("strategies.leaderlag.stop_distance_bps", 8.0);
     c.leaderlag.tp1_size_ratio = Config::get_or<double>("strategies.leaderlag.tp1_size_ratio", 0.6);
@@ -571,6 +581,17 @@ BotApp::StrategyConfigs BotApp::load_strategy_configs_() {
         return Config::has(modern) ? Config::get_or<int64_t>(modern, def)
                                    : Config::get_or<int64_t>(legacy, def);
     };
+    auto get_flush_bool = [&](std::string_view key, bool def) {
+        const auto modern = flush_key(key);
+        const auto legacy = legacy_flush_key(key);
+        return Config::has(modern) ? Config::get_or<bool>(modern, def)
+                                   : Config::get_or<bool>(legacy, def);
+    };
+    c.flushreversal.allow_live = get_flush_bool("allow_live", false);
+    c.flushreversal.live_gates_implemented = get_flush_bool("live_gates_implemented", false);
+    c.flushreversal.require_liquidation_flush = get_flush_bool("require_liquidation_flush", true);
+    c.flushreversal.require_open_interest_confirmation =
+        get_flush_bool("require_open_interest_confirmation", true);
     c.flushreversal.entry_offset_bps = get_flush_double("entry_offset_bps", 2.0);
     c.flushreversal.stop_buffer_bps = get_flush_double("stop_buffer_bps", 8.0);
     c.flushreversal.tp1_r = get_flush_double("tp1_r", 2.0);
@@ -634,6 +655,25 @@ void BotApp::init_feed_and_executor_(std::shared_ptr<BeastWsClient> ws, int port
 
 void BotApp::setup_strategy_engine_callbacks_() {
     strategy_engine_->set_on_plan([&](const TradePlan& plan) {
+        if (live_executor_ && plan.strategy_name == "FlushReversal") {
+            FlushReversal::Config live_gate_cfg;
+            live_gate_cfg.allow_live =
+                Config::get_or<bool>("strategies.flushreversal.allow_live", false);
+            live_gate_cfg.live_gates_implemented =
+                Config::get_or<bool>("strategies.flushreversal.live_gates_implemented", false);
+            live_gate_cfg.require_liquidation_flush =
+                Config::get_or<bool>("strategies.flushreversal.require_liquidation_flush", true);
+            live_gate_cfg.require_open_interest_confirmation = Config::get_or<bool>(
+                "strategies.flushreversal.require_open_interest_confirmation", true);
+            if (!FlushReversal::live_gate_satisfied(plan, live_gate_cfg)) {
+                LOG_ERROR("[Strategy] FlushReversal live plan rejected: status=phase-later "
+                          "allow_live={} live_gates_implemented={} (T5 LiquidationFlush/OI/history "
+                          "evidence is not implemented)",
+                          live_gate_cfg.allow_live, live_gate_cfg.live_gates_implemented);
+                strategy_engine_->reset_strategy_plan(plan.ticker, plan.strategy_name.c_str());
+                return;
+            }
+        }
         // FEAT-06: §0.7 affinity_stable_min — ticker must be in pool for ≥5 min before first trade
         static constexpr std::chrono::seconds kAffinityStableMin{300};
         if (!universe_.is_affinity_stable(plan.ticker, kAffinityStableMin, system_clock_->now())) {

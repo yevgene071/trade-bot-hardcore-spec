@@ -62,6 +62,9 @@ ROADMAP.md
 - `LARGE_PARTICIPANTS_AND_INEFFICIENCIES.md` уточняет ручные понятия крупных
   участников и неэффективностей перед тем, как они становятся detector/strategy
   requirements.
+- `reports/FN-004-leaderlag-flushreversal-source-audit.md` фиксирует итоговые
+  status labels для `LeaderLag` (`gated`) и `FlushReversal` (`gated` paper/offline,
+  live `phase-later`) и должен сверяться при изменении этих стратегий.
 - `STRATEGIES.md` строится поверх сигналов из `SIGNAL_DETECTION.md` и правил
   `RISK_MANAGEMENT.md`.
 - Всё, что касается MetaScalp endpoints, WS events и JSON fields, сверяется с

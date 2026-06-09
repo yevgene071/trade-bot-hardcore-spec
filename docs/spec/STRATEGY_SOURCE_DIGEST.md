@@ -138,6 +138,10 @@
 - раскорреляция спот/фьюч или инструмента с поводырём;
 - раздача: одинаковые рыночные объёмы вверх/вниз в диапазоне.
 
+FN-004 уточняет статус: repeated-flush логика `FlushReversal` является `gated`
+paper/offline prototype; liquidation/open-interest прострелы являются
+`phase-later` live gate и не могут считаться подтверждёнными plain `TapeFlush`.
+
 ---
 
 ## 3. Плотности и крупные участники
@@ -180,7 +184,10 @@
 
 Для live-бота это означает: спот/фьюч и поводырь нельзя считать фоном на глаз;
 нужны отдельные нормализованные feeds, correlation/lag metrics и запрет входа,
-если источник stale.
+если источник stale. По FN-004 текущий `LeaderLag` имеет статус `gated`:
+обычный leader/follower catch-up допускается только с correlation/staleness
+checks, а spot/futures-дислокация и сценарий «держали плотностью/роботом до
+release» остаются `phase-later` до явной instrument identity и multi-feed replay.
 
 ---
 

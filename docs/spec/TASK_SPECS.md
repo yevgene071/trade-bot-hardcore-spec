@@ -914,10 +914,18 @@ MetaScalp SDK v1.0.7 добавил two-step модель для массовы�
 
 **Depends on:** T3-PLAN
 
+**Status:** `gated` (FN-004). The source-backed leader/follower lag pattern may
+run only with explicit leader mapping, fresh streams, correlation/staleness
+checks, and density-on-path rejection. Spot/futures dislocation and
+robot/density-release variants are `phase-later` until instrument identity and
+multi-feed replay fixtures exist.
+
 **Deliverables:**
 - `src/strategy/LeaderLag.{hpp,cpp}` — реализация всех условий C* из `STRATEGIES.md § 3`
 - все пороги из секции конфига `[strategies.leaderlag]`
-- unit-тесты на happy path, каждую инвалидацию, каждый граничный случай
+- unit-тесты на happy path, low correlation, stale `LeaderMove`, density-on-path,
+  direction/sign handling, and post-entry leader/correlation invalidations
+- spec/status consistency test asserting `LeaderLag` remains explicitly `gated`
 
 ---
 
@@ -1204,8 +1212,20 @@ Backtest-движок использует тот же StrategyEngine с ReplayF
 
 ### T5-FLUSH: FlushReversal + LiquidationDetector
 
+**Status:** current `FlushReversal` is `gated` for paper/offline replay; live is
+`phase-later` until this ticket is complete (FN-004). `allow_live=true` alone is
+not sufficient for live-grade approval.
+
 Доведение FlushReversal до production-качества с liquidations/open-interest
 подтверждением из external feeds.
+
+**Acceptance additions:**
+- `LiquidationFlush` detector and open-interest/history confirmations are wired
+  into the strategy live gate.
+- Plain `TapeFlush` cannot satisfy live mode; automated tests prove live plans
+  require liquidation/OI evidence.
+- Config and docs keep `strategies.flushreversal.allow_live=false` as the safe
+  default until all live gates are implemented and tested.
 
 ---
 

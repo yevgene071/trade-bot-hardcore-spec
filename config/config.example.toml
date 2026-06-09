@@ -233,6 +233,11 @@ min_distance_from_best_bps = [8.0, 5.0, 3.0]
 support_search_range_bps = [40.0, 30.0, 20.0]
 
 [strategies.leaderlag]
+min_correlation = 0.6             # hard gate: no LeaderLag without rolling correlation
+max_spread_bps = 3.0              # hard gate: spread must stay tight
+lag_max_age_ms = 3000             # hard gate: stale LeaderMove is rejected
+max_our_change_2s_pct = 0.1       # hard gate: follower has not already caught up
+density_on_path_search_bps = 25.0 # hard gate: no large density blocking catch-up path
 tp1_size_ratio = 0.6
 no_progress_timeout_sec = 15
 stop_distance_bps = 8
@@ -244,7 +249,16 @@ leader_exit_reversal_bps = 5.0     # exit if leader reverses more than this
 swing_lookback_ticks = 30          # ticks for local extremum stop placement
 
 [strategies.flushreversal]
+# FN-004 status: gated paper/offline prototype. Safe default is non-live.
+# Plain TapeFlush/repeated TapeFlush does NOT satisfy live-grade liquidation gates.
+# Live requires T5 LiquidationFlush + open-interest/history confirmations and tests;
+# allow_live=true alone must not be treated as production approval. Until T5
+# implements these gates, live_gates_implemented remains false. FN-004 runtime
+# rejects live FlushReversal plans unconditionally until those evidence checks exist.
 allow_live = false
+live_gates_implemented = false
+require_liquidation_flush = true
+require_open_interest_confirmation = true
 tp1_size_ratio = 0.7
 tp1_r = 2.0
 no_progress_timeout_sec = 90

@@ -537,6 +537,13 @@ if last Nsec (=60) price stayed within consolidation_range_bps (=10) of the leve
 
 ## 6. LeaderSignal — сигнал от поводыря
 
+**Status:** `gated` input for `LeaderLag`. `LeaderMove` is source-backed as a
+formal proxy for manual leader/follower раскорреляция, but it is executable only
+when configured leader mapping, correlation, and staleness gates pass. It does
+not by itself prove spot/futures dislocation or robot/density release; those
+variants remain `phase-later` until explicit instrument identity and replay
+fixtures exist.
+
 **Поводырь** — коррелированный инструмент, который двигается первым. В крипте:
 BTC → альткоины; ETH → DeFi-альты; SPX/NDX → фондовые.
 
@@ -666,6 +673,11 @@ Precision важнее recall: лучше пропустить сигнал, ч�
 
 ## 9. LiquidationDetector — отдельный детектор (ExternalFeed-based)
 
+**Status:** `phase-later` live gate for `FlushReversal`. Current paper/offline
+`FlushReversal` may use repeated `TapeFlush`, but live-grade `FlushReversal`
+must require `LiquidationFlush` plus open-interest/history confirmation. Plain
+`TapeFlush` or `FlushNoLiq` must not satisfy live mode.
+
 Планируется в Фазе 5 вместе с FlushReversal. Использует внешний фид
 Binance `<symbol>@forceOrder` (см. ARCH § 2.12 — external_feeds.liquidations).
 
@@ -695,8 +707,8 @@ on_tape_flush(F):
 Использование в T5/live-grade режиме: FlushReversal стратегия (STRATEGIES § 4)
 входит только при `LiquidationFlush`, не при `FlushNoLiq` — это отличает
 капитуляционные флэши от шумовых одиночных принтов. Текущий кодовый
-FlushReversal — paper prototype без liquidation hard gate; детали доводки — в
-T5-FLUSH.
+FlushReversal — `gated` paper/offline prototype без liquidation hard gate;
+детали доводки — в T5-FLUSH.
 
 ---
 
