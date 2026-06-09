@@ -49,7 +49,14 @@
 
 ### Сборка
 
+Все команды выполняются из корня репозитория.
+
 ```bash
+# Шаг 1: Бутстрап окружения сборки (идемпотентный, безопасно запускать повторно)
+# Проверяет инструменты, настраивает Conan 2 профиль и ремоуты.
+./scripts/bootstrap-build-env.sh
+
+# Шаг 2: Сборка
 # Release (production)
 ./scripts/build.sh release
 
@@ -57,6 +64,7 @@
 ./scripts/build.sh debug --tests
 
 # Быстрая пересборка (без conan install + cmake configure)
+# Требует предварительного запуска без --quick для генерации conan_toolchain.cmake
 ./scripts/build.sh debug --quick
 
 # Только trade_bot бинарник (без тестов, labeler)
@@ -66,13 +74,21 @@
 ./scripts/build.sh clean
 ```
 
+> **Примечание:** `./scripts/build.sh` автоматически вызывает `bootstrap-build-env.sh`
+> перед `conan install`, поэтому ручной запуск бутстрапа не обязателен, но рекомендуется
+> для диагностики проблем при первом запуске в новом worktree.
+
 **Флаги:**
 - `--tests` — включить `BUILD_TESTS=ON`
 - `--bench` — включить `BUILD_BENCHMARKS=ON`
-- `--no-conan` — пропустить `conan install` (использовать кеш)
-- `--quick` — пропустить conan install + cmake configure (fast incremental)
+- `--no-conan` — пропустить `conan install` (использовать кеш; требует наличия `build/<mode>/conan_toolchain.cmake`)
+- `--quick` — пропустить conan install + cmake configure (fast incremental; требует предварительного запуска без `--quick`)
 - `--bin` — собрать только `trade_bot` (без тестов/лейблера)
 - `--jobs N` — переопределить число параллельных задач
+
+> **Важно:** Флаги `--no-conan` и `--quick` требуют, чтобы файл `build/<mode>/conan_toolchain.cmake`
+> уже существовал (сгенерирован предыдущим запуском `conan install`). Если файл отсутствует,
+> скрипт завершится с ошибкой и подскажет решение.
 
 ### Тестирование
 
@@ -205,6 +221,53 @@ trade_bot/
 | FeatureFrame → Signal | 2 мс | 10 мс |
 | Signal → TradePlan | 1 мс | 5 мс |
 | **Total book → submit** | **5 мс** | **25 мс** |
+
+---
+
+## Устранение проблем
+
+### Conan remote возвращает 403 (Forbidden)
+
+Если `conan install` завершается с ошибкой `403 Forbidden`, проблема в устаревшем ремоуте:
+
+```bash
+# Проверить текущий ремоут
+conan remote list
+
+# Обновить на правильный URL (Conan 2)
+conan remote update conancenter https://center2.conan.io
+```
+
+Скрипт `bootstrap-build-env.sh` делает это автоматически.
+
+### Отсутствует `conan_toolchain.cmake`
+
+Если CMake выдает ошибку вида `CMake Error: Could not find toolchain file .../conan_toolchain.cmake`:
+
+```bash
+# Запустить полную сборку (без --quick/--no-conan) для генерации toolchain
+./scripts/build.sh debug --tests
+```
+
+Файл `build/<mode>/conan_toolchain.cmake` генерируется командой `conan install` и
+необходим для настройки CMake. Флаги `--quick` и `--no-conan` пропускают этот шаг,
+поэтому требуют предварительного запуска.
+
+### Не установлен Ninja
+
+```
+CMake Error: CMake was unable to find a build program corresponding to "Ninja"
+```
+
+Установить: `sudo apt install ninja-build`
+
+### Требуется Conan 2.x
+
+Если установлен Conan 1.x:
+
+```bash
+pip install --upgrade 'conan>=2,<3'
+```
 
 ---
 

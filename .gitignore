@@ -28,6 +28,10 @@ Thumbs.db
 
 # Local agent tooling state
 .claude/
+
+# Python
+__pycache__/
+*.pyc
 .claude-flow/
 .swarm/
 .mcp.json

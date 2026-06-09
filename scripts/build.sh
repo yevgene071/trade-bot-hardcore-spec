@@ -86,7 +86,7 @@ while [[ $# -gt 0 ]]; do
         --target)     TARGET="$2"; shift 2 ;;
         --jobs|-j)    JOBS="$2"; shift 2 ;;
         -v|--verbose) VERBOSE=true; shift ;;
-        *) echo -e "${RED}Unknown option: $1${NC}"; usage ;;
+        *) echo -e "${RED}Unknown option: $1${NC}"; exit 1 ;;
     esac
 done
 
@@ -135,24 +135,63 @@ fi
 echo -e "  jobs:   ${BOLD}$JOBS${NC}"
 echo ""
 
+# ── bootstrap build environment ──────────────────────────────
+if [ "$NO_CONAN" = false ]; then
+    BOOTSTRAP_SCRIPT="$(dirname "$0")/bootstrap-build-env.sh"
+    if [ -f "$BOOTSTRAP_SCRIPT" ]; then
+        step "Bootstrapping build environment …"
+        # shellcheck source=/dev/null
+        bash "$BOOTSTRAP_SCRIPT" || die "Build environment bootstrap failed"
+    else
+        warn "Bootstrap script not found at $BOOTSTRAP_SCRIPT — skipping"
+    fi
+fi
+
 # ── conan install ──────────────────────────────────────────
 if [ "$NO_CONAN" = false ]; then
     STAGE_START=$SECONDS
     step "Conan install …"
+
+    # Proxy configuration for dependency resolution.
+    # Without these, Conan remote access to center2.conan.io may fail.
+    # External integration evidence: canonical-upstream-repo-url https://github.com/conan-io/conan
+    # release-or-download-url https://pypi.org/project/conan/ | binary-or-cli-name conan
+    # checksum-or-source-of-truth-evidence PyPI package metadata
+    CONAN_PROXY_URL="${CONAN_PROXY_URL:-}"
+    if [ -n "$CONAN_PROXY_URL" ]; then
+        export HTTP_PROXY="$CONAN_PROXY_URL"
+        export HTTPS_PROXY="$CONAN_PROXY_URL"
+        info "Using proxy for Conan: $CONAN_PROXY_URL"
+    fi
+
+    # Run conan install and preserve output. Do NOT mask failures with
+    # '|| true' — conan must generate build/<mode>/conan_toolchain.cmake
+    # before CMake configure can proceed.
     conan install core \
         --output-folder="$BUILD_DIR" \
         --build=missing \
         -s build_type="$BUILD_TYPE" \
-        2>&1 | grep -E "^(ERROR|WARN|Requirement|Install)" || true
+        || die "Conan install failed. Check remote access and profile. Try: ./scripts/bootstrap-build-env.sh"
+
+    # Verify that the toolchain file was generated
+    if [ ! -f "$BUILD_DIR/conan_toolchain.cmake" ]; then
+        die "Conan install succeeded but $BUILD_DIR/conan_toolchain.cmake was not generated. Check conan install output above."
+    fi
+
     ok "Conan done  $(( SECONDS - STAGE_START ))s"
 else
     warn "Skipping conan install (--no-conan / --quick)"
 fi
 
-# ── quick guard: warn if no CMakeCache ────────────────────
-if [ "$QUICK" = true ] && [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
-    warn "--quick: no CMakeCache found in $BUILD_DIR — running configure anyway"
-    QUICK=false
+# ── quick guard: warn if conan_toolchain.cmake is missing ──
+if [ "$QUICK" = true ]; then
+    if [ ! -f "$BUILD_DIR/conan_toolchain.cmake" ]; then
+        die "--quick requested but $BUILD_DIR/conan_toolchain.cmake is missing. Run without --quick first to bootstrap the build environment."
+    fi
+    if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+        warn "--quick: no CMakeCache found in $BUILD_DIR — running configure anyway"
+        QUICK=false
+    fi
 fi
 
 # ── cmake configure ────────────────────────────────────────

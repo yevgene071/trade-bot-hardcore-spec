@@ -6,23 +6,77 @@ on:
   pull_request:
     branches: [ main, master ]
 
+# Cancel in-flight runs for the same branch when a new push arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Conan proxy for dependency resolution.  Without this, Conan remote access
+  # to center2.conan.io may fail in CI runners behind restricted networks.
+  # External integration evidence (FN-024):
+  #   canonical-upstream-repo-url: https://github.com/conan-io/conan
+  #   release-or-download-url:    https://pypi.org/project/conan/
+  #   binary-or-cli-name:         conan
+  #   checksum-or-source-of-truth-evidence: PyPI package metadata
+  CONAN_PROXY_URL: ${{ secrets.CONAN_PROXY_URL }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Install Dependencies
+    # ── Install host toolchain ─────────────────────────────────────────────
+    # The project requires: CMake 3.22+, Ninja, GCC 14+ or Clang 17+, Conan 2.x.
+    # Ubuntu 24.04 (ubuntu-latest) ships GCC 13 in build-essential, so we must
+    # install GCC 14 from the ubuntu-toolchain-r/test PPA and select it.
+    - name: Install build prerequisites
       run: |
+        sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential libboost-all-dev libcurl4-openssl-dev
+        sudo apt-get install -y \
+          cmake \
+          ninja-build \
+          gcc-14 g++-14 \
+          libboost-all-dev \
+          libcurl4-openssl-dev
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+        echo "--- Installed tool versions ---"
+        cmake --version
+        ninja --version
+        g++ --version | head -1
 
-    - name: Configure CMake
-      run: cmake -S core -B build -DCMAKE_BUILD_TYPE=Release
+    # Prefer pipx (pre-installed on GitHub Actions runners) for Conan 2 to
+    # avoid PEP 668 externally-managed-environment issues on Ubuntu 24.04.
+    - name: Install Conan 2
+      run: |
+        pipx install 'conan>=2,<3' || pip install --user 'conan>=2,<3'
+        echo "Conan $(conan --version)"
 
-    - name: Build
-      run: cmake --build build -j$(nproc)
+    # ── Conan package cache ────────────────────────────────────────────────
+    # Cache key derived from conanfile.txt hash, OS, and compiler toolchain.
+    # Conan binary packages are compiler-specific; include GCC major version
+    # in the key to avoid stale cache hits when the compiler changes.
+    - name: Cache Conan packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.conan2
+        key: conan-${{ runner.os }}-${{ hashFiles('core/conanfile.txt') }}-gcc14-debug
+        restore-keys: |
+          conan-${{ runner.os }}-${{ hashFiles('core/conanfile.txt') }}-
+          conan-${{ runner.os }}-
 
-    - name: Run Tests
-      run: cd build && ctest --output-on-failure
+    # ── Bootstrap + Build + Test ───────────────────────────────────────────
+    # Uses the same scripts that local worktrees use so CI mirrors local
+    # executor verification.
+    - name: Bootstrap build environment
+      run: ./scripts/bootstrap-build-env.sh
+
+    - name: Build (debug + tests)
+      run: ./scripts/build.sh debug --tests
+
+    - name: Run tests
+      run: ./scripts/test.sh debug
