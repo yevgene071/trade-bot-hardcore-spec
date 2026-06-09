@@ -209,6 +209,53 @@
 
 ---
 
+
+## 5.1. FN-002: слабый пробой, потенциал и план сделки
+
+Детальная rule-by-rule матрица по источникам `ФАКТОРЫ СЛАБОГО ПРОБОЯ`,
+`ПОТЕНЦИАЛ` и `ПЛАН СДЕЛКИ` находится в
+`reports/fn-002-weak-breakout-potential-trade-plan.md`; извлечённые DOCX-тексты
+со стабильными строками сохранены в `reports/fn-002/docx-text/*.txt`.
+Статусы используют только `implemented` / `missing` / `ambiguous` / `live-only`.
+
+### Слабый пробой (`WB-*`)
+
+| ID | Источник | Формальное правило | Статус | Действие |
+|----|----------|--------------------|--------|----------|
+| `WB-01` | `ФАКТОРЫ...` 0001-0003 | Нет роста объёма/интереса перед уровнем ⇒ пробой слабый. | `implemented` | Runtime reject `WeakBreakoutLowParticipation` and exact test added. |
+| `WB-02` | `ФАКТОРЫ...` 0004-0010 | Вход только в разъедание плотности примерно до 1/2-1/3; слишком рано/полностью съедено ⇒ отказ. | `implemented` | Runtime rejects `WeakBreakoutEatingTooEarly` and `WeakBreakoutDensityFullyEaten` added. |
+| `WB-03` | `ФАКТОРЫ...` 0011-0016 | Защищённый уровень повышает качество пробоя после проторговки; identity защитника не выводим. | `ambiguous` | Использовать только density/tape evidence; не вводить MM/robot heuristics. |
+| `WB-04` | `ФАКТОРЫ...` 0017-0018 | Нужна поддержка сзади для разгона и stop-anchor. | `implemented` | Runtime reject `WeakBreakoutNoSupportBehind` and exact test added. |
+| `WB-05` | `ФАКТОРЫ...` 0019-0025 | Встречный кластер/завал перед движением расходует объём и блокирует импульс. | `implemented` | Runtime reject `WeakBreakoutContraResistanceCluster` and exact test added. |
+| `WB-06` | `ФАКТОРЫ...` 0030-0033 | Дырявый стакан в поддержку опасен для стопа/slippage. | `missing` | Текущий proxy — наличие support density/iceberg; полная liquidity model отдельно. |
+| `WB-07` | `ФАКТОРЫ...` 0034-0038 | Поводырь против пробоя ⇒ hard reject / post-entry invalidation. | `implemented` | Runtime reject `WeakBreakoutLeaderContra`; existing post-entry `LeaderContraPostEntry`; pre-entry test added. |
+| `WB-08` | `ФАКТОРЫ...` 0039-0048 | Лента должна быть активной и направленной; fades/reversals запрещают вход. | `implemented` | Runtime rejects `WeakBreakoutNoTapeBurst`, `WeakBreakoutTapeAggressionLow`, `WeakBreakoutTapeFaded`; exact fade/aggression tests added. |
+| `WB-09` | `ФАКТОРЫ...` 0049-0053 | После входа новые obstacles/разворот/замирание ленты требуют выхода. | `missing` | Частично покрыто `TapeFade`/`LeaderMove`; post-entry obstacle manager не реализован. |
+| `WB-10` | `ФАКТОРЫ...` 0055-0058 | Управление: активная лента — быстрый scale-out; слабый откат без ленты — выход; runner 2/10. | `missing` | Описать schema; runtime staged-management — follow-up, если нужен. |
+
+### Потенциал (`POT-*`)
+
+| ID | Источник | Формальное правило | Статус | Действие |
+|----|----------|--------------------|--------|----------|
+| `POT-01` | `ПОТЕНЦИАЛ` 0002-0010 | Тренд/волатильность повышают потенциал; боковик снижает пробой. | `ambiguous` | Нужен формальный trend/range detector перед hard gate. |
+| `POT-02` | `ПОТЕНЦИАЛ` 0006, 0016-0019 | Вертикальный объём, медленный подход, касания повышают потенциал. | `missing` | Relative volume есть; полного compression/touch model нет. |
+| `POT-03` | `ПОТЕНЦИАЛ` 0011-0015, 0025 | Таймфрейм/видимость уровня повышают потенциал. | `ambiguous` | Нужны timeframe/visibility payloads от level detector. |
+| `POT-04` | `ПОТЕНЦИАЛ` 0026-0033 | Вытряхивание, ретест, пробитый боковик повышают target confidence. | `ambiguous` | Нужны pattern detectors; не реализовывать визуально. |
+| `POT-05` | `ПОТЕНЦИАЛ` 0004-0005 + `ФАКТОРЫ...` 0049-0053 | До TP1 должно быть свободное пространство ≥ 1R; obstacle до TP1 блокирует/понижает качество. | `implemented` | Breakout checks rounded TP1 ≥ 1R and confirmed `nearest_resistance/support` obstacle before TP1. |
+
+### План сделки (`TP-*`)
+
+| ID | Источник | Формальное правило | Статус | Действие |
+|----|----------|--------------------|--------|----------|
+| `TP-01` | `ПЛАН СДЕЛКИ` 0001-0018 | План фиксирует графический контекст, уровни и объём. | `implemented` | `TradePlan.reason/evidence/frame_at_entry`; уточнить schema. |
+| `TP-02` | `ПЛАН СДЕЛКИ` 0019-0031 | План фиксирует стакан и order-book evidence; MM/robots не угадываются. | `missing` | Документировать supported vs unsupported evidence. |
+| `TP-03` | `ПЛАН СДЕЛКИ` 0032-0054 | Лента, обратные принты, поводырь и новости входят в доказательную базу/риски. | `implemented` | Evidence + RiskManager blackouts; уточнить имена. |
+| `TP-04` | `ПЛАН СДЕЛКИ` 0056-0061 | План содержит entry/stop/TP/R:R/risk/size/management. | `implemented` | Зафиксировать persisted/runtime-only поля. |
+| `TP-05` | `ПЛАН СДЕЛКИ` 0062-0065 | Footprint подтверждает разъеденные плотности/объём свечи. | `live-only` | `DensityEating` — только proxy; не invent API fields. |
+| `TP-06` | `ПЛАН СДЕЛКИ` 0066-0072 | Entry mode должен быть явным: заранее/на уровне/по факту/combined. | `implemented` | `entry_type`, `entry_price`, `valid_until`. |
+| `TP-07` | `ПЛАН СДЕЛКИ` 0073-0086 | Единая schema применима ко всем текущим `TradePlan` producers. | `implemented` | Аудит Bounce/Breakout/LeaderLag/FlushReversal при изменениях. |
+
+
 ## 6. Требования к формализации
 
 Каждая автоматическая стратегия должна явно ответить:

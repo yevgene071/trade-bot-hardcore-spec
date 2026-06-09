@@ -6,9 +6,9 @@
 #include "signals/Signal.hpp"
 #include "utils/FixedString.hpp"
 
-#include <vector>
-#include <optional>
 #include <chrono>
+#include <optional>
+#include <vector>
 
 namespace trade_bot {
 
@@ -37,11 +37,11 @@ struct TradePlan {
     /// Bounce=120s, Breakout=60s, LeaderLag=15s.
     double no_progress_timeout_sec{120.0};
     /// Grace period after entry during which follow-through is not enforced.
-    /// Used by BreakoutEatThrough (default 5s).
-    double post_entry_grace_sec{5.0};
+    /// Strategies opt in by setting min_follow_through_bps > 0.
+    double post_entry_grace_sec{0.0};
     /// Minimum price move (in bps) required within post_entry_grace_sec.
-    /// Used by BreakoutEatThrough (default 10 bps).
-    double min_follow_through_bps{10.0};
+    /// 0 disables follow-through enforcement for legacy/manual/non-breakout plans.
+    double min_follow_through_bps{0.0};
 
     // ── Post-entry invalidation monitoring (STRATEGIES.md § 3.7) ──────────
     /// Entry-time values used by strategies (e.g., LeaderLag) to detect

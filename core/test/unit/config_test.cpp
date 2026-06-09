@@ -1,12 +1,13 @@
-#include <gtest/gtest.h>
 #include "config/Config.hpp"
 #include "logger/Logger.hpp"
+
 #include <fstream>
+#include <gtest/gtest.h>
 
 using namespace trade_bot;
 
 class ConfigTest : public ::testing::Test {
-protected:
+  protected:
     void SetUp() override {
         trade_bot::Logger::init("test_logs/config_test.log");
         std::ofstream f("test_config.toml");
@@ -30,7 +31,8 @@ protected:
           << "num = 42\n"
           << "pi = 3.14\n"
           << "flag = true\n"
-          << "arr = [1, 2, 3]\n";
+          << "arr = [1, 2, 3]\n"
+          << "float_arr = [0.35, 0.20, 0.12]\n";
         f.close();
     }
 
@@ -41,7 +43,7 @@ protected:
 
 TEST_F(ConfigTest, LoadAndGet) {
     Config::load("test_config.toml");
-    
+
     EXPECT_EQ(Config::get<std::string>("section.key"), "value");
     EXPECT_EQ(Config::get<int64_t>("section.num"), 42);
     EXPECT_DOUBLE_EQ(Config::get<double>("section.pi"), 3.14);
@@ -58,7 +60,7 @@ TEST_F(ConfigTest, GetVector) {
 
 TEST_F(ConfigTest, GetOr) {
     Config::load("test_config.toml");
-    
+
     EXPECT_EQ(Config::get_or<int64_t>("section.missing", 100), 100);
     EXPECT_EQ(Config::get_or<std::string>("section.key", "default"), "value");
 }
@@ -83,7 +85,16 @@ TEST_F(ConfigTest, ValidationFail) {
     f << "[app]\n"
       << "version = \"0.0.1\"\n"; // Missing many required keys
     f.close();
-    
+
     EXPECT_THROW(Config::load("invalid_config.toml"), ConfigError);
     std::remove("invalid_config.toml");
+}
+
+TEST_F(ConfigTest, GetDoubleVector) {
+    Config::load("test_config.toml");
+    auto values = Config::get<std::vector<double>>("section.float_arr");
+    ASSERT_EQ(values.size(), 3);
+    EXPECT_DOUBLE_EQ(values[0], 0.35);
+    EXPECT_DOUBLE_EQ(values[1], 0.20);
+    EXPECT_DOUBLE_EQ(values[2], 0.12);
 }

@@ -1,20 +1,23 @@
-#include "strategy/LeaderLag.hpp"
-#include "signals/SignalBus.hpp"
 #include "logger/Logger.hpp"
+#include "signals/SignalBus.hpp"
+#include "strategy/LeaderLag.hpp"
+
 #include <gtest/gtest.h>
 
 using namespace trade_bot;
 
 class LeaderLagStrategyTest : public ::testing::Test {
-protected:
-    void SetUp() override { Logger::init(); }
+  protected:
+    void SetUp() override {
+        Logger::init();
+    }
 };
 
 TEST_F(LeaderLagStrategyTest, GeneratesLongPlanOnPositiveLag) {
     TickerInfo info{"ALTUSDT", "ALT", "USDT", true, 0.01, 1e-6, 0.0, 0.0};
     LeaderLag strategy("ALTUSDT", info);
     auto now = std::chrono::system_clock::now();
-    
+
     FeatureFrame frame{};
     frame.ticker = "ALTUSDT";
     frame.mid = 100.0;
@@ -22,15 +25,13 @@ TEST_F(LeaderLagStrategyTest, GeneratesLongPlanOnPositiveLag) {
     frame.best_ask = 100.01;
     frame.timestamp = now;
     strategy.on_frame(frame);
-    
+
     Signal s{
-        SignalKind::LeaderMove, now, "ALTUSDT", 100.0, 0.8,
-        {.lag_pct = 0.25, .correlation = 0.8}
-    };
+        SignalKind::LeaderMove, now, "ALTUSDT", 100.0, 0.8, {.lag_pct = 0.25, .correlation = 0.8}};
     strategy.on_signal(s, now);
-    
+
     auto plan = strategy.tick(now);
-    
+
     ASSERT_TRUE(plan.has_value());
     EXPECT_EQ(plan->side, Side::Buy);
     EXPECT_EQ(plan->entry_type, OrderType::Market);
@@ -41,13 +42,23 @@ TEST_F(LeaderLagStrategyTest, NoPlanOnLowCorrelation) {
     TickerInfo info{"ALTUSDT", "ALT", "USDT", true, 0.01, 1e-6, 0.0, 0.0};
     LeaderLag strategy("ALTUSDT", info);
     auto now = std::chrono::system_clock::now();
-    
+
     Signal s{
-        SignalKind::LeaderMove, now, "ALTUSDT", 100.0, 0.8,
+        SignalKind::LeaderMove,
+        now,
+        "ALTUSDT",
+        100.0,
+        0.8,
         {.lag_pct = 0.25, .correlation = 0.4} // low
     };
     strategy.on_signal(s, now);
-    
+
     auto plan = strategy.tick(now);
     EXPECT_FALSE(plan.has_value());
+}
+
+TEST(LeaderLagStrategyTest, LeaderLagPlansDisableFollowThroughByDefault) {
+    TradePlan plan;
+    EXPECT_DOUBLE_EQ(plan.min_follow_through_bps, 0.0);
+    EXPECT_DOUBLE_EQ(plan.post_entry_grace_sec, 0.0);
 }

@@ -204,9 +204,20 @@ affinity_stable_min = 5
 burst_contra_exit_sec = 5       # TapeBurst contra → close within this window after entry
 
 [strategies.breakout]
+max_avg_spread_bps = 4.0
+tp1_r = 1.5                         # target R multiple; strategy pre-filters rounded TP1 below 1R
 tp1_size_ratio = 0.5
 no_progress_timeout_sec = 60
 aggressive_offset_bps = 2
+stop_buffer_bps = 5                 # stop behind support density/iceberg
+support_search_range_bps = 20.0     # range for support density/iceberg behind breakout
+min_distance_from_best_bps = 2.0    # WeakBreakoutTooCloseToBest threshold
+min_leader_correlation = 0.6        # correlation at/above this makes non-neutral contra leader a hard reject
+leader_neutral_max_pct = 0.10       # abs(leader_change_5s) <= this is neutral and allowed
+leader_pre_entry_contra_pct = 0.10  # percentage threshold: abs(LeaderMove.lag_pct) for WeakBreakoutLeaderContra
+min_tape_aggression = 0.3           # WeakBreakoutTapeAggressionLow threshold
+min_relative_volume = 1.5           # WeakBreakoutLowParticipation threshold (5s vs 30s/6)
+max_resistance_cluster_ratio = 0.7  # WeakBreakoutContraResistanceCluster threshold
 post_entry_grace_sec = 5
 min_follow_through_bps = 10
 affinity_threshold = 0.55
@@ -215,6 +226,11 @@ affinity_stable_min = 5
 fade_contra_exit_sec = 5         # TapeFade on our side → close within this window after entry
 leader_contra_exit_sec = 5       # LeaderMove contra → close within this window after entry
 leader_exit_contra_pct = 0.15    # |lag_pct| threshold for leader contra exit
+
+[strategies.breakout.tiers]
+min_tape_aggression = [0.35, 0.20, 0.12]
+min_distance_from_best_bps = [8.0, 5.0, 3.0]
+support_search_range_bps = [40.0, 30.0, 20.0]
 
 [strategies.leaderlag]
 tp1_size_ratio = 0.6
