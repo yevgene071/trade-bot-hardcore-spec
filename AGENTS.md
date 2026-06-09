@@ -2,6 +2,17 @@
 
 This file provides guidance to agents when working with code in this repository.
 
+## ⚠️ CRITICAL RULE — READ FIRST
+
+**DO NOT RUN BUILD COMMANDS.**
+
+Never execute `./scripts/build.sh`, `cmake --build`, `make`, `ninja`, or any build/compile command.
+Only the human user triggers builds. When a build is needed, write a message telling the user the exact command to run.
+
+Violating this rule causes the agent to be terminated.
+
+---
+
 ## Project Overview
 
 **Trade Bot — Hardcore Spec** is a high-frequency scalping bot for MetaScalp (futures market maker/aggregator). Written in C++23 with a focus on determinism, low latency, and fully formal decision-making logic (no ML in production phases 0-4).
@@ -231,6 +242,17 @@ When kill-switch triggers, the canonical sequence (RISK_MANAGEMENT.md § 4) MUST
 8. Exit with code 42
 
 Do not modify this sequence without explicit approval.
+
+### 7. No Agent Builds
+**NEVER** run `./scripts/build.sh`, `cmake --build`, `make`, `ninja`, or any other build/compile command. Only the human user triggers builds. Agents may:
+- Read build output and analyze errors
+- Suggest fixes for compilation errors
+- Run tests (`ctest`) on an already-built binary
+
+**When a build is needed**, the agent MUST explicitly instruct the user with the exact command to run, e.g.:
+> "Please run: `./scripts/build.sh debug --tests`"
+
+Reason: Conan dependencies are cached, build timing is user-controlled, and build failures require human judgment.
 
 ## Where to Find Information
 

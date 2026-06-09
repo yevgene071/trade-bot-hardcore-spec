@@ -236,7 +236,7 @@ void to_json(nlohmann::json& j, const TradePlan& p) {
                        {"entry_price", p.entry_price},
                        {"stop_price", p.stop_price},
                        {"tp1_price", p.tp1_price},
-                       {"tp2_price", p.tp2_price},
+                       {"tp2_price", p.tp2_price ? nlohmann::json(*p.tp2_price) : nlohmann::json{}},
                        {"tp1_size_ratio", p.tp1_size_ratio},
                        {"size_coin", p.size_coin},
                        {"risk_usd", p.risk_usd},
