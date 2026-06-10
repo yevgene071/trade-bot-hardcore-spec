@@ -10,19 +10,20 @@
 namespace trade_bot {
 
 enum class SignalKind {
-    DensityDetected,     // в стакане появилась плотность
-    DensityRemoved,      // плотность ушла (манипуляция)
-    DensityEating,       // плотность активно проедается
-    IcebergSuspected,    // видимый размер < реализованного
-    TapeBurst,           // всплеск агрессии в одну сторону
-    TapeFade,            // затухание ленты
-    TapeFlush,           // "прострел"
-    TapeDistribution,    // консолидация / раздача (низкая дисперсия + сохранённый объём)
-    LevelFormed,         // сформирован новый горизонтальный уровень
-    LevelApproach,       // подход к уровню
-    LevelRejection,      // отбой от уровня
-    LevelBreak,          // пробой уровня
-    LeaderMove           // поводырь двинулся, а мы — нет
+    DensityDetected = 0,     // в стакане появилась плотность
+    DensityRemoved = 1,      // плотность ушла (манипуляция)
+    DensityEating = 2,       // плотность активно проедается
+    IcebergSuspected = 3,    // видимый размер < реализованного
+    TapeBurst = 4,           // всплеск агрессии в одну сторону
+    TapeFade = 5,            // затухание ленты
+    TapeFlush = 6,           // "прострел"
+    TapeDistribution = 7,    // консолидация / раздача (низкая дисперсия + сохранённый объём)
+    LevelFormed = 8,         // сформирован новый горизонтальный уровень
+    LevelApproach = 9,       // подход к уровню
+    LevelRejection = 10,     // отбой от уровня
+    LevelBreak = 11,         // пробой уровня
+    LeaderMove = 12,         // поводырь двинулся, а мы — нет
+    DensityStack = 13        // завал плотностей (same-side cluster)
 };
 
 /**
@@ -37,6 +38,12 @@ struct SignalPayload {
     double          original_size = 0.0;
     double          remaining_size = 0.0;
     double          eaten_ratio = 0.0;
+    double          remaining_ratio = 0.0;
+    double          first_price = 0.0;
+    double          last_price = 0.0;
+    double          width_bps = 0.0;
+    double          total_size_usd = 0.0;
+    double          stop_anchor_price = 0.0;
     double          lag_pct = 0.0;
     double          correlation = 0.0;
     double          dist_bps = 0.0;

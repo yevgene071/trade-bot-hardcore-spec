@@ -121,6 +121,10 @@ eating_window_ms = 3000
 eating_ratio_threshold = 0.5
 eating_min_prints = 5
 eating_cooloff_ms = 1000
+# DensityStack sub-detector
+stack_min_levels = 2
+stack_max_width_bps = 20.0
+stack_min_size_usd = 100000.0
 
 [signals.iceberg]
 evidence_count_min = 3

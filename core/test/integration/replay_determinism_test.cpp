@@ -132,6 +132,13 @@ static uint64_t hash_signal_payload(const Signal& sig) {
     h ^= std::hash<double>{}(sig.payload.lag_pct);
     h ^= std::hash<std::string>{}(std::string(sig.payload.side));
     h ^= std::hash<std::string>{}(std::string(sig.payload.approach_type));
+    // FN-008: include DensityEating/DensityStack payload fields in fingerprint
+    h ^= std::hash<double>{}(sig.payload.remaining_ratio);
+    h ^= std::hash<double>{}(sig.payload.first_price);
+    h ^= std::hash<double>{}(sig.payload.last_price);
+    h ^= std::hash<double>{}(sig.payload.width_bps);
+    h ^= std::hash<double>{}(sig.payload.total_size_usd);
+    h ^= std::hash<double>{}(sig.payload.stop_anchor_price);
     return h;
 }
 

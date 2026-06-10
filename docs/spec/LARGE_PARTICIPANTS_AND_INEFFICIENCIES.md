@@ -377,8 +377,8 @@ Use as research labels or manual dashboard context, not live trading trigger.
 | «Крупная плотность стоит заранее» | `age_ms >= sticky_duration_ms`; size thresholds | `DensityDetector` | Ensure `sticky_min_trade_ms` configured before strategies use it | Offline replay |
 | «Плотность крупна относительно стакана/принтов/5m свечи» | DEMA avg level, print size distribution, candle/cluster volume | `DensityDetector`, `TapeAnalyzer`, `cluster-snapshot` | Add 5m-volume comparison to density confidence if not implemented | Offline |
 | «На споте плотность чаще настоящая» | spot density gets higher confidence, not automatic trade | none / strategy context | Needs explicit market type in instrument identity | Live/data mapping |
-| «Завал плотностей» | same-side density cluster within stop width | `DensityStack` spec | Implement dedicated payload: first/last/width/total | Offline |
-| «Разъедание при остатке 1/2–1/3» | `eaten_ratio >= 0.5` and remaining <= 1/3–1/2 | `DensityEating` | Add remaining-ratio payload if absent | Offline with book/trade sync |
+| «Завал плотностей» | same-side density cluster within stop width | `DensityStack` | Implemented: first/last/width/total_usd/stop_anchor payload fields (FN-008) | Offline |
+| «Разъедание при остатке 1/2–1/3» | `eaten_ratio >= 0.5` and remaining <= 1/3–1/2 | `DensityEating` | Implemented: `remaining_ratio` payload field for 1/2–1/3 trigger semantics (FN-008) | Offline with book/trade sync |
 | «Переставление 3–5 раз ближе к спреду» | monotonic placement sequence, stable size | `LargeParticipantMove` planned | Create implementation task | Offline-first |
 | «Если 30 сек не выставил новую плотность — выход» | reappear timeout | `LargeParticipantMove` planned | Must be strategy exit rule | Offline/live |
 | «Реализация объёма частично по рынку» | remove/reappear + directional prints | planned | Needs tape/book join and aggregation calibration | Offline/live gate |
@@ -419,10 +419,10 @@ These are separate implementation tasks, not part of this formalization:
 
 1. Implement `LargeParticipantMove` detector with replay fixtures for 3–5
    monotonic density moves and 30s reappear timeout.
-2. Extend `DensityStack` payload to include `first_price`, `last_price`,
-   `width_bps`, `total_size_usd`, and `stop_anchor_price`.
-3. Add `remaining_ratio` to `DensityEating` payload for 1/2–1/3 manual trigger
-   semantics.
+2. ~~Extend `DensityStack` payload to include `first_price`, `last_price`,
+   `width_bps`, `total_size_usd`, and `stop_anchor_price`.~~ **Done (FN-008).**
+3. ~~Add `remaining_ratio` to `DensityEating` payload for 1/2–1/3 manual trigger
+   semantics.~~ **Done (FN-008).**
 4. Create `SpringReleaseReversal` paper strategy after `LargeParticipantMove`
    has positive examples.
 5. Add explicit spot/futures mapping config and multi-instrument replay fixtures

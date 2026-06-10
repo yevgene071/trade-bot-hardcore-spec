@@ -131,6 +131,12 @@ void to_json(nlohmann::json& j, const SignalPayload& p) {
                        {"original_size", p.original_size},
                        {"remaining_size", p.remaining_size},
                        {"eaten_ratio", p.eaten_ratio},
+                       {"remaining_ratio", p.remaining_ratio},
+                       {"first_price", p.first_price},
+                       {"last_price", p.last_price},
+                       {"width_bps", p.width_bps},
+                       {"total_size_usd", p.total_size_usd},
+                       {"stop_anchor_price", p.stop_anchor_price},
                        {"lag_pct", p.lag_pct},
                        {"correlation", p.correlation},
                        {"dist_bps", p.dist_bps},
@@ -164,6 +170,12 @@ void from_json(const nlohmann::json& j, SignalPayload& p) {
     p.original_size = j.value("original_size", 0.0);
     p.remaining_size = j.value("remaining_size", 0.0);
     p.eaten_ratio = j.value("eaten_ratio", 0.0);
+    p.remaining_ratio = j.value("remaining_ratio", 0.0);
+    p.first_price = j.value("first_price", 0.0);
+    p.last_price = j.value("last_price", 0.0);
+    p.width_bps = j.value("width_bps", 0.0);
+    p.total_size_usd = j.value("total_size_usd", 0.0);
+    p.stop_anchor_price = j.value("stop_anchor_price", 0.0);
     p.lag_pct = j.value("lag_pct", 0.0);
     p.correlation = j.value("correlation", 0.0);
     p.dist_bps = j.value("dist_bps", 0.0);

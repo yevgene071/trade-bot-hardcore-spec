@@ -323,7 +323,7 @@ void BotApp::subscribe_signal_bus_() {
             "DensityDetected", "DensityRemoved", "DensityEating",  "IcebergSuspected",
             "TapeBurst",       "TapeFade",       "TapeFlush",      "TapeDistribution",
             "LevelFormed",     "LevelApproach",  "LevelRejection", "LevelBreak",
-            "LeaderMove"};
+            "LeaderMove",      "DensityStack"};
         const auto idx = static_cast<std::size_t>(s.kind);
         const char* kind_name = idx < std::size(kKindNames) ? kKindNames[idx] : "Unknown";
         signal_counts_[kind_name]++;

@@ -80,6 +80,12 @@ void DensityDetector::on_trade(const Trade& trade) {
             meta.print_count >= cfg_.eating_min_prints) {
             meta.eating_emitted = true;
 
+            const double remaining = meta.initial_size - meta.eaten_volume;
+            // Guard: positive baseline prevents NaN/Inf from division.
+            const double remaining_ratio = (meta.initial_size > 0.0)
+                ? std::max(0.0, remaining / meta.initial_size)
+                : 0.0;
+
             Signal s {
                 .kind = SignalKind::DensityEating,
                 .timestamp = now,
@@ -88,10 +94,11 @@ void DensityDetector::on_trade(const Trade& trade) {
                 .confidence = std::min(1.0, eaten_ratio),
                 .payload = {
                     .side = meta.side == Side::Buy ? "Bid" : "Ask",
-                    .size = meta.initial_size - meta.eaten_volume,
+                    .size = remaining,
                     .original_size = meta.initial_size,
-                    .remaining_size = meta.initial_size - meta.eaten_volume,
+                    .remaining_size = remaining,
                     .eaten_ratio = eaten_ratio,
+                    .remaining_ratio = remaining_ratio,
                     .prints = meta.print_count
                 }
             };
@@ -142,6 +149,9 @@ void DensityDetector::on_book_update(const OrderBookUpdate& update) {
             bus_.publish(s);
         }
         tracked_.erase(it);
+        // Invalidate stack signature when a level is removed so the
+        // cluster can be re-evaluated on the next frame.
+        last_stack_.valid = false;
     }
 
     // Pass 2: additions — mid required for distance filtering.
@@ -246,6 +256,134 @@ void DensityDetector::check_sticky_levels_(std::chrono::system_clock::time_point
             }
         }
         ++it;
+    }
+
+    // FN-008: check for density stacks after processing sticky levels.
+    if (mid && *mid > 0.0) {
+        check_density_stacks_(now, price_inc, *mid);
+    }
+}
+
+// FN-008: DensityStack — detect same-side clusters of emitted density levels.
+//
+// Side-aware semantics:
+//   Ask (resistance) stack: first_price = nearest/lower price (entry zone),
+//                           stop_anchor = farthest/higher price.
+//   Bid (support)   stack: first_price = nearest/higher price (entry zone),
+//                           stop_anchor = farthest/lower price.
+void DensityDetector::check_density_stacks_(std::chrono::system_clock::time_point now,
+                                            double price_inc, double mid) {
+    // Scan through tracked_ (btree, sorted by tick) collecting contiguous
+    // same-side emitted levels.  A "cluster" is a maximal run of emitted
+    // levels on the same side whose price span ≤ stack_max_width_bps.
+    struct ClusterEntry {
+        int    tick;
+        double price;
+        double size;
+    };
+
+    auto emit_if_qualified = [&](Side side, const std::vector<ClusterEntry>& cluster) {
+        if (static_cast<int>(cluster.size()) < cfg_.stack_min_levels) return;
+
+        // Price span.
+        double first_price_val = cluster.front().price;
+        double last_price_val  = cluster.back().price;
+        double width = std::abs(last_price_val - first_price_val) / mid * 10000.0;
+        if (width > cfg_.stack_max_width_bps) return;
+
+        // Total USD.
+        double total_usd = 0.0;
+        for (const auto& e : cluster) total_usd += e.size * e.price;
+        if (total_usd < cfg_.stack_min_size_usd) return;
+
+        // Side-aware first/last/stop-anchor:
+        //   Ask: first = nearest (lower price), stop_anchor = farthest (higher price)
+        //   Bid: first = nearest (higher price), stop_anchor = farthest (lower price)
+        double first_price_out;
+        double last_price_out;
+        double stop_anchor;
+        if (side == Side::Sell) {
+            // Ask: btree ascending — front is lowest (= nearest to mid from above)
+            first_price_out = cluster.front().price;
+            last_price_out  = cluster.back().price;
+            stop_anchor     = cluster.back().price;
+        } else {
+            // Bid: btree ascending — back is highest (= nearest to mid from below)
+            first_price_out = cluster.back().price;
+            last_price_out  = cluster.front().price;
+            stop_anchor     = cluster.front().price;
+        }
+
+        // Duplicate suppression: same side, same ticks, same total_usd → skip.
+        int first_tick = (side == Side::Sell) ? cluster.front().tick : cluster.back().tick;
+        int last_tick  = (side == Side::Sell) ? cluster.back().tick  : cluster.front().tick;
+        if (last_stack_.matches(side, first_tick, last_tick, total_usd)) return;
+
+        last_stack_ = {side, first_tick, last_tick, total_usd, true};
+
+        Signal s {
+            .kind = SignalKind::DensityStack,
+            .timestamp = now,
+            .ticker = ticker_,
+            .price = first_price_out,
+            .confidence = 1.0,
+            .payload = {
+                .side = (side == Side::Sell) ? "Ask" : "Bid",
+                .size = 0.0,             // total base size (sum below)
+                .size_usd = total_usd,
+                .first_price = first_price_out,
+                .last_price = last_price_out,
+                .width_bps = width,
+                .total_size_usd = total_usd,
+                .stop_anchor_price = stop_anchor
+            }
+        };
+        // Populate size with total base units.
+        double total_base = 0.0;
+        for (const auto& e : cluster) total_base += e.size;
+        s.payload.size = total_base;
+
+        s.trigger_trace_id = current_trace_context().trace_id;
+        bus_.publish(s);
+    };
+
+    // Iterate through the sorted btree and cluster same-side emitted levels.
+    Side current_side{Side::Buy};
+    std::vector<ClusterEntry> current_cluster;
+    bool cluster_active = false;
+
+    for (auto it = tracked_.begin(); it != tracked_.end(); ++it) {
+        const auto& [tick, meta] = *it;
+        if (!meta.emitted) continue; // only matured (emitted) levels contribute
+
+        if (!cluster_active) {
+            current_side = meta.side;
+            current_cluster.clear();
+            current_cluster.push_back({static_cast<int>(tick.ticks), tick.to_price(price_inc), meta.initial_size});
+            cluster_active = true;
+        } else if (meta.side == current_side) {
+            // Same side — check width before adding.
+            double span = std::abs(tick.to_price(price_inc) - current_cluster.front().price)
+                          / mid * 10000.0;
+            if (span <= cfg_.stack_max_width_bps) {
+                current_cluster.push_back({static_cast<int>(tick.ticks), tick.to_price(price_inc), meta.initial_size});
+            } else {
+                // Width exceeded — flush current cluster and start new one.
+                emit_if_qualified(current_side, current_cluster);
+                current_side = meta.side;
+                current_cluster.clear();
+                current_cluster.push_back({static_cast<int>(tick.ticks), tick.to_price(price_inc), meta.initial_size});
+            }
+        } else {
+            // Side changed — flush.
+            emit_if_qualified(current_side, current_cluster);
+            current_side = meta.side;
+            current_cluster.clear();
+            current_cluster.push_back({static_cast<int>(tick.ticks), tick.to_price(price_inc), meta.initial_size});
+        }
+    }
+    if (cluster_active) {
+        emit_if_qualified(current_side, current_cluster);
     }
 }
 

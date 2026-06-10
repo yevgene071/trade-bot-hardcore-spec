@@ -121,9 +121,16 @@ on_trade(t):
   "initial_size_usd": 800000,
   "eaten_usd": 460000,
   "eaten_ratio": 0.575,
+  "remaining_ratio": 0.425,
   "prints_in_window": 9
 }
 ```
+
+`remaining_ratio` = `max(0, remaining_size / original_size)`. Enables explicit
+1/2–1/3 manual trigger semantics: strategies can check
+`remaining_ratio <= 0.5` (half-eaten) or `remaining_ratio <= 0.33` (third-eaten)
+without recomputing from `eaten_ratio`. Guarded against zero/negative baselines
+(no NaN/Inf).
 
 Если плотность полностью съедена (размер уровня в книге < 20% изначального) —
 DensityEating больше не эмитится, вместо этого DensityRemoved (с `fake=false`).
@@ -136,11 +143,11 @@ DensityEating больше не эмитится, вместо этого Densit
 
 ```
 on_density_detected(d):
-    cluster = find densities on same side within stack_max_width_bps
+    cluster = find emitted densities on same side within stack_max_width_bps
     if cluster.count >= stack_min_levels
-       AND width(cluster) <= stop_anchor_max_bps
+       AND width(cluster) <= stack_max_width_bps
        AND sum(cluster.size_usd) >= stack_min_size_usd:
-        emit DensityStack(first_price, last_price, total_size_usd, side)
+        emit DensityStack(first_price, last_price, width_bps, total_size_usd, stop_anchor_price, side)
 ```
 
 | Параметр | Default | Описание |
@@ -149,9 +156,32 @@ on_density_detected(d):
 | `stack_max_width_bps` | **20** | диапазон завала не шире нормального стопа |
 | `stack_min_size_usd` | **$100,000** | суммарный размер |
 
-`BounceFromDensity` использует `first_price` как зону входа и `last_price`
+**Payload:**
+```json
+{
+  "side": "Ask",
+  "first_price": 65400.0,
+  "last_price": 65500.0,
+  "width_bps": 15.3,
+  "total_size_usd": 818000.0,
+  "stop_anchor_price": 65500.0,
+  "size": 12.5,
+  "size_usd": 818000.0
+}
+```
+
+**Side-aware semantics (defined in code comments and tests):**
+- **Ask (resistance) stack:** `first_price` = nearest/lower price (entry zone),
+  `stop_anchor_price` = farthest/higher price (stop goes above).
+- **Bid (support) stack:** `first_price` = nearest/higher price (entry zone),
+  `stop_anchor_price` = farthest/lower price (stop goes below).
+
+`BounceFromDensity` использует `first_price` как зону входа и `stop_anchor_price`
 как stop-anchor. `BreakoutEatThrough` использует завал как серию преград:
 после разъедания первой плотности ожидается переход к следующей.
+
+Duplicate suppression: the same side + same first/last ticks + same total USD
+will emit at most once. Re-arms naturally when levels are removed or refilled.
 
 ### DensityDetector: implementation notes (algorithm-grade)
 
@@ -631,6 +661,9 @@ on_frame:
 | Density | `min_size_vs_avg` | 10× |
 | Density | `min_size_usd` | $50k |
 | Density | `sticky_duration_ms` | 2000 |
+| Density | `stack_min_levels` | 2 |
+| Density | `stack_max_width_bps` | 20 |
+| Density | `stack_min_size_usd` | $100k |
 | Iceberg | `evidence_count_min` | 3 |
 | Iceberg | `iceberg_min_size_usd` | $100k |
 | TapeBurst | `burst_ratio` | 3.0 |
